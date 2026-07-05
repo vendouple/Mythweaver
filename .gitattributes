@@ -1,0 +1,2 @@
+TTS/Voice/*.mp3 !text !filter !merge !diff
+public/music/SFX/*.mp3 !text !filter !merge !diff
