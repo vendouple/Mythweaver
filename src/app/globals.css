@@ -2936,6 +2936,19 @@ textarea { min-height: 7rem; resize: vertical; }
   color: var(--text);
 }
 
+/* Host-side variant: sits beside the cog button, unobtrusive until hovered */
+.threejs-toggle-btn.host-corner-toggle {
+  left: 4.9rem;
+  right: auto;
+  bottom: 1rem;
+  z-index: 6;
+  opacity: 0.35;
+}
+
+.threejs-toggle-btn.host-corner-toggle:hover {
+  opacity: 1;
+}
+
 
 /* ===========================================================================
    THEME SYSTEM — data-theme retints the whole UI per campaign type.
