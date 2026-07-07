@@ -2778,16 +2778,18 @@ function TypingTitle({ texts }: { texts: string[] }) {
   );
 }
 
-function D20Spinner({ showNumber = true }: { showNumber?: boolean }) {
+function D20Spinner({ showNumber = true, finalValue }: { showNumber?: boolean; finalValue?: number }) {
   const [num, setNum] = useState(20);
 
   useEffect(() => {
-    if (!showNumber) return;
+    if (!showNumber || finalValue !== undefined) return;
     const interval = setInterval(() => {
       setNum((prev) => (prev % 20) + 1);
     }, 120);
     return () => clearInterval(interval);
-  }, [showNumber]);
+  }, [showNumber, finalValue]);
+
+  const display = finalValue !== undefined ? finalValue : num;
 
   return (
     <div className="d20-spinner-container">
@@ -2848,7 +2850,7 @@ function D20Spinner({ showNumber = true }: { showNumber?: boolean }) {
           </g>
 
           {showNumber && (
-            <text x="60" y="66" textAnchor="middle" fill="var(--gold)" filter="url(#neon-glow)" className="d20-text">{num}</text>
+            <text x="60" y="66" textAnchor="middle" fill="var(--gold)" filter="url(#neon-glow)" className={`d20-text ${finalValue !== undefined ? "d20-final-pop" : ""}`}>{display}</text>
           )}
         </g>
 
@@ -3349,7 +3351,10 @@ function DiceOverlay({ event, charging, threeDEnabled = true }: { event?: Displa
           <ThreeJSD20Roll dice={dice} phase={phase} accentColor={accentColor} />
         ) : (
           <div className="dice-css-d20">
-            <D20Spinner showNumber={false} />
+            <D20Spinner
+              showNumber={phase !== "charging"}
+              finalValue={phase === "settled" && dice ? dice.total : undefined}
+            />
           </div>
         )}
         <div className="settle-shockwave" />
