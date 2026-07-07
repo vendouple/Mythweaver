@@ -2680,16 +2680,32 @@ textarea { min-height: 7rem; resize: vertical; }
   width: 100%;
   padding: 0.85rem 1rem;
   margin: 0.5rem 0;
-  border-radius: 14px;
-  background: linear-gradient(135deg, rgba(217, 164, 65, 0.18), rgba(255, 215, 0, 0.08));
-  border: 1px solid rgba(217, 164, 65, 0.55);
+  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--gold) 18%, transparent), color-mix(in srgb, var(--gold) 8%, transparent));
+  border: 1px solid color-mix(in srgb, var(--gold) 55%, transparent);
   color: #fff5dc;
   font-family: 'Cinzel', Georgia, serif;
   font-size: 0.95rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   animation: controller-pulse 1.1s ease-in-out infinite;
-  box-shadow: 0 0 24px rgba(217, 164, 65, 0.25);
+  box-shadow: 0 0 24px color-mix(in srgb, var(--gold) 25%, transparent);
+}
+.controller-rolling-pulse .mini-d20 {
+  width: 44px;
+  height: 44px;
+  flex: 0 0 auto;
+}
+.controller-rolling-pulse .mini-d20 .d20-spinner-container {
+  width: 44px;
+  height: 44px;
+  margin: 0;
+}
+.controller-rolling-pulse .mini-d20 .d20-svg {
+  animation: mini-d20-spin 1.4s linear infinite;
+}
+@keyframes mini-d20-spin {
+  to { transform: rotate(360deg); }
 }
 .controller-rolling-pulse .pulse-dots {
   display: inline-flex;
@@ -2708,6 +2724,78 @@ textarea { min-height: 7rem; resize: vertical; }
 @keyframes overlay-in {
   0% { opacity: 0; transform: translate(50%, -50%) scale(0.7); }
   100% { opacity: 1; transform: translate(50%, -50%) scale(1); }
+}
+
+/* Delayed breakdown line so the total lands first, then the detail resolves */
+.dice-overlay.settled .dice-breakdown {
+  animation: breakdown-in 0.5s ease-out 0.3s both;
+}
+@keyframes breakdown-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Natural 20 — the die blazes gold, total blooms, a ray burst spins behind */
+.dice-overlay.crit-success {
+  border-color: color-mix(in srgb, var(--gold) 90%, white);
+  box-shadow:
+    0 30px 90px rgba(0, 0, 0, 0.75),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    0 0 90px color-mix(in srgb, var(--gold) 55%, transparent);
+}
+.dice-overlay.crit-success .dice-stage::before {
+  content: "";
+  position: absolute;
+  inset: -30%;
+  z-index: 0;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg,
+    transparent 0deg, color-mix(in srgb, var(--gold) 55%, transparent) 12deg, transparent 24deg,
+    transparent 60deg, color-mix(in srgb, var(--gold) 55%, transparent) 72deg, transparent 84deg,
+    transparent 120deg, color-mix(in srgb, var(--gold) 55%, transparent) 132deg, transparent 144deg,
+    transparent 180deg, color-mix(in srgb, var(--gold) 55%, transparent) 192deg, transparent 204deg,
+    transparent 240deg, color-mix(in srgb, var(--gold) 55%, transparent) 252deg, transparent 264deg,
+    transparent 300deg, color-mix(in srgb, var(--gold) 55%, transparent) 312deg, transparent 324deg);
+  animation: crit-ray-spin 6s linear infinite;
+  pointer-events: none;
+  opacity: 0.7;
+}
+.dice-overlay.crit-success .dice-total-readout {
+  animation: crit-bloom 0.7s cubic-bezier(0.2, 1.4, 0.4, 1) both;
+  color: #fff;
+  text-shadow:
+    0 0 14px var(--gold),
+    0 0 44px color-mix(in srgb, var(--gold) 80%, transparent);
+}
+@keyframes crit-ray-spin { to { transform: rotate(360deg); } }
+@keyframes crit-bloom {
+  0% { opacity: 0; transform: scale(0.5); }
+  60% { transform: scale(1.35); }
+  100% { opacity: 1; transform: scale(1.2); }
+}
+
+/* Natural 1 — the omen turns crimson and shudders */
+.dice-overlay.crit-fail {
+  border-color: color-mix(in srgb, var(--red) 85%, black);
+  box-shadow:
+    0 30px 90px rgba(0, 0, 0, 0.8),
+    0 0 70px color-mix(in srgb, var(--red) 55%, transparent);
+  animation: overlay-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) both, crit-fail-shudder 0.5s ease-out 0.5s;
+}
+.dice-overlay.crit-fail .dice-total-readout {
+  color: #ff9a9a;
+  text-shadow: 0 0 10px var(--red), 0 0 34px color-mix(in srgb, var(--red) 70%, transparent);
+}
+.dice-overlay.crit-fail .phase-label {
+  color: #ff9a9a;
+  text-shadow: 0 0 8px color-mix(in srgb, var(--red) 70%, transparent);
+}
+@keyframes crit-fail-shudder {
+  0%, 100% { transform: translate(50%, -50%); }
+  20% { transform: translate(calc(50% - 5px), -50%); }
+  40% { transform: translate(calc(50% + 5px), -50%); }
+  60% { transform: translate(calc(50% - 3px), -50%); }
+  80% { transform: translate(calc(50% + 3px), -50%); }
 }
 
 @keyframes d20-charge-whirl {
