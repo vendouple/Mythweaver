@@ -3226,6 +3226,70 @@ textarea { min-height: 7rem; resize: vertical; }
   text-align: center;
 }
 
+/* Minimal 2D chrome over the 3D dimension: the scene dominates, the UI
+   sinks to the bottom edge */
+.phone-lobby-card.has-3d {
+  align-content: end;
+}
+
+.phone-lobby-card.has-3d .stage-content {
+  justify-items: center;
+  text-align: center;
+  gap: 0.65rem;
+  padding-bottom: 0.4rem;
+}
+
+.lobby-minimal-ui {
+  display: grid;
+  gap: 0.65rem;
+  justify-items: center;
+  text-align: center;
+  width: 100%;
+}
+
+.lobby-title {
+  margin: 0;
+  font-size: clamp(1.3rem, 6vw, 1.8rem);
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.85);
+}
+
+.lobby-hint {
+  margin: 0;
+  max-width: 26rem;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.9);
+}
+
+.lobby-minimal-ui button {
+  width: min(20rem, 100%);
+}
+
+.controller-loading-screen.has-3d {
+  justify-content: flex-end;
+}
+
+.controller-loading-screen.has-3d .stage-content {
+  justify-content: flex-end;
+  padding-bottom: 0.4rem;
+}
+
+.loading-minimal-ui {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.loading-minimal-ui h2 {
+  margin: 0;
+  text-shadow: 0 2px 16px rgba(0, 0, 0, 0.9);
+}
+
+.loading-minimal-ui .loading-status {
+  margin: 0;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.9);
+}
+
 /* In-game controller fades in rather than popping after the loading stage */
 .phone-controller {
   animation: stage-enter 0.5s ease both;

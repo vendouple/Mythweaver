@@ -1443,7 +1443,7 @@ function CyclingTipBox({ variant = "dnd" }: { variant?: CampaignTypeChoice }) {
   );
 }
 
-type PortalPlayer = { id: string; color?: string };
+type PortalPlayer = { id: string; color?: string; name?: string };
 
 function CinematicPortalScene({
   isActive,
@@ -1505,6 +1505,25 @@ function CinematicPortalScene({
       let speedCurrent = mode === "lobby" ? 0.45 : 1.0 + stepProgress * 2.5;
       let localPlayerIdState = localPlayerId;
       const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+
+      // Accumulated rotation angles. Rotations must integrate (angle += rate*dt)
+      // rather than compute angle = t * rate: with elapsed time in the tens of
+      // seconds, any change to `rate` would otherwise snap every angle forward,
+      // which is exactly the jarring speed jump this scene used to have.
+      let coreRotX = 0, coreRotY = 0;
+      let d20RotX = 0, d20RotY = 0, d20RotZ = 0;
+      let yourRotX = 0, yourRotY = 0, yourRotZ = 0;
+      let groundRot = 0, runeRot = 0, dashRotY = 0, dashRotZ = 0, chargeRingRot = 0;
+      let flowClock = Math.random() * 10; // mini-d20 stream phase
+      let orbSpinAcc = 0;
+      // Pointer parallax (the "middle dimension" reacts to your touch)
+      let parX = 0, parY = 0, parTX = 0, parTY = 0;
+      const onPointerMove = (e: PointerEvent) => {
+        if (typeof window === "undefined") return;
+        parTX = (e.clientX / window.innerWidth - 0.5) * 2;
+        parTY = (e.clientY / window.innerHeight - 0.5) * 2;
+      };
+      if (!reducedMotion) window.addEventListener("pointermove", onPointerMove, { passive: true });
 
       const hexFromColor = (c?: string): number => {
         if (!c) return 0xffd700;
@@ -1709,19 +1728,87 @@ function CinematicPortalScene({
       yourD20Group.position.set(0, 0.5, 4.0);
       scene.add(yourD20Group);
 
-      // ===================== TRANSMISSION BEAM (CONTROLLER ONLY) =====================
-      const beamLineGeo = new THREE.BufferGeometry().setFromPoints([
-        new THREE.Vector3(0, 0.5, 4.0),
-        new THREE.Vector3(0, 1.5, -2.0)
-      ]);
-      const beamLineMat = new THREE.LineBasicMaterial({
+      // Soft aura in the player's color around your die
+      const auraGeo = new THREE.SphereGeometry(0.6, 20, 20);
+      const auraMat = new THREE.MeshBasicMaterial({
         color: 0xffd700,
         transparent: true,
-        opacity: 0.4,
+        opacity: 0,
         blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.BackSide,
       });
-      const transmissionBeam = new THREE.Line(beamLineGeo, beamLineMat);
+      const yourAura = new THREE.Mesh(auraGeo, auraMat);
+      yourD20Group.add(yourAura);
+
+      // Charge halo ring that tightens around your die as energy gathers
+      const chargeRingGeo = new THREE.TorusGeometry(0.75, 0.02, 8, 64);
+      const chargeRingMat = new THREE.MeshBasicMaterial({
+        color: 0xffd700,
+        transparent: true,
+        opacity: 0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      });
+      const chargeRing = new THREE.Mesh(chargeRingGeo, chargeRingMat);
+      chargeRing.rotation.x = Math.PI / 2.4;
+      yourD20Group.add(chargeRing);
+
+      // ===================== TRANSMISSION ARC (CONTROLLER ONLY) =====================
+      // Energy travels along a curved arc from your die up and into the portal
+      // heart, instead of the old flat 1px line.
+      const beamCurve = new THREE.QuadraticBezierCurve3(
+        new THREE.Vector3(0, 0.5, 4.0),
+        new THREE.Vector3(0, 3.1, 1.2),
+        new THREE.Vector3(0, 1.5, -2.0)
+      );
+      const beamTubeGeo = new THREE.TubeGeometry(beamCurve, 48, 0.028, 8, false);
+      const beamTubeMat = new THREE.MeshBasicMaterial({
+        color: 0xffd700,
+        transparent: true,
+        opacity: 0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      });
+      const transmissionBeam = new THREE.Mesh(beamTubeGeo, beamTubeMat);
       scene.add(transmissionBeam);
+
+      const beamSheathGeo = new THREE.TubeGeometry(beamCurve, 48, 0.1, 8, false);
+      const beamSheathMat = new THREE.MeshBasicMaterial({
+        color: 0xffd700,
+        transparent: true,
+        opacity: 0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      });
+      const beamSheath = new THREE.Mesh(beamSheathGeo, beamSheathMat);
+      scene.add(beamSheath);
+
+      // Energy motes flowing along the arc
+      const strN = 70;
+      const strProg = new Float32Array(strN);
+      const strSpd = new Float32Array(strN);
+      const strJitA = new Float32Array(strN);
+      const strJitR = new Float32Array(strN);
+      for (let i = 0; i < strN; i++) {
+        strProg[i] = Math.random();
+        strSpd[i] = 0.7 + Math.random() * 0.7;
+        strJitA[i] = Math.random() * Math.PI * 2;
+        strJitR[i] = Math.random() * 0.09;
+      }
+      const strPos = new Float32Array(strN * 3);
+      const strGeo = new THREE.BufferGeometry();
+      strGeo.setAttribute("position", new THREE.BufferAttribute(strPos, 3));
+      const strMat = new THREE.PointsMaterial({
+        size: 0.09,
+        transparent: true,
+        opacity: 0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        sizeAttenuation: true,
+      });
+      const streamPoints = new THREE.Points(strGeo, strMat);
+      scene.add(streamPoints);
 
       // ===================== MINI D20 DICE =====================
       const miniD20Group = new THREE.Group();
@@ -1729,6 +1816,7 @@ function CinematicPortalScene({
       const miniD20s: Array<{
         mesh: InstanceType<typeof THREE.Mesh>;
         baseAngle: number;
+        orbitAngle: number;
         radiusOffset: number;
         speedMultiplier: number;
         verticalOffset: number;
@@ -1748,6 +1836,7 @@ function CinematicPortalScene({
         miniD20s.push({
           mesh,
           baseAngle: (i / miniD20Count) * Math.PI * 2,
+          orbitAngle: (i / miniD20Count) * Math.PI * 2,
           radiusOffset: Math.random() * 2 - 1,
           speedMultiplier: 0.8 + Math.random() * 0.4,
           verticalOffset: Math.random() * 2 - 1,
@@ -1831,6 +1920,8 @@ function CinematicPortalScene({
       ptCtx.fillStyle = ptGrd;
       ptCtx.fillRect(0, 0, 64, 64);
       const pTex = new THREE.CanvasTexture(ptCanvas);
+      strMat.map = pTex;
+      strMat.needsUpdate = true;
 
       // ===================== PARTICLE SYSTEM 1: AMBIENT DUST =====================
       const dustN = 220;
@@ -1911,11 +2002,13 @@ function CinematicPortalScene({
       // ===================== SOUL ORBS (PLAYERS) =====================
       type SoulOrb = {
         id: string;
+        name: string;
         group: InstanceType<typeof THREE.Group>;
         sphere: InstanceType<typeof THREE.Mesh>;
         halo: InstanceType<typeof THREE.Mesh>;
         light: InstanceType<typeof THREE.PointLight>;
         trail: InstanceType<typeof THREE.Mesh>; // Small trail indicator
+        label: InstanceType<typeof THREE.Sprite>;
         baseAngle: number;
         born: number;
         color: number;
@@ -1958,6 +2051,31 @@ function CinematicPortalScene({
 
         const light = new THREE.PointLight(color, 0, 8);
         group.add(light);
+
+        // Floating name label so the party is visible in the scene itself
+        const lblCanvas = document.createElement("canvas");
+        lblCanvas.width = 256;
+        lblCanvas.height = 64;
+        const lblCtx = lblCanvas.getContext("2d")!;
+        lblCtx.font = "700 28px Inter, system-ui, sans-serif";
+        lblCtx.textAlign = "center";
+        lblCtx.textBaseline = "middle";
+        lblCtx.shadowColor = "rgba(0,0,0,0.85)";
+        lblCtx.shadowBlur = 10;
+        lblCtx.fillStyle = `#${color.toString(16).padStart(6, "0")}`;
+        lblCtx.fillText((p.name || "").slice(0, 16), 128, 32);
+        const lblTex = new THREE.CanvasTexture(lblCanvas);
+        const lblMat = new THREE.SpriteMaterial({
+          map: lblTex,
+          transparent: true,
+          opacity: 0,
+          depthWrite: false,
+        });
+        const label = new THREE.Sprite(lblMat);
+        label.scale.set(1.7, 0.42, 1);
+        label.position.y = 0.8;
+        group.add(label);
+
         scene.add(group);
 
         let beam: InstanceType<typeof THREE.Line> | undefined;
@@ -1976,25 +2094,33 @@ function CinematicPortalScene({
           scene.add(beam);
         }
 
-        return { id: p.id, group, sphere, halo, trail, light, baseAngle: 0, born, color, beam };
+        return { id: p.id, name: p.name || "", group, sphere, halo, trail, light, label, baseAngle: 0, born, color, beam };
+      };
+
+      const disposeOrb = (o: SoulOrb) => {
+        scene.remove(o.group);
+        if (o.beam) {
+          scene.remove(o.beam);
+          o.beam.geometry.dispose();
+          (o.beam.material as InstanceType<typeof THREE.Material>).dispose();
+        }
+        o.sphere.geometry.dispose();
+        (o.sphere.material as InstanceType<typeof THREE.Material>).dispose();
+        o.halo.geometry.dispose();
+        (o.halo.material as InstanceType<typeof THREE.Material>).dispose();
+        o.trail.geometry.dispose();
+        (o.trail.material as InstanceType<typeof THREE.Material>).dispose();
+        (o.label.material as InstanceType<typeof THREE.SpriteMaterial>).map?.dispose();
+        (o.label.material as InstanceType<typeof THREE.Material>).dispose();
       };
 
       const reconcileOrbs = (next: PortalPlayer[]) => {
-        const ids = new Set(next.map((p) => p.id));
+        const byId = new Map(next.map((p) => [p.id, p]));
         orbs = orbs.filter((o) => {
-          if (!ids.has(o.id)) {
-            scene.remove(o.group);
-            if (o.beam) {
-              scene.remove(o.beam);
-              o.beam.geometry.dispose();
-              (o.beam.material as InstanceType<typeof THREE.Material>).dispose();
-            }
-            o.sphere.geometry.dispose();
-            (o.sphere.material as InstanceType<typeof THREE.Material>).dispose();
-            o.halo.geometry.dispose();
-            (o.halo.material as InstanceType<typeof THREE.Material>).dispose();
-            o.trail.geometry.dispose();
-            (o.trail.material as InstanceType<typeof THREE.Material>).dispose();
+          const p = byId.get(o.id);
+          // Rebuild when a player leaves or their name label goes stale
+          if (!p || (p.name || "") !== o.name) {
+            disposeOrb(o);
             return false;
           }
           return true;
@@ -2064,9 +2190,11 @@ function CinematicPortalScene({
         });
 
         // ---- Energy Core ----
-        core.rotation.x = t * 0.4 * speed;
-        core.rotation.y = t * 0.6 * speed;
-        const coreScale = 0.7 + phaseBlend * 0.35 + stepProgressState * 0.5
+        coreRotX += 0.4 * speed * dt;
+        coreRotY += 0.6 * speed * dt;
+        core.rotation.x = coreRotX;
+        core.rotation.y = coreRotY;
+        const coreScale = 0.7 + phaseBlend * 0.35 + stepSmooth * 0.5
           + pImage * 0.3 + pLive * 0.55
           + Math.sin(t * (1.8 + pSignal * 4)) * 0.12;
         core.scale.setScalar(coreScale);
@@ -2079,116 +2207,180 @@ function CinematicPortalScene({
         shellMat.opacity = 0.015 + phaseBlend * 0.03 + pImage * 0.07 + pLive * 0.12;
 
         const isController = !!localPlayerIdState;
+        const portalZ = isController ? -2.0 : 0;
 
         // ---- D20 ----
         const d20Spd = speed * (0.4 + phaseBlend * 0.7 + pSheet * 0.4);
-        const chargeShake = stepProgressState > 0 ? Math.sin(t * 30) * 0.04 * stepProgressState : 0;
-        
-        if (isController) {
-          d20Group.position.set(0, 1.5, -2.0);
-          
-          const localPlayerInfo = players.find(p => p.id === localPlayerIdState);
-          const localColor = hexFromColor(localPlayerInfo?.color);
-          yourD20WireMat.color.setHex(localColor);
-          beamLineMat.color.setHex(localColor);
-          
-          yourD20Group.position.set(0, 0.5, 4.0);
-          yourD20Group.visible = true;
-          transmissionBeam.visible = true;
-          
-          yourD20Group.rotation.x = -t * 0.3;
-          yourD20Group.rotation.y = -t * 0.55;
-          yourD20Group.rotation.z = -t * 0.18;
-          yourD20Group.scale.setScalar(0.7);
+        const chargeShake = phaseBlend * Math.sin(t * 30) * 0.04 * (0.3 + stepSmooth * 0.7);
+        const localPlayerInfo = isController ? players.find(p => p.id === localPlayerIdState) : undefined;
+        const localColor = hexFromColor(localPlayerInfo?.color);
 
-          ground.visible = false;
-          portalRingsGroup.visible = false;
+        // The whole portal (rings, core, glow) sits deeper in the void on the
+        // controller so your die floats in the foreground of a living space.
+        core.position.z = portalZ;
+        innerGlow.position.z = portalZ;
+        shell.position.z = portalZ;
+        portalRingsGroup.position.z = portalZ;
+        dashRing.position.z = portalZ;
+
+        if (isController) {
+          d20Group.position.set(0, 1.5, portalZ);
+
+          yourD20WireMat.color.setHex(localColor);
+          auraMat.color.setHex(localColor);
+          chargeRingMat.color.setHex(localColor);
+          beamTubeMat.color.setHex(localColor);
+          beamSheathMat.color.setHex(localColor);
+          strMat.color.setHex(localColor);
+
+          // Your die: serene drift in the lobby, trembling surge while charging
+          yourD20Group.position.set(
+            Math.sin(t * 0.5) * 0.07 * (1 - phaseBlend) + chargeShake * 0.6,
+            0.5 + Math.sin(t * 0.85) * 0.1 * (1 - phaseBlend * 0.6) + chargeShake,
+            4.0
+          );
+          yourD20Group.visible = true;
+          const yourSpin = (0.35 + phaseBlend * 0.9) * speed;
+          yourRotX -= 0.5 * yourSpin * dt;
+          yourRotY -= 0.9 * yourSpin * dt;
+          yourRotZ -= 0.3 * yourSpin * dt;
+          yourD20Group.rotation.set(yourRotX, yourRotY, yourRotZ);
+          yourD20Group.scale.setScalar(0.7 + phaseBlend * 0.12 + Math.sin(t * 2.2) * 0.02);
+
+          // Aura breathes in the lobby, blazes while transmitting
+          auraMat.opacity = 0.1 + Math.sin(t * 1.6) * 0.04 + phaseBlend * (0.3 + stepSmooth * 0.25);
+          chargeRingRot += (0.6 + phaseBlend * 3.2) * speed * dt;
+          chargeRing.rotation.z = chargeRingRot;
+          chargeRing.scale.setScalar(1 - phaseBlend * stepSmooth * 0.25 + Math.sin(t * 3) * 0.04);
+          chargeRingMat.opacity = 0.12 + phaseBlend * (0.35 + Math.sin(t * 7) * 0.2);
+
+          // Transmission arc awakens with the ritual
+          transmissionBeam.visible = true;
+          beamSheath.visible = true;
+          streamPoints.visible = true;
+          const beamPulse = 0.75 + Math.sin(t * 6) * 0.25;
+          beamTubeMat.opacity = phaseBlend * (0.28 + stepSmooth * 0.3) * beamPulse + (1 - phaseBlend) * 0.03;
+          beamSheathMat.opacity = phaseBlend * (0.07 + stepSmooth * 0.08) * beamPulse;
+
+          // Portal environment stays present but dormant in the lobby
+          ground.visible = true;
+          portalRingsGroup.visible = true;
           runeRing.visible = false;
-          dashRing.visible = false;
-          
+          dashRing.visible = true;
+
           orbs.forEach(o => {
-            o.group.visible = false;
+            const isLocalOrb = o.id === localPlayerIdState;
+            o.group.visible = !isLocalOrb; // you ARE the die in the foreground
             if (o.beam) o.beam.visible = false;
           });
         } else {
           d20Group.position.set(0, 1.5, 0);
           yourD20Group.visible = false;
           transmissionBeam.visible = false;
-          
+          beamSheath.visible = false;
+          streamPoints.visible = false;
+
           ground.visible = true;
           portalRingsGroup.visible = true;
           runeRing.visible = true;
           dashRing.visible = true;
-          
+
           orbs.forEach(o => {
             o.group.visible = true;
             if (o.beam) o.beam.visible = true;
           });
         }
 
-        d20Group.rotation.x = t * 0.25 * d20Spd;
-        d20Group.rotation.y = t * 0.4  * d20Spd;
-        d20Group.rotation.z = t * 0.12 * d20Spd;
-        d20Group.scale.setScalar((isController ? 1.0 : 0.85) + phaseBlend * 0.18 + stepProgressState * 0.22 + pLive * 0.18 + chargeShake);
+        d20RotX += 0.25 * d20Spd * dt;
+        d20RotY += 0.4 * d20Spd * dt;
+        d20RotZ += 0.12 * d20Spd * dt;
+        d20Group.rotation.set(d20RotX, d20RotY, d20RotZ);
+        d20Group.scale.setScalar((isController ? 1.0 : 0.85) + phaseBlend * 0.18 + stepSmooth * 0.22 + pLive * 0.18 + chargeShake);
         d20WireMat.opacity = 0.55 + phaseBlend * 0.3 + pSheet * 0.15;
 
         // ---- Mini D20s ----
         if (isController) {
-          const speedFactor = modeState === "lobby" ? 0.22 : 0.65;
+          // Lobby: the dice idle in a lazy orbit around your die.
+          // Charging: they launch along the transmission arc, spiraling into
+          // the portal. phaseBlend morphs between the two continuously.
+          const flowRate = 0.05 + phaseBlend * (0.3 + stepSmooth * 0.55);
+          flowClock += flowRate * dt;
           miniD20s.forEach((die, i) => {
-            const progress = ((t * speedFactor + (i / miniD20Count)) % 1.0);
-            const startPos = yourD20Group.position;
-            const endPos = d20Group.position;
-            
-            const basePos = new THREE.Vector3().lerpVectors(startPos, endPos, progress);
-            
-            const direction = new THREE.Vector3().subVectors(endPos, startPos).normalize();
-            const upVec = new THREE.Vector3(0, 1, 0);
-            const rightVec = new THREE.Vector3().crossVectors(direction, upVec).normalize();
-            const orthoUpVec = new THREE.Vector3().crossVectors(rightVec, direction).normalize();
-            
+            // Idle orbit position (around your die)
+            const orbitAngle = die.baseAngle + t * (0.25 + 0.15 * die.speedMultiplier);
+            const orbitR = 0.95 + die.radiusOffset * 0.3;
+            const ox = yourD20Group.position.x + Math.cos(orbitAngle) * orbitR;
+            const oy = yourD20Group.position.y + Math.sin(t * 0.7 + die.baseAngle * 2) * 0.28;
+            const oz = yourD20Group.position.z + Math.sin(orbitAngle) * orbitR * 0.6;
+
+            // Streaming position (along the arc, spiraling around it)
+            const progress = ((flowClock * die.speedMultiplier + i / miniD20Count) % 1.0);
+            const basePos = beamCurve.getPoint(progress);
+            const tangent = beamCurve.getTangent(progress);
+            const rightVec = new THREE.Vector3().crossVectors(tangent, new THREE.Vector3(0, 1, 0)).normalize();
+            const orthoUpVec = new THREE.Vector3().crossVectors(rightVec, tangent).normalize();
             const spiralAngle = progress * Math.PI * 6 + die.baseAngle;
-            const spiralRadius = 0.35 * Math.sin(progress * Math.PI);
-            
-            const offset = new THREE.Vector3()
+            const spiralRadius = 0.3 * Math.sin(progress * Math.PI);
+            basePos
               .addScaledVector(rightVec, Math.cos(spiralAngle) * spiralRadius)
               .addScaledVector(orthoUpVec, Math.sin(spiralAngle) * spiralRadius);
-              
-            die.mesh.position.copy(basePos).add(offset);
-            
+
+            die.mesh.position.set(
+              ox + (basePos.x - ox) * phaseBlend,
+              oy + (basePos.y - oy) * phaseBlend,
+              oz + (basePos.z - oz) * phaseBlend
+            );
+
             die.mesh.rotation.x = t * 3.5 * die.speedMultiplier;
             die.mesh.rotation.y = t * 4.5 * die.speedMultiplier;
-            
+
             const dieMat = die.mesh.material as InstanceType<typeof THREE.MeshBasicMaterial>;
-            const localPlayerInfo = players.find(p => p.id === localPlayerIdState);
-            const localColor = hexFromColor(localPlayerInfo?.color);
             dieMat.color.setHex(localColor);
-            
-            dieMat.opacity = Math.sin(progress * Math.PI) * 0.85;
+            const idleOp = 0.4 + Math.sin(t * 1.4 + die.baseAngle * 3) * 0.15;
+            const streamOp = Math.sin(progress * Math.PI) * 0.9;
+            dieMat.opacity = idleOp + (streamOp - idleOp) * phaseBlend;
           });
         } else {
           miniD20s.forEach((die, i) => {
-            const progress = stepProgressState;
+            const progress = stepSmooth;
             const startRadius = 8 + die.radiusOffset;
             const endRadius = 0.65;
             const curRadius = startRadius * (1 - progress) + endRadius * progress;
-            const orbitSpeed = (2.4 + progress * 5.8) * die.speedMultiplier;
-            const angle = die.baseAngle + t * orbitSpeed;
+            die.orbitAngle += (2.4 + progress * 5.8) * die.speedMultiplier * dt;
+            const angle = die.orbitAngle;
             const curY = 1.5 + die.verticalOffset * (1 - progress) + Math.sin(t * 4 + i) * 0.12 * (1 - progress);
-            
+
             die.mesh.position.set(
               Math.cos(angle) * curRadius,
               curY,
               Math.sin(angle) * curRadius
             );
-            
+
             die.mesh.rotation.x = t * 2 * die.speedMultiplier;
             die.mesh.rotation.y = t * 3 * die.speedMultiplier;
-            
+
             const dieMat = die.mesh.material as InstanceType<typeof THREE.MeshBasicMaterial>;
-            dieMat.opacity = (0.5 + (1 - progress) * 0.4) * (modeState === "lobby" ? 0.3 : 1);
+            dieMat.opacity = (0.5 + (1 - progress) * 0.4) * (0.3 + phaseBlend * 0.7);
             dieMat.color.setHex(0xffd700);
           });
+        }
+
+        // ---- Transmission stream motes ----
+        if (isController) {
+          const sPosArr = strGeo.attributes.position.array as Float32Array;
+          for (let i = 0; i < strN; i++) {
+            strProg[i] += strSpd[i] * (0.12 + phaseBlend * (0.28 + stepSmooth * 0.5)) * dt;
+            if (strProg[i] > 1) {
+              strProg[i] -= 1;
+              strJitA[i] = Math.random() * Math.PI * 2;
+            }
+            const p = beamCurve.getPoint(strProg[i]);
+            sPosArr[i * 3]     = p.x + Math.cos(strJitA[i]) * strJitR[i];
+            sPosArr[i * 3 + 1] = p.y + Math.sin(strJitA[i]) * strJitR[i];
+            sPosArr[i * 3 + 2] = p.z;
+          }
+          strGeo.attributes.position.needsUpdate = true;
+          strMat.opacity = 0.1 + phaseBlend * (0.55 + Math.sin(t * 5) * 0.2);
         }
 
         // ---- Core Light ----
@@ -2206,8 +2398,9 @@ function CinematicPortalScene({
         }
 
         // ---- Ground ----
-        groundMat.opacity = 0.32 + phaseBlend * 0.38 + pImage * 0.22 + pLive * 0.35;
-        ground.rotation.z = t * 0.02 * speed;
+        groundMat.opacity = (0.32 + phaseBlend * 0.38 + pImage * 0.22 + pLive * 0.35) * (isController ? 0.55 : 1);
+        groundRot += 0.02 * speed * dt;
+        ground.rotation.z = groundRot;
 
         // ---- Beams ----
         beamMeshes.forEach((bm, i) => {
@@ -2218,16 +2411,20 @@ function CinematicPortalScene({
         });
 
         // ---- Rune Ring ----
-        runeRing.rotation.z = t * 0.04 * speed;
+        runeRot += 0.04 * speed * dt;
+        runeRing.rotation.z = runeRot;
         runeMat.opacity = 0.06 + phaseBlend * 0.12 + pSheet * 0.14 + pLive * 0.18;
 
         // ---- Dash Ring ----
-        dashRing.rotation.y = t * (0.08 + pInteg * 0.35) * speed;
-        dashRing.rotation.z = t * (0.04 + pImage * 0.22) * speed;
+        dashRotY += (0.08 + pInteg * 0.35) * speed * dt;
+        dashRotZ += (0.04 + pImage * 0.22) * speed * dt;
+        dashRing.rotation.y = dashRotY;
+        dashRing.rotation.z = dashRotZ;
         dashMat.opacity = 0.04 + phaseBlend * 0.04 + pInteg * 0.1;
 
         // ---- Soul Orbs ----
-        const orbSpin = t * 0.1 * speed;
+        orbSpinAcc += 0.1 * speed * dt;
+        const orbSpin = orbSpinAcc;
         orbs.forEach((orb) => {
           const age = t - orb.born;
           const fadeIn = Math.min(1, age / 1.0);
@@ -2247,7 +2444,7 @@ function CinematicPortalScene({
           orb.group.position.set(
             Math.cos(angle) * curR,
             curY,
-            Math.sin(angle) * curR
+            Math.sin(angle) * curR + portalZ
           );
 
           const isLocal = localPlayerIdState && orb.id === localPlayerIdState;
@@ -2260,6 +2457,7 @@ function CinematicPortalScene({
           sMat.opacity = ease * flk;
           hMat.opacity = ease * 0.2 * flk;
           tMat.opacity = ease * flk * 0.9;
+          (orb.label.material as InstanceType<typeof THREE.SpriteMaterial>).opacity = ease * 0.85;
           orb.light.intensity = ease * (1.5 + phaseBlend * 0.6) * flk * (isLocal ? 2.5 : 1.0);
 
           orb.sphere.scale.setScalar(scaleMult);
@@ -2284,7 +2482,7 @@ function CinematicPortalScene({
           if (orb.beam) {
             const points = [
               orb.group.position.clone(),
-              new THREE.Vector3(0, 1.5, 0)
+              new THREE.Vector3(0, 1.5, portalZ)
             ];
             orb.beam.geometry.setFromPoints(points);
             const bMat = orb.beam.material as InstanceType<typeof THREE.LineBasicMaterial>;
@@ -2341,37 +2539,43 @@ function CinematicPortalScene({
         embGeo.attributes.position.needsUpdate = true;
         embMat.opacity = 0.35 + phaseBlend * 0.35 + pImage * 0.2;
 
-        // ---- Camera: Cinematic orbit ----
-        const orbitSpeed = isController ? 0.25 : speed;
-        camAngle += dt * 0.05 * orbitSpeed;
+        // ---- Camera: Cinematic drift with parallax ----
+        const orbitRate = isController ? 0.18 + phaseBlend * 0.35 : speed;
+        camAngle += dt * 0.05 * orbitRate;
         const aspect = mount.clientWidth / mount.clientHeight;
         const aspectMult = aspect < 1 ? Math.min(1.8, 1.25 / aspect) : 1.0;
-        
+
         let cR = (14 - phaseBlend * 2.5 - pLive * 3.5) * aspectMult;
         let cH = (6 + Math.sin(t * 0.12) * 0.6 - phaseBlend * 0.8) * aspectMult;
-        
+
         if (isController) {
-          cR = 9.0 * aspectMult;
-          cH = 4.5 * aspectMult;
+          // Lobby drifts wide and calm; charging pushes in toward the ritual
+          cR = (9.2 - phaseBlend * 1.9 - stepSmooth * 0.7) * aspectMult;
+          cH = (4.6 - phaseBlend * 0.9 + Math.sin(t * 0.2) * 0.35) * aspectMult;
         }
-        
+
+        // The dimension leans with your touch
+        parX += (parTX - parX) * Math.min(1, dt * 2.5);
+        parY += (parTY - parY) * Math.min(1, dt * 2.5);
+
         let shake = 0;
         if (modeState !== "lobby" && modeState !== "player-sync") {
           // Camera shake intensifies as progress reaches 100%
-          shake = stepProgressState * 0.08;
+          shake = phaseBlend * stepSmooth * 0.08;
         }
         const shakeX = (Math.random() - 0.5) * shake;
         const shakeY = (Math.random() - 0.5) * shake;
         const shakeZ = (Math.random() - 0.5) * shake;
 
         camera.position.set(
-          Math.cos(camAngle) * cR + shakeX,
-          cH + shakeY,
+          Math.cos(camAngle) * cR + shakeX + parX * 0.9,
+          cH + shakeY - parY * 0.6,
           Math.sin(camAngle) * cR + shakeZ
         );
-        
+
         if (isController) {
-          camera.lookAt(0, 1.0, 1.0);
+          // Gaze slides from your die toward the portal as the ritual charges
+          camera.lookAt(parX * 0.4, 1.0 - phaseBlend * 0.15, 1.4 - phaseBlend * 1.9);
         } else {
           camera.lookAt(0, 1.2, 0);
         }
@@ -2399,6 +2603,7 @@ function CinematicPortalScene({
           disposed = true;
           cancelAnimationFrame(animId);
           window.removeEventListener("resize", onResize);
+          window.removeEventListener("pointermove", onPointerMove);
           resizeObserver?.disconnect();
           renderer.dispose();
           scene.traverse((obj) => {
@@ -2455,7 +2660,7 @@ function CinematicPortalScene({
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Push reactive state into the Three.js scene
-  const playersSig = players.map((p) => `${p.id}:${p.color ?? ""}`).join("|");
+  const playersSig = players.map((p) => `${p.id}:${p.color ?? ""}:${p.name ?? ""}`).join("|");
   useEffect(() => {
     let cancelled = false;
     const push = () => {
@@ -2488,7 +2693,7 @@ function CinematicLoadingOverlay({ campaign, status, mode, threeDEnabled, leavin
   const activePhase = phases[currentStep] || phases[0];
 
   const portalPlayers = useMemo<PortalPlayer[]>(
-    () => campaign.players.map((p) => ({ id: p.id, color: p.color })),
+    () => campaign.players.map((p) => ({ id: p.id, color: p.color, name: p.characterName || p.name })),
     [campaign.players]
   );
 
@@ -4208,7 +4413,7 @@ function ControllerView(props: {
         localPlayer={activePlayer}
         threeJsDisabled={threeJsDisabled}
       >
-        <PhoneLobby campaign={props.campaign} player={activePlayer} setCampaign={props.setCampaign} busy={props.busy} setBusy={props.setBusy} error={props.error} setError={props.setError} />
+        <PhoneLobby campaign={props.campaign} player={activePlayer} setCampaign={props.setCampaign} busy={props.busy} setBusy={props.setBusy} error={props.error} setError={props.setError} showRoster={threeJsDisabled} />
       </PhonePortalStage>
     );
   }
@@ -4224,6 +4429,7 @@ function PhoneLobby({
   setBusy,
   error,
   setError,
+  showRoster,
 }: {
   campaign: Campaign;
   player: Player;
@@ -4232,6 +4438,7 @@ function PhoneLobby({
   setBusy: (busy: boolean) => void;
   error: string;
   setError: (error: string) => void;
+  showRoster?: boolean;
 }) {
   const isLeader = campaign.partyLeaderId === player.id;
   const startingRef = useRef(false);
@@ -4245,16 +4452,27 @@ function PhoneLobby({
     startingRef.current = false;
   }
 
+  const partyCount = campaign.players.length;
   return (
     <>
       <div className="phone-lobby-glow" aria-hidden="true" />
-      <span className="phone-lobby-kicker">Party Lobby</span>
-      <h1>{campaign.title}</h1>
-      <p className="small">Waiting for the party to gather. When the leader starts, this screen will fold into the campaign loading ritual.</p>
-      <div className="phone-lobby-code">Code {campaign.joinCode}</div>
-      <Players campaign={campaign} playerId={player.id} />
-      {isLeader ? <button disabled={busy || campaign.players.length === 0} onClick={start}>{busy ? "Opening..." : "Start campaign"}</button> : <p className="small">The party leader will start the campaign.</p>}
-      {error && <p className="small">{error}</p>}
+      <div className="lobby-minimal-ui">
+        <span className="phone-lobby-kicker">Party Lobby</span>
+        <h1 className="lobby-title">{campaign.title}</h1>
+        <div className="phone-lobby-code">Code {campaign.joinCode}</div>
+        <p className="small lobby-hint">
+          {partyCount === 1 ? "You stand alone in the circle." : `${partyCount} adventurers stand in the circle.`}{" "}
+          {isLeader ? "Begin when your party has gathered." : "The party leader will start the campaign."}
+        </p>
+        {/* Players are embodied in the 3D dimension; only list them when it's off */}
+        {showRoster && <Players campaign={campaign} playerId={player.id} />}
+        {isLeader && (
+          <button disabled={busy || campaign.players.length === 0} onClick={start}>
+            {busy ? "Opening..." : "Start campaign"}
+          </button>
+        )}
+        {error && <p className="small">{error}</p>}
+      </div>
     </>
   );
 }
@@ -4591,7 +4809,7 @@ function PhonePortalStage({ variant, campaign, localPlayer, status, threeJsDisab
   const activePhase = phases[currentStep] || phases[0];
 
   const portalPlayers = useMemo<PortalPlayer[]>(
-    () => (campaign ? campaign.players.map((p) => ({ id: p.id, color: p.color })) : []),
+    () => (campaign ? campaign.players.map((p) => ({ id: p.id, color: p.color, name: p.characterName || p.name })) : []),
     [campaign]
   );
 
@@ -4630,21 +4848,22 @@ function JoinLoadingContent({ title, status, campaign, threeJsDisabled, progress
   const flavor = flavorOf(campaign?.campaignType);
   return (
     <>
-      {threeJsDisabled ? (
+      {threeJsDisabled && (
         <div className="spinner-container controller-spinner-stage" style={{ minHeight: "150px" }}>
           <D20Spinner />
         </div>
-      ) : (
-        <div className="controller-3d-spacer" />
       )}
-      <h2>{title || "Setting Up Character..."}</h2>
-      <p className="loading-status">{status || `The ${flavor.dmName} is reviewing your background and forging your character sheet...`}</p>
-      <div className="controller-progress" role="progressbar" aria-valuenow={Math.round(progress * 100)} aria-valuemin={0} aria-valuemax={100}>
-        <div className="controller-progress-bar"><div className="controller-progress-fill" style={{ width: `${progress * 100}%` }} /></div>
-        <span className="controller-progress-pct">{Math.round(progress * 100)}%</span>
+      <div className="loading-minimal-ui">
+        <h2>{title || "Setting Up Character..."}</h2>
+        <p className="loading-status">{status || `The ${flavor.dmName} is reviewing your background and forging your character sheet...`}</p>
+        <div className="controller-progress" role="progressbar" aria-valuenow={Math.round(progress * 100)} aria-valuemin={0} aria-valuemax={100}>
+          <div className="controller-progress-bar"><div className="controller-progress-fill" style={{ width: `${progress * 100}%` }} /></div>
+          <span className="controller-progress-pct">{Math.round(progress * 100)}%</span>
+        </div>
+        {/* The 3D ritual carries the story when it's on; keep the step icons as fallback */}
+        {threeJsDisabled && <StatusTimeline status={status || ""} mode="character" />}
+        <CyclingTipBox variant={themeOf(campaign)} />
       </div>
-      <StatusTimeline status={status || ""} mode="character" />
-      <CyclingTipBox variant={themeOf(campaign)} />
     </>
   );
 }
