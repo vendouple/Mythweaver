@@ -2388,12 +2388,17 @@ function CinematicPortalScene({
         renderer.setSize(mount.clientWidth, mount.clientHeight);
       };
       window.addEventListener("resize", onResize);
+      // Container can change size without a window resize (e.g. the portal
+      // stage swapping lobby/loading variants), so watch the mount too.
+      const resizeObserver = typeof ResizeObserver !== "undefined" ? new ResizeObserver(onResize) : null;
+      resizeObserver?.observe(mount);
 
       sceneRef.current = {
         dispose: () => {
           disposed = true;
           cancelAnimationFrame(animId);
           window.removeEventListener("resize", onResize);
+          resizeObserver?.disconnect();
           renderer.dispose();
           scene.traverse((obj) => {
             if ((obj as any).isMesh || (obj as any).isLine) {
@@ -3689,6 +3694,27 @@ function ControllerView(props: {
       </>
     );
   };
+
+  const renderLoadingStage = (title?: string, status?: string, localPlayer?: Player | null) =>
+    renderWithToggle(
+      <PhonePortalStage
+        variant="loading"
+        campaign={props.campaign}
+        localPlayer={localPlayer ?? props.localPlayer}
+        status={status}
+        threeJsDisabled={threeJsDisabled}
+      >
+        {(progress) => (
+          <JoinLoadingContent
+            title={title}
+            status={status}
+            campaign={props.campaign}
+            threeJsDisabled={threeJsDisabled}
+            progress={progress}
+          />
+        )}
+      </PhonePortalStage>
+    );
   const [characterName, setCharacterName] = useState("");
   const [personality, setPersonality] = useState("");
   const [background, setBackground] = useState("");
@@ -3781,7 +3807,7 @@ function ControllerView(props: {
   }
 
   if (joining || (props.busy && !props.localPlayer)) {
-    return renderWithToggle(<JoinLoadingView campaign={props.campaign} localPlayer={props.localPlayer} threeJsDisabled={threeJsDisabled} />);
+    return renderLoadingStage();
   }
 
   if (!props.campaign || !props.localPlayer) {
@@ -4054,14 +4080,10 @@ function ControllerView(props: {
   const isOtherPlayerGenerating = !isLocalPlayerGenerating && props.campaign.players.some((p) => p.status === "Generating profile...") && props.campaign.dmStatus;
 
   if (isInitialLoading) {
-    return renderWithToggle(
-      <JoinLoadingView
-        title={props.campaign.campaignType === "tabletop" ? "Starting Story..." : "Starting Campaign..."}
-        status={props.campaign.dmStatus || `The ${flavorOf(props.campaign.campaignType).dmName} is preparing the initial scenario...`}
-        campaign={props.campaign}
-        localPlayer={activePlayer}
-        threeJsDisabled={threeJsDisabled}
-      />
+    return renderLoadingStage(
+      props.campaign.campaignType === "tabletop" ? "Starting Story..." : "Starting Campaign...",
+      props.campaign.dmStatus || `The ${flavorOf(props.campaign.campaignType).dmName} is preparing the initial scenario...`,
+      activePlayer
     );
   }
 
@@ -4116,31 +4138,32 @@ function ControllerView(props: {
 
   if (isLocalPlayerGenerating) {
     const isSurprise = props.campaign?.isRandomized;
-    return renderWithToggle(
-      <JoinLoadingView 
-        title={isSurprise ? "Forging Your Character Sheet..." : "Setting Up Character..."}
-        status={props.campaign?.dmStatus || `The ${flavorOf(props.campaign?.campaignType).dmName} is ${isSurprise ? "rolling character traits and painting a custom portrait..." : "reviewing your background and forging your character sheet..."}`}
-        campaign={props.campaign}
-        localPlayer={activePlayer}
-        threeJsDisabled={threeJsDisabled}
-      />
+    return renderLoadingStage(
+      isSurprise ? "Forging Your Character Sheet..." : "Setting Up Character...",
+      props.campaign?.dmStatus || `The ${flavorOf(props.campaign?.campaignType).dmName} is ${isSurprise ? "rolling character traits and painting a custom portrait..." : "reviewing your background and forging your character sheet..."}`,
+      activePlayer
     );
   }
 
   if (isOtherPlayerGenerating) {
-    return renderWithToggle(
-      <JoinLoadingView 
-        title="Party Member Joining..." 
-        status={props.campaign.dmStatus || `The ${flavorOf(props.campaign.campaignType).dmName} is integrating a new adventurer...`}
-        campaign={props.campaign}
-        localPlayer={activePlayer}
-        threeJsDisabled={threeJsDisabled}
-      />
+    return renderLoadingStage(
+      "Party Member Joining...",
+      props.campaign.dmStatus || `The ${flavorOf(props.campaign.campaignType).dmName} is integrating a new adventurer...`,
+      activePlayer
     );
   }
 
   if (props.campaign.status === "lobby") {
-    return renderWithToggle(<PhoneLobby campaign={props.campaign} player={activePlayer} setCampaign={props.setCampaign} busy={props.busy} setBusy={props.setBusy} error={props.error} setError={props.setError} threeJsDisabled={threeJsDisabled} />);
+    return renderWithToggle(
+      <PhonePortalStage
+        variant="lobby"
+        campaign={props.campaign}
+        localPlayer={activePlayer}
+        threeJsDisabled={threeJsDisabled}
+      >
+        <PhoneLobby campaign={props.campaign} player={activePlayer} setCampaign={props.setCampaign} busy={props.busy} setBusy={props.setBusy} error={props.error} setError={props.setError} />
+      </PhonePortalStage>
+    );
   }
 
   return <PhoneController campaign={props.campaign} player={activePlayer} setCampaign={props.setCampaign} busy={props.busy} setBusy={props.setBusy} error={props.error} setError={props.setError} />;
@@ -4154,7 +4177,6 @@ function PhoneLobby({
   setBusy,
   error,
   setError,
-  threeJsDisabled,
 }: {
   campaign: Campaign;
   player: Player;
@@ -4163,7 +4185,6 @@ function PhoneLobby({
   setBusy: (busy: boolean) => void;
   error: string;
   setError: (error: string) => void;
-  threeJsDisabled?: boolean;
 }) {
   const isLeader = campaign.partyLeaderId === player.id;
   const startingRef = useRef(false);
@@ -4177,25 +4198,8 @@ function PhoneLobby({
     startingRef.current = false;
   }
 
-  const portalPlayers = useMemo<PortalPlayer[]>(
-    () => campaign.players.map((p) => ({ id: p.id, color: p.color })),
-    [campaign.players]
-  );
-
   return (
-    <section className={`controller-card phone-lobby-card ${!threeJsDisabled ? "has-3d" : ""}`}>
-      {!threeJsDisabled && (
-        <div className="controller-3d-bg">
-          <CinematicPortalScene
-            isActive={false}
-            mode="lobby"
-            stepProgress={0}
-            phaseKey="signal"
-            players={portalPlayers}
-            localPlayerId={player.id}
-          />
-        </div>
-      )}
+    <>
       <div className="phone-lobby-glow" aria-hidden="true" />
       <span className="phone-lobby-kicker">Party Lobby</span>
       <h1>{campaign.title}</h1>
@@ -4204,7 +4208,7 @@ function PhoneLobby({
       <Players campaign={campaign} playerId={player.id} />
       {isLeader ? <button disabled={busy || campaign.players.length === 0} onClick={start}>{busy ? "Opening..." : "Start campaign"}</button> : <p className="small">The party leader will start the campaign.</p>}
       {error && <p className="small">{error}</p>}
-    </section>
+    </>
   );
 }
 
@@ -4513,27 +4517,29 @@ const ControllerMiniD20 = ({ className }: { className: string }) => (
   </div>
 );
 
-function JoinLoadingView({
-  title,
-  status,
-  campaign,
-  localPlayer,
-  threeJsDisabled,
-}: {
-  title?: string;
-  status?: string;
+type StageVariant = "lobby" | "loading";
+
+/**
+ * Persistent shell for the controller's lobby and loading screens. It stays
+ * mounted at the same tree position across both variants so the single
+ * CinematicPortalScene survives lobby -> loading and animates the change
+ * (phaseBlend/speed lerp) instead of being destroyed and rebuilt.
+ */
+function PhonePortalStage({ variant, campaign, localPlayer, status, threeJsDisabled, children }: {
+  variant: StageVariant;
   campaign?: Campaign | null;
   localPlayer?: Player | null;
+  status?: string;
   threeJsDisabled?: boolean;
-} = {}) {
-  const mode = campaign ? getHostLoadingMode(campaign) : "initial";
-  const flavor = flavorOf(campaign?.campaignType);
+  children: React.ReactNode | ((progress: number) => React.ReactNode);
+}) {
+  const mode: HostLoadingMode = variant === "lobby" ? "lobby" : campaign ? getHostLoadingMode(campaign) : "initial";
   const phases = getHostPhases(mode);
-  const currentStep = campaign ? getHostPhaseIndex(mode, status || "", campaign.dmPhase) : 0;
-  const stepProgress = mode === "lobby" ? 0 : Math.min(1, currentStep / Math.max(1, phases.length - 1));
+  const currentStep = variant === "loading" && campaign ? getHostPhaseIndex(mode, status || "", campaign.dmPhase) : 0;
+  const rawProgress = mode === "lobby" ? 0 : Math.min(1, currentStep / Math.max(1, phases.length - 1));
   const displayProgress = useSmoothedProgress(
-    stepProgress,
-    Math.min(1, stepProgress + 0.6 / Math.max(1, phases.length - 1))
+    rawProgress,
+    Math.min(1, rawProgress + 0.6 / Math.max(1, phases.length - 1))
   );
   const activePhase = phases[currentStep] || phases[0];
 
@@ -4543,19 +4549,40 @@ function JoinLoadingView({
   );
 
   return (
-    <section className={`controller-card join-loading-card controller-loading-screen ${!threeJsDisabled ? "has-3d" : ""}`}>
+    <section
+      className={`controller-card phone-portal-stage ${
+        variant === "lobby" ? "phone-lobby-card" : "join-loading-card controller-loading-screen"
+      } ${!threeJsDisabled ? "has-3d" : ""}`}
+    >
       {!threeJsDisabled && (
         <div className="controller-3d-bg">
           <CinematicPortalScene
-            isActive={true}
+            isActive={variant === "loading"}
             mode={mode}
             stepProgress={displayProgress}
-            phaseKey={activePhase?.key || "signal"}
+            phaseKey={variant === "lobby" ? "signal" : activePhase?.key || "signal"}
             players={portalPlayers}
             localPlayerId={localPlayer?.id}
           />
         </div>
       )}
+      <div key={variant} className="stage-content">
+        {typeof children === "function" ? children(displayProgress) : children}
+      </div>
+    </section>
+  );
+}
+
+function JoinLoadingContent({ title, status, campaign, threeJsDisabled, progress }: {
+  title?: string;
+  status?: string;
+  campaign?: Campaign | null;
+  threeJsDisabled?: boolean;
+  progress: number;
+}) {
+  const flavor = flavorOf(campaign?.campaignType);
+  return (
+    <>
       {threeJsDisabled ? (
         <div className="spinner-container controller-spinner-stage" style={{ minHeight: "150px" }}>
           <D20Spinner />
@@ -4565,13 +4592,13 @@ function JoinLoadingView({
       )}
       <h2>{title || "Setting Up Character..."}</h2>
       <p className="loading-status">{status || `The ${flavor.dmName} is reviewing your background and forging your character sheet...`}</p>
-      <div className="controller-progress" role="progressbar" aria-valuenow={Math.round(displayProgress * 100)} aria-valuemin={0} aria-valuemax={100}>
-        <div className="controller-progress-bar"><div className="controller-progress-fill" style={{ width: `${displayProgress * 100}%` }} /></div>
-        <span className="controller-progress-pct">{Math.round(displayProgress * 100)}%</span>
+      <div className="controller-progress" role="progressbar" aria-valuenow={Math.round(progress * 100)} aria-valuemin={0} aria-valuemax={100}>
+        <div className="controller-progress-bar"><div className="controller-progress-fill" style={{ width: `${progress * 100}%` }} /></div>
+        <span className="controller-progress-pct">{Math.round(progress * 100)}%</span>
       </div>
       <StatusTimeline status={status || ""} mode="character" />
       <CyclingTipBox variant={themeOf(campaign)} />
-    </section>
+    </>
   );
 }
 
