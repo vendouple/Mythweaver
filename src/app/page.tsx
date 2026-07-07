@@ -3625,10 +3625,14 @@ function DiceOverlay({ event, charging, threeDEnabled = true }: { event?: Displa
   const phaseClass = phase;
   const rollMode = dice?.d20Mode && dice.d20Mode !== "normal" ? dice.d20Mode : undefined;
   const speaker = event?.speaker && event.speaker !== "Dice" ? event.speaker : "Fate";
+  const isD20 = !!dice?.notation && /d20\b/i.test(dice.notation);
+  const isNat20 = phase === "settled" && isD20 && dice!.rolls.includes(20);
+  const isNat1 = phase === "settled" && isD20 && !isNat20 && dice!.rolls.every((r) => r === 1);
+  const critClass = isNat20 ? "crit-success" : isNat1 ? "crit-fail" : "";
 
   return (
     <div
-      className={`dice-overlay epic ${phaseClass}`}
+      className={`dice-overlay epic ${phaseClass} ${critClass}`}
       key={dice ? `${dice.reason}-${dice.total}-${dice.rolls.join("-")}` : "charging-only"}
       style={{ "--roll-accent": accentColor } as CSSProperties}
     >
@@ -3673,7 +3677,7 @@ function DiceOverlay({ event, charging, threeDEnabled = true }: { event?: Displa
         <>
           <div className="dice-label">{dice.reason}</div>
           <div className="dice-total-readout">{displayValue}</div>
-          <div className="small">{rollMode ? `${rollMode.toUpperCase()} | ` : ""}{dice.notation}: {dice.rolls.join(", ")}{dice.modifier ? ` ${dice.modifier > 0 ? "+" : ""}${dice.modifier}` : ""}</div>
+          <div className="dice-breakdown small">{rollMode ? `${rollMode.toUpperCase()} | ` : ""}{dice.notation}: {dice.rolls.join(", ")}{dice.modifier ? ` ${dice.modifier > 0 ? "+" : ""}${dice.modifier}` : ""}</div>
         </>
       )}
     </div>
@@ -4566,7 +4570,8 @@ function PhoneController({ campaign, player, setCampaign, busy, setBusy, error, 
       </label>
       {busy && (
         <div className="controller-rolling-pulse" role="status" aria-live="polite">
-          <span>🎲 Rolling on TV</span>
+          <div className="mini-d20"><D20Spinner showNumber={false} /></div>
+          <span>Rolling on TV</span>
           <span className="pulse-dots" aria-hidden="true">
             <span /><span /><span />
           </span>
