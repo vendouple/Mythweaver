@@ -839,30 +839,21 @@ textarea { min-height: 7rem; resize: vertical; }
   animation: lobby-glow-breathe 6.5s ease-in-out infinite;
 }
 
-.controller-orbit {
-  position: absolute;
-  width: min(22rem, 76vw);
-  height: min(22rem, 76vw);
-  border: 1px dashed rgba(217, 164, 65, 0.32);
-  border-radius: 50%;
-  animation: rotate-mandala 24s linear infinite;
-  pointer-events: none;
-  box-shadow: inset 0 0 34px rgba(217, 164, 65, 0.08), 0 0 40px rgba(217, 164, 65, 0.09);
+/* Shared decorative keyframes for the lobby & loading card backdrops */
+@keyframes rotate-mandala {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
-.controller-orbit::before,
-.controller-orbit::after {
-  content: "";
-  position: absolute;
-  width: 0.55rem;
-  height: 0.55rem;
-  border-radius: 50%;
-  background: var(--gold);
-  box-shadow: 0 0 20px rgba(217, 164, 65, 0.8);
+@keyframes lobby-glow-breathe {
+  0%, 100% { opacity: 0.55; transform: scale(0.97); }
+  50% { opacity: 1; transform: scale(1.03); }
 }
 
-.controller-orbit::before { top: 12%; left: 18%; }
-.controller-orbit::after { right: 14%; bottom: 20%; }
+@keyframes portal-breathe {
+  0%, 100% { opacity: 0.5; transform: scale(0.985); }
+  50% { opacity: 1; transform: scale(1.015); }
+}
 
 .controller-spinner-stage {
   position: relative;
@@ -872,311 +863,6 @@ textarea { min-height: 7rem; resize: vertical; }
   justify-content: center;
   align-items: center;
   overflow: visible !important;
-}
-
-/* Controller Charging Particles Animation */
-.controller-charge-container {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  width: 120px;
-  height: 120px;
-  overflow: visible !important;
-}
-
-.controller-beam-svg {
-  position: absolute;
-  left: 50%;
-  bottom: 50%;
-  width: 5rem;
-  height: 13.5rem;
-  transform: translateX(-50%);
-  overflow: visible;
-  pointer-events: none;
-}
-
-.ctrl-beam-core {
-  filter: drop-shadow(0 0 6px rgba(255, 215, 0, 0.9)) drop-shadow(0 0 14px rgba(217, 164, 65, 0.7));
-  animation: controller-beam-charge 1.6s ease-in-out infinite;
-}
-
-.ctrl-bolt {
-  fill: none;
-  stroke: #fff8e0;
-  stroke-width: 1.6;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  filter: drop-shadow(0 0 5px rgba(255, 235, 170, 0.95)) drop-shadow(0 0 10px rgba(217, 164, 65, 0.8));
-  opacity: 0;
-}
-
-.ctrl-bolt-1 { animation: ctrl-bolt-flicker 0.9s steps(3, end) infinite; }
-.ctrl-bolt-2 { animation: ctrl-bolt-flicker 0.7s steps(3, end) infinite 0.18s; }
-.ctrl-bolt-3 { animation: ctrl-bolt-flicker 1.1s steps(2, end) infinite 0.4s; stroke-width: 1; opacity: 0; }
-
-@keyframes ctrl-bolt-flicker {
-  0%, 100% { opacity: 0; }
-  10% { opacity: 1; }
-  22% { opacity: 0.2; }
-  34% { opacity: 0.95; }
-  48% { opacity: 0.35; }
-  60% { opacity: 1; }
-  74% { opacity: 0.15; }
-  86% { opacity: 0.7; }
-}
-
-.controller-charge-beam-glow {
-  position: absolute;
-  left: 50%;
-  bottom: 50%;
-  width: 3.5rem;
-  height: 13.5rem;
-  border-radius: 999px;
-  background: linear-gradient(to top, rgba(217, 164, 65, 0) 0%, rgba(217, 164, 65, 0.35) 50%, rgba(217, 164, 65, 0) 100%);
-  filter: blur(12px);
-  transform: translateX(-50%);
-  animation: controller-beam-charge 1.6s ease-in-out infinite;
-  animation-delay: -0.8s;
-  pointer-events: none;
-}
-
-.controller-lightning-bolt {
-  position: absolute;
-  left: 50%;
-  bottom: 70%;
-  width: 0.22rem;
-  height: 7rem;
-  border-radius: 999px;
-  background: linear-gradient(to top, transparent, #fff5dc 18%, var(--gold) 48%, transparent 78%);
-  box-shadow: 0 0 14px rgba(255, 215, 0, 0.8);
-  opacity: 0;
-  transform-origin: bottom center;
-  clip-path: polygon(48% 0, 100% 28%, 58% 28%, 96% 60%, 42% 100%, 55% 64%, 14% 64%, 46% 34%, 8% 34%);
-  animation: controller-lightning-flicker 1.8s steps(2, end) infinite;
-}
-
-.controller-lightning-bolt.lb1 { transform: translateX(-1.6rem) rotate(-10deg); }
-.controller-lightning-bolt.lb2 { transform: translateX(1.2rem) rotate(12deg); animation-delay: 0.55s; }
-
-.charge-particle {
-  position: absolute;
-  width: 0.35rem;
-  height: 0.35rem;
-  border-radius: 50%;
-  background: #fff5dc;
-  box-shadow: 0 0 10px #ffd700, 0 0 20px var(--gold);
-}
-
-.cp1 { --x-start: -2.2rem; --x-end: -0.2rem; animation: charge-up 1.6s ease-in infinite; }
-.cp2 { --x-start: 1.8rem; --x-end: 0.15rem; animation: charge-up 1.8s ease-in infinite 0.2s; }
-.cp3 { --x-start: -0.8rem; --x-end: -0.05rem; animation: charge-up 1.4s ease-in infinite 0.4s; }
-.cp4 { --x-start: 2.5rem; --x-end: 0.3rem; animation: charge-up 2s ease-in infinite 0.6s; }
-.cp5 { --x-start: -2.8rem; --x-end: -0.3rem; animation: charge-up 1.7s ease-in infinite 0.8s; }
-.cp6 { --x-start: 0.6rem; --x-end: 0.05rem; animation: charge-up 1.5s ease-in infinite 1s; }
-.cp7 { --x-start: -0.4rem; --x-end: 0.1rem; animation: charge-up 1.9s ease-in infinite 1.2s; }
-.cp8 { --x-start: 1.2rem; --x-end: -0.1rem; animation: charge-up 1.5s ease-in infinite 0.3s; }
-.cp9 { --x-start: -1.6rem; --x-end: 0.2rem; animation: charge-up 1.7s ease-in infinite 0.7s; }
-.cp10 { --x-start: 2.2rem; --x-end: -0.15rem; animation: charge-up 1.3s ease-in infinite 1.1s; }
-.cp11 { --x-start: -0.5rem; --x-end: -0.3rem; animation: charge-up 1.8s ease-in infinite 1.4s; }
-.cp12 { --x-start: 1.5rem; --x-end: 0.25rem; animation: charge-up 1.6s ease-in infinite 0.9s; }
-
-/* Floating mini D20 wireframe particles */
-.charge-mini-d20 {
-  position: absolute;
-  width: 1.25rem;
-  height: 1.25rem;
-  pointer-events: none;
-  opacity: 0;
-}
-
-.charge-mini-d20 svg {
-  width: 100%;
-  height: 100%;
-  filter: drop-shadow(0 0 6px rgba(217, 164, 65, 0.85));
-}
-
-.cmd1 { --x-start: -2rem; --x-end: -0.4rem; animation: charge-up-d20 2.2s ease-in-out infinite; }
-.cmd2 { --x-start: 1.6rem; --x-end: 0.3rem; animation: charge-up-d20 2.6s ease-in-out infinite 0.5s; }
-.cmd3 { --x-start: -1.2rem; --x-end: -0.1rem; animation: charge-up-d20 2.4s ease-in-out infinite 1s; }
-.cmd4 { --x-start: 2rem; --x-end: 0.5rem; animation: charge-up-d20 2.8s ease-in-out infinite 1.5s; }
-.cmd5 { --x-start: -0.5rem; --x-end: 0.2rem; animation: charge-up-d20 2.5s ease-in-out infinite 2s; }
-
-@keyframes charge-up {
-  0% {
-    transform: translate(var(--x-start), 4.8rem) scale(0.65);
-    opacity: 0;
-  }
-  15% {
-    opacity: 1;
-  }
-  75% {
-    opacity: 0.95;
-  }
-  100% {
-    transform: translate(var(--x-end), -10.5rem) scale(1.3);
-    opacity: 0;
-  }
-}
-
-@keyframes charge-up-d20 {
-  0% {
-    transform: translate(var(--x-start), 5rem) scale(0.5) rotate(0deg);
-    opacity: 0;
-  }
-  20% {
-    opacity: 0.85;
-  }
-  80% {
-    opacity: 0.85;
-  }
-  100% {
-    transform: translate(var(--x-end), -11.5rem) scale(1.15) rotate(360deg);
-    opacity: 0;
-  }
-}
-
-@keyframes controller-beam-charge {
-  0%, 100% { opacity: 0.45; transform: translateX(-50%) scaleX(0.85); filter: blur(0.5px); }
-  50% { opacity: 0.95; transform: translateX(-50%) scaleX(1.1); filter: blur(0); }
-}
-
-@keyframes controller-lightning-flicker {
-  0%, 22%, 100% { opacity: 0; }
-  28%, 38% { opacity: 0.9; }
-  44%, 52% { opacity: 0.25; }
-  58%, 64% { opacity: 1; }
-}
-
-/* TV Loading Screen Mandala Speed and Mini D20 Transition */
-.magic-mandala {
-  position: absolute;
-  width: 100%;
-  height: 100%;
-  transform-origin: center;
-  filter: drop-shadow(0 0 18px rgba(217, 164, 65, 0.2));
-  transition: animation-duration 2.5s cubic-bezier(0.25, 1, 0.5, 1);
-  overflow: visible !important;
-}
-
-.magic-mandala.lobby-speed {
-  animation: rotate-mandala 120s linear infinite;
-}
-
-.magic-mandala.active-speed {
-  animation: rotate-mandala 60s linear infinite;
-}
-
-.mini-d20-group {
-  opacity: 0;
-  transform: scale(0.65);
-  transform-origin: 100px 100px;
-  transition: opacity 2s cubic-bezier(0.25, 1, 0.5, 1), transform 2s cubic-bezier(0.25, 1, 0.5, 1);
-}
-
-.mini-d20-group.visible-active {
-  opacity: 1;
-  transform: scale(1);
-}
-
-.mini-d20-rotator {
-  transform-box: view-box;
-  transform-origin: 100px 100px;
-  animation: rotate-mandala 18s linear infinite;
-}
-
-/* Each die spins freely and continuously on its own center (geometry centered at 0,0) */
-.mini-d20-die {
-  transform-box: fill-box;
-  transform-origin: center;
-  filter: drop-shadow(0 0 9px rgba(255, 215, 0, 0.65)) drop-shadow(0 0 4px rgba(255, 245, 220, 0.55));
-}
-
-.die-1 { animation: mini-d20-spin 2.1s linear infinite; }
-.die-2 { animation: mini-d20-spin 2.9s linear infinite reverse; }
-.die-3 { animation: mini-d20-spin 1.7s linear infinite; }
-.die-4 { animation: mini-d20-spin 3.4s linear infinite reverse; }
-.die-5 { animation: mini-d20-spin 2.4s linear infinite; }
-
-/* TV-side orbital track the dice ride on */
-.orbit-track {
-  transform-box: view-box;
-  transform-origin: 100px 100px;
-  animation: rotate-mandala 40s linear infinite reverse;
-}
-
-/* Mandala electricity arcs surrounding the orbital system */
-.electric-mandala {
-  transform-box: view-box;
-  transform-origin: 100px 100px;
-  animation: rotate-mandala 28s linear infinite;
-  filter: drop-shadow(0 0 5px rgba(255, 235, 170, 0.55));
-}
-
-.electric-burst {
-  opacity: 0;
-}
-
-.electric-burst.eb-a { animation: electric-arc-flicker 1.3s steps(3, end) infinite; }
-.electric-burst.eb-b { animation: electric-arc-flicker 1.7s steps(2, end) infinite 0.4s; }
-
-@keyframes electric-arc-flicker {
-  0%, 100% { opacity: 0; }
-  12% { opacity: 0.9; }
-  26% { opacity: 0.2; }
-  40% { opacity: 0.75; }
-  55% { opacity: 0.15; }
-  70% { opacity: 0.85; }
-  85% { opacity: 0.3; }
-}
-
-/* Charging electricity beams flowing inward to the core */
-.charge-bolt {
-  stroke: #fff8e0;
-  stroke-width: 1.3;
-  filter: drop-shadow(0 0 4px rgba(255, 235, 170, 0.9)) drop-shadow(0 0 9px rgba(217, 164, 65, 0.75));
-  opacity: 0;
-}
-
-.cbolt-1 { animation: charge-bolt-flicker 0.8s steps(3, end) infinite; }
-.cbolt-2 { animation: charge-bolt-flicker 0.95s steps(3, end) infinite 0.16s; }
-.cbolt-3 { animation: charge-bolt-flicker 0.7s steps(2, end) infinite 0.32s; }
-.cbolt-4 { animation: charge-bolt-flicker 1.05s steps(3, end) infinite 0.48s; }
-.cbolt-5 { animation: charge-bolt-flicker 0.85s steps(2, end) infinite 0.64s; }
-
-@keyframes charge-bolt-flicker {
-  0%, 100% { opacity: 0; }
-  15% { opacity: 0.95; }
-  30% { opacity: 0.15; }
-  45% { opacity: 0.8; }
-  60% { opacity: 0.1; }
-  78% { opacity: 0.7; }
-}
-
-/* Charging border encircling the central big D20 */
-.charge-border {
-  transform-box: view-box;
-  transform-origin: 100px 100px;
-  filter: drop-shadow(0 0 6px rgba(255, 235, 170, 0.6));
-  animation: rotate-mandala 14s linear infinite;
-}
-
-.charge-border-2 {
-  animation: rotate-mandala 9s linear infinite reverse;
-}
-
-.charge-core-pulse {
-  transform-box: view-box;
-  transform-origin: 100px 100px;
-  animation: charge-core-ring 2.8s ease-out infinite;
-}
-
-@keyframes charge-core-ring {
-  0% { r: 40; opacity: 0; stroke: rgba(255, 245, 220, 0.4); }
-  30% { opacity: 0.35; }
-  100% { r: 56; opacity: 0; stroke: rgba(217, 164, 65, 0.1); }
 }
 
 
@@ -2900,12 +2586,21 @@ textarea { min-height: 7rem; resize: vertical; }
   height: 2px;
   background: rgba(217, 164, 65, 0.15);
   z-index: 0;
-  transition: background 0.8s ease;
 }
 
-.timeline-connector.filled {
+.timeline-connector::after {
+  content: "";
+  position: absolute;
+  inset: 0;
   background: linear-gradient(90deg, rgba(217, 164, 65, 0.8), rgba(255, 215, 0, 0.6));
   box-shadow: 0 0 8px rgba(217, 164, 65, 0.4);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 0.9s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.timeline-connector.filled::after {
+  transform: scaleX(1);
 }
 
 .timeline-node {
@@ -3124,7 +2819,6 @@ textarea { min-height: 7rem; resize: vertical; }
 /* Hide static/CSS orbits and graphics when Three.js is active */
 .controller-loading-screen.has-3d::before,
 .controller-loading-screen.has-3d::after,
-.controller-loading-screen.has-3d .controller-orbit,
 .phone-lobby-card.has-3d::before,
 .phone-lobby-card.has-3d::after,
 .phone-lobby-card.has-3d .phone-lobby-glow {
