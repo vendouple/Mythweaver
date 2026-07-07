@@ -1096,12 +1096,63 @@ function HostView(props: {
         setError={props.setError}
       />
       <button className="cog-button" onClick={() => setAdminOpen((open) => !open)} aria-label="Party controls">⚙</button>
+      <ThreeDToggleButton className="host-corner-toggle" />
       {adminOpen && (
         <HostAdminPanel 
           {...props} 
         />
       )}
     </main>
+  );
+}
+
+const THREE_D_KEY = "dnd_threejs_disabled";
+const THREE_D_EVENT = "threejs-pref-changed";
+
+function use3DEnabled(): [boolean, (enabled: boolean) => void] {
+  const [disabled, setDisabled] = useState<boolean>(() =>
+    typeof window !== "undefined" && localStorage.getItem(THREE_D_KEY) === "true"
+  );
+  useEffect(() => {
+    const sync = () => setDisabled(localStorage.getItem(THREE_D_KEY) === "true");
+    window.addEventListener(THREE_D_EVENT, sync);
+    window.addEventListener("storage", sync);
+    return () => {
+      window.removeEventListener(THREE_D_EVENT, sync);
+      window.removeEventListener("storage", sync);
+    };
+  }, []);
+  const setEnabled = useCallback((enabled: boolean) => {
+    localStorage.setItem(THREE_D_KEY, String(!enabled));
+    window.dispatchEvent(new Event(THREE_D_EVENT));
+  }, []);
+  return [!disabled, setEnabled];
+}
+
+function ThreeDToggleButton({ className }: { className?: string }) {
+  const [enabled, setEnabled] = use3DEnabled();
+  return (
+    <button
+      type="button"
+      className={`threejs-toggle-btn ${!enabled ? "disabled" : ""} ${className || ""}`}
+      onClick={() => setEnabled(!enabled)}
+      aria-pressed={!enabled}
+    >
+      <span>{enabled ? "⚡ Disable 3D" : "🔮 Enable 3D"}</span>
+    </button>
+  );
+}
+
+function CinematicFallbackBackdrop() {
+  return (
+    <div className="cinematic-fallback-backdrop" aria-hidden="true">
+      <div className="cfb-ring" />
+      <div className="cfb-embers">
+        {Array.from({ length: 9 }).map((_, i) => (
+          <span key={i} className={`cfb-ember e${i + 1}`} />
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -2373,7 +2424,7 @@ function CinematicPortalScene({
   return <div ref={mountRef} className="threejs-portal-mount" />;
 }
 
-function CinematicLoadingOverlay({ campaign, status, mode }: { campaign: Campaign; status: string; mode: HostLoadingMode }) {
+function CinematicLoadingOverlay({ campaign, status, mode, threeDEnabled }: { campaign: Campaign; status: string; mode: HostLoadingMode; threeDEnabled: boolean }) {
   const isLobby = mode === "lobby";
   const isPlayerSync = mode === "player-sync";
   const isActive = !isLobby;
@@ -2393,14 +2444,18 @@ function CinematicLoadingOverlay({ campaign, status, mode }: { campaign: Campaig
 
   return (
     <div className={`cinematic-overlay cinematic-${mode}`}>
-      {/* Full 3D Portal Scene */}
-      <CinematicPortalScene
-        isActive={isActive}
-        mode={mode}
-        stepProgress={stepProgress}
-        phaseKey={activePhase?.key || "signal"}
-        players={portalPlayers}
-      />
+      {/* Full 3D Portal Scene, or CSS-only backdrop when 3D is off */}
+      {threeDEnabled ? (
+        <CinematicPortalScene
+          isActive={isActive}
+          mode={mode}
+          stepProgress={stepProgress}
+          phaseKey={activePhase?.key || "signal"}
+          players={portalPlayers}
+        />
+      ) : (
+        <CinematicFallbackBackdrop />
+      )}
 
       {/* Floating HUD Layer */}
       <div className="cinematic-hud">
@@ -2564,6 +2619,7 @@ function SceneStage({
     (e) => e.type === "narration" || e.type === "dialogue"
   );
 
+  const [threeDEnabled] = use3DEnabled();
   const hostLoadingMode = getHostLoadingMode(campaign);
   const showMagicalLoading =
     campaign.status === "lobby" ||
@@ -2623,14 +2679,15 @@ function SceneStage({
       </div>
 
       {showMagicalLoading && (
-        <CinematicLoadingOverlay 
-          campaign={campaign} 
-          status={campaign.dmStatus || (campaign.status === "lobby" ? "Gathering party..." : "Preparing the initial scenario...")} 
+        <CinematicLoadingOverlay
+          campaign={campaign}
+          status={campaign.dmStatus || (campaign.status === "lobby" ? "Gathering party..." : "Preparing the initial scenario...")}
           mode={hostLoadingMode}
+          threeDEnabled={threeDEnabled}
         />
       )}
 
-      {showOverlay && <DiceOverlay event={showDice ? latestDice : undefined} charging={charging} />}
+      {showOverlay && <DiceOverlay event={showDice ? latestDice : undefined} charging={charging} threeDEnabled={threeDEnabled} />}
     </section>
   );
 }
@@ -3224,7 +3281,7 @@ function ThreeJSD20Roll({ dice, phase, accentColor }: { dice?: DiceEvent; phase:
   return <div className="dice-webgl-d20" ref={mountRef} aria-hidden="true" />;
 }
 
-function DiceOverlay({ event, charging }: { event?: DisplayEvent; charging?: boolean }) {
+function DiceOverlay({ event, charging, threeDEnabled = true }: { event?: DisplayEvent; charging?: boolean; threeDEnabled?: boolean }) {
   const dice = event?.dice;
   const [displayValue, setDisplayValue] = useState<number | string>("?");
   const [phase, setPhase] = useState<"charging" | "rolling" | "settled">("rolling");
@@ -3288,7 +3345,13 @@ function DiceOverlay({ event, charging }: { event?: DisplayEvent; charging?: boo
             );
           })}
         </svg>
-        <ThreeJSD20Roll dice={dice} phase={phase} accentColor={accentColor} />
+        {threeDEnabled ? (
+          <ThreeJSD20Roll dice={dice} phase={phase} accentColor={accentColor} />
+        ) : (
+          <div className="dice-css-d20">
+            <D20Spinner showNumber={false} />
+          </div>
+        )}
         <div className="settle-shockwave" />
       </div>
       <div className="phase-label">
@@ -3430,6 +3493,7 @@ function HostAdminPanel({ campaign, setCampaign, busy, setBusy, error, setError 
 }) {
   const [imagePrompt, setImagePrompt] = useState("");
   const [guidance, setGuidance] = useState("");
+  const [hostThreeDEnabled, setHostThreeDEnabled] = use3DEnabled();
 
   async function updateSetting(name: string, value: boolean) {
     const updated = { ...campaign, [name]: value };
@@ -3522,6 +3586,14 @@ function HostAdminPanel({ campaign, setCampaign, busy, setBusy, error, setError 
           /> 
           Show quest log on controllers
         </label>
+        <label className="check-row">
+          <input
+            type="checkbox"
+            checked={hostThreeDEnabled}
+            onChange={(event) => setHostThreeDEnabled(event.target.checked)}
+          />
+          3D effects (this screen)
+        </label>
         <label>Scene image prompt<input value={imagePrompt} onChange={(event) => setImagePrompt(event.target.value)} placeholder="Optional manual image prompt" /></label>
         <button disabled={busy} onClick={makeImage}>Generate scene image</button>
         <label>Story guidance<textarea value={guidance} onChange={(event) => setGuidance(event.target.value)} placeholder="Privately steer the DM: make it darker, reveal an NPC clue, slow down combat..." /></label>
@@ -3553,31 +3625,14 @@ function ControllerView(props: {
   setError: (error: string) => void;
 }) {
   const [joinCode, setJoinCode] = useState("");
-  const [threeJsDisabled, setThreeJsDisabled] = useState<boolean>(() => {
-    if (typeof window !== "undefined") {
-      return localStorage.getItem("dnd_threejs_disabled") === "true";
-    }
-    return false;
-  });
-
-  const toggleThreeJs = (disabled: boolean) => {
-    setThreeJsDisabled(disabled);
-    if (typeof window !== "undefined") {
-      localStorage.setItem("dnd_threejs_disabled", String(disabled));
-    }
-  };
+  const [threeDEnabled] = use3DEnabled();
+  const threeJsDisabled = !threeDEnabled;
 
   const renderWithToggle = (node: React.ReactNode) => {
     return (
       <>
         {node}
-        <button
-          type="button"
-          className={`threejs-toggle-btn ${threeJsDisabled ? "disabled" : ""}`}
-          onClick={() => toggleThreeJs(!threeJsDisabled)}
-        >
-          <span>{threeJsDisabled ? "🔮 Enable 3D" : "⚡ Disable 3D"}</span>
-        </button>
+        <ThreeDToggleButton />
       </>
     );
   };
