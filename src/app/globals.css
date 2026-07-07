@@ -2999,6 +2999,43 @@ textarea { min-height: 7rem; resize: vertical; }
   width: 100%;
 }
 
+/* Persistent portal stage: one section shell shared by lobby and loading so
+   the 3D scene survives the transition; only .stage-content swaps (and fades) */
+.phone-portal-stage {
+  min-height: calc(100vh - 2rem);
+}
+
+.phone-portal-stage .stage-content {
+  position: relative;
+  z-index: 10;
+  width: 100%;
+  animation: stage-enter 0.5s ease both;
+}
+
+.phone-lobby-card .stage-content {
+  display: grid;
+  gap: 1rem;
+  align-content: center;
+}
+
+.controller-loading-screen .stage-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+/* In-game controller fades in rather than popping after the loading stage */
+.phone-controller {
+  animation: stage-enter 0.5s ease both;
+}
+
+@keyframes stage-enter {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+
 /* Make sure all controller overlay card texts sit on top of 3D canvas */
 .controller-loading-screen.has-3d h2,
 .controller-loading-screen.has-3d .loading-status,
