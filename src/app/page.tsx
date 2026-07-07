@@ -4525,125 +4525,122 @@ function PhoneController({ campaign, player, setCampaign, busy, setBusy, error, 
 
   const actions = controllerActions(campaign, player);
   const hasActions = actions.length > 0;
+  const dataState = busy ? "rolling" : hasActions ? "your-turn" : "stunned";
+  const showQuest = campaign.showQuestOnController !== false;
+  const activeTab = showQuest ? controllerTab : "sheet";
 
   return (
-    <section className="controller-card phone-controller">
-      <div style={{ display: "flex", gap: "1rem", alignItems: "center", marginBottom: "0.5rem" }}>
-        <Avatar portraitUrl={player.portraitUrl} name={player.characterName || player.name} />
-        <div>
-          <h1 style={{ margin: 0, fontSize: "1.5rem" }}>{campaign.title}</h1>
-          <p className="small" style={{ margin: 0 }}>Playing as <strong style={player.color ? { color: player.color } : { color: "var(--gold)" }}>{player.characterName || player.name}</strong></p>
+    <section className="controller-card phone-controller grimoire" data-state={dataState}>
+      {/* 1. Character banner */}
+      <header className="grimoire-banner">
+        <div className="grimoire-portrait">
+          <Avatar portraitUrl={player.portraitUrl} name={player.characterName || player.name} />
+          <span className="grimoire-portrait-ring" style={player.color ? ({ borderColor: player.color } as CSSProperties) : undefined} aria-hidden="true" />
         </div>
+        <div className="grimoire-identity">
+          <span className="grimoire-campaign">{campaign.title}</span>
+          <h1 className="grimoire-name" style={player.color ? { color: player.color } : undefined}>
+            {player.characterName || player.name}
+          </h1>
+          <span className="grimoire-status-chip">{player.status || "Ready"}</span>
+        </div>
+        <div className="grimoire-vitals"><StatsBars stats={player.stats} /></div>
+      </header>
+
+      {/* 2. State ribbon — single slot that also hosts the rolling indicator */}
+      <div className="grimoire-ribbon" role="status" aria-live="polite">
+        {busy ? (
+          <span className="grimoire-ribbon-rolling">
+            <span className="mini-d20"><D20Spinner showNumber={false} /></span>
+            <span>Rolling on TV</span>
+            <span className="pulse-dots" aria-hidden="true"><span /><span /><span /></span>
+          </span>
+        ) : hasActions ? (
+          "Your move — choose an action, then watch it unfold on the TV."
+        ) : (
+          "⚠️ No actions available (Stunned / Staggered / Skip a turn)."
+        )}
       </div>
-      
+
+      {/* 3. Action area */}
       {hasActions ? (
-        <>
-          <p className="controller-status">Choose an action here, then watch it play out on the TV.</p>
-          <div className="suggestion-list action-cards">
+        <div className="grimoire-actions">
+          <div className="suggestion-list action-cards grimoire-action-cards">
             {actions.map((suggestion) => (
-              <button 
-                key={`${suggestion.title}-${suggestion.prompt}`} 
-                disabled={busy} 
+              <button
+                className="grimoire-action-card"
+                key={`${suggestion.title}-${suggestion.prompt}`}
+                disabled={busy}
                 onClick={() => sendAction(actionPrompt(suggestion))}
               >
-                {suggestion.title}
+                <span className="action-card-glyph" aria-hidden="true">✦</span>
+                <span className="action-card-title">{suggestion.title}</span>
               </button>
             ))}
           </div>
-        </>
+          <label className="grimoire-freeform">Freeform action
+            <textarea
+              value={action}
+              disabled={busy}
+              onChange={(event) => setAction(event.target.value)}
+              placeholder="Describe what you do, say, inspect, cast, attempt, or ask."
+            />
+          </label>
+          <button className="grimoire-send" disabled={busy || !action.trim()} onClick={() => sendAction()}>
+            {busy ? "Thinking..." : "Send action"}
+          </button>
+        </div>
       ) : (
         <div className="stunned-notice">
-          <p className="controller-status warning-text">⚠️ No actions available (e.g. Stunned / Staggered / Skip a turn).</p>
           <button className="skip-turn-button" disabled={busy} onClick={() => sendAction("I skip my turn (stunned / no actions available).")}>
             {busy ? "Thinking..." : "Skip Turn"}
           </button>
         </div>
       )}
 
-      <label>Freeform action
-        <textarea 
-          value={action} 
-          disabled={!hasActions || busy} 
-          onChange={(event) => setAction(event.target.value)} 
-          placeholder={hasActions ? "Describe what you do, say, inspect, cast, attempt, or ask." : "Actions disabled."} 
-        />
-      </label>
-      {busy && (
-        <div className="controller-rolling-pulse" role="status" aria-live="polite">
-          <div className="mini-d20"><D20Spinner showNumber={false} /></div>
-          <span>Rolling on TV</span>
-          <span className="pulse-dots" aria-hidden="true">
-            <span /><span /><span />
-          </span>
-        </div>
-      )}
-      <button disabled={busy || !hasActions || !action.trim()} onClick={() => sendAction()}>
-        {busy ? "Thinking..." : "Send action"}
-      </button>
-
-      <div className="controller-tabs" style={{ display: "flex", gap: "0.5rem", marginTop: "1.5rem", borderBottom: "1px solid var(--line)", paddingBottom: "0.5rem" }}>
-        <button 
-          onClick={() => setControllerTab("sheet")} 
-          type="button"
-          style={{ 
-            flex: 1, 
-            padding: "0.5rem", 
-            borderRadius: "8px", 
-            background: controllerTab === "sheet" ? "rgba(217, 164, 65, 0.15)" : "transparent",
-            borderColor: controllerTab === "sheet" ? "var(--gold)" : "transparent",
-            color: controllerTab === "sheet" ? "var(--gold)" : "var(--muted)",
-            borderStyle: "solid",
-            borderWidth: "1px",
-            fontSize: "0.85rem",
-            textTransform: "uppercase",
-            letterSpacing: "0.05em",
-            fontWeight: "bold",
-            cursor: "pointer"
-          }}
-        >
-          📜 Sheet
-        </button>
-        {campaign.showQuestOnController !== false && (
-          <button 
-            onClick={() => setControllerTab("quest")} 
-            type="button"
-            style={{ 
-              flex: 1, 
-              padding: "0.5rem", 
-              borderRadius: "8px", 
-              background: controllerTab === "quest" ? "rgba(217, 164, 65, 0.15)" : "transparent",
-              borderColor: controllerTab === "quest" ? "var(--gold)" : "transparent",
-              color: controllerTab === "quest" ? "var(--gold)" : "var(--muted)",
-              borderStyle: "solid",
-              borderWidth: "1px",
-              fontSize: "0.85rem",
-              textTransform: "uppercase",
-              letterSpacing: "0.05em",
-              fontWeight: "bold",
-              cursor: "pointer"
-            }}
-          >
-            ⚔️ Quest Log
-          </button>
+      {/* 4. Panel — keyed remount retriggers the enter animation on tab switch */}
+      <div className="grimoire-panel" key={activeTab}>
+        {activeTab === "sheet" ? (
+          <PrivateSheet player={player} />
+        ) : (
+          <div className="private-sheet mobile-quest-log">
+            <h3 className="panel-heading">Quest Log</h3>
+            {campaign.questLog ? (
+              parseQuestLog(campaign.questLog)
+            ) : (
+              <p className="small italic" style={{ color: "var(--muted)", textAlign: "center", padding: "1.5rem 0" }}>
+                No quests logged by the DM yet.
+              </p>
+            )}
+          </div>
         )}
       </div>
 
-      {controllerTab === "sheet" || campaign.showQuestOnController === false ? (
-        <PrivateSheet player={player} />
-      ) : (
-        <div className="private-sheet mobile-quest-log" style={{ marginTop: "1rem" }}>
-          <h3>Quest Log</h3>
-          {campaign.questLog ? (
-            parseQuestLog(campaign.questLog)
-          ) : (
-            <p className="small italic" style={{ color: "var(--muted)", textAlign: "center", padding: "1.5rem 0" }}>
-              No quests logged by the DM yet.
-            </p>
-          )}
-        </div>
-      )}
+      {error && <p className="small error-text">{error}</p>}
 
-      {error && <p className="small">{error}</p>}
+      {/* 5. Bottom tab bar */}
+      <nav className="grimoire-tabbar" aria-label="Controller sections">
+        <button
+          type="button"
+          className={`grimoire-tab ${activeTab === "sheet" ? "active" : ""}`}
+          aria-pressed={activeTab === "sheet"}
+          onClick={() => setControllerTab("sheet")}
+        >
+          <span className="tab-icon" aria-hidden="true">📜</span>
+          <span className="tab-label">Sheet</span>
+        </button>
+        {showQuest && (
+          <button
+            type="button"
+            className={`grimoire-tab ${activeTab === "quest" ? "active" : ""}`}
+            aria-pressed={activeTab === "quest"}
+            onClick={() => setControllerTab("quest")}
+          >
+            <span className="tab-icon" aria-hidden="true">⚔️</span>
+            <span className="tab-label">Quest Log</span>
+          </button>
+        )}
+      </nav>
     </section>
   );
 }
@@ -4651,7 +4648,7 @@ function PhoneController({ campaign, player, setCampaign, busy, setBusy, error, 
 function PrivateSheet({ player }: { player: Player }) {
   return (
     <div className="private-sheet">
-      <h3>Your Sheet</h3>
+      <h3 className="panel-heading">Your Sheet</h3>
       <p className="small">Status: {player.status || "Ready"}</p>
       <StatsBars stats={player.stats} />
       <p className="small" style={{ marginTop: "0.5rem" }}>Inventory: {player.inventory.join(", ") || "Empty"}</p>
