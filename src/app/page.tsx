@@ -1177,6 +1177,7 @@ function SmoothBackground({ imageUrl }: { imageUrl?: string }) {
 
   return (
     <div className="scene-background-container">
+      <div className="scene-ambient-backdrop" aria-hidden="true" />
       {prevUrl && (
         <div 
           className="scene-image prev-scene-image" 
@@ -2662,6 +2663,15 @@ function SceneStage({
     ["narration", "dialogue", "playerAction", "system", "dice"].includes(event.type)
   );
 
+  // The most recent narration/dialogue gets a spotlight treatment below the
+  // history log; everything before it recedes into the scrollable history.
+  const lastChatEvent = chatEvents[chatEvents.length - 1];
+  const spotlightEvent =
+    lastChatEvent && (lastChatEvent.type === "narration" || lastChatEvent.type === "dialogue")
+      ? lastChatEvent
+      : null;
+  const historyEvents = spotlightEvent ? chatEvents.slice(0, -1) : chatEvents;
+
   useEffect(() => {
     if (chatBottomRef.current) {
       chatBottomRef.current.scrollIntoView({ behavior: "smooth" });
@@ -2703,7 +2713,10 @@ function SceneStage({
   const showOverlay = showDice || charging;
 
   return (
-    <section className="scene-stage fullscreen-stage">
+    <section
+      className={`scene-stage fullscreen-stage ${charging ? "dice-charging" : ""} ${showDice ? "dice-settled" : ""}`}
+      style={{ "--roll-accent": colorFromRollOwner(showDice ? latestDice : undefined) } as CSSProperties}
+    >
       <SmoothBackground imageUrl={campaign.currentImageUrl} />
       <div className="scene-vignette" />
       
@@ -2732,12 +2745,12 @@ function SceneStage({
           )}
           
           <div className="chat-log-container">
-            <div className="chat-log-scrollable">
-              {chatEvents.map((event) => (
-                <DialogueBox 
-                  key={event.id} 
-                  event={event} 
-                  campaign={campaign} 
+            <div className={`chat-log-scrollable ${spotlightEvent ? "has-spotlight" : ""}`}>
+              {historyEvents.map((event) => (
+                <DialogueBox
+                  key={event.id}
+                  event={event}
+                  campaign={campaign}
                   setCampaign={setCampaign}
                   busy={busy}
                   setBusy={setBusy}
@@ -2747,6 +2760,18 @@ function SceneStage({
               <div ref={chatBottomRef} />
             </div>
           </div>
+          {spotlightEvent && (
+            <div className="narration-spotlight" key={spotlightEvent.id}>
+              <DialogueBox
+                event={spotlightEvent}
+                campaign={campaign}
+                setCampaign={setCampaign}
+                busy={busy}
+                setBusy={setBusy}
+                setError={setError}
+              />
+            </div>
+          )}
         </div>
 
         <HostPartyBar campaign={campaign} />
@@ -3498,14 +3523,14 @@ function HostPartyBar({ campaign }: { campaign: Campaign }) {
       <div className="sidebar-section">
         <h3 className="sidebar-section-title">Party</h3>
         {campaign.players.map((player) => (
-          <article 
-            className="host-player-card" 
+          <article
+            className="host-player-card"
             key={player.id}
-            style={player.color ? { borderColor: `${player.color}50`, boxShadow: `0 4px 15px ${player.color}15` } : undefined}
+            style={player.color ? ({ "--pc": player.color } as CSSProperties) : undefined}
           >
             <Avatar portraitUrl={player.portraitUrl} name={player.characterName || player.name} />
             <div className="player-details">
-              <strong style={player.color ? { color: player.color } : undefined}>
+              <strong>
                 {player.characterName || player.name}
               </strong>
               <span className="small">{player.status || "Ready"}</span>
@@ -3521,14 +3546,14 @@ function HostPartyBar({ campaign }: { campaign: Campaign }) {
         <div className="sidebar-section npc-section">
           <h3 className="sidebar-section-title">NPCs & Foes</h3>
           {activeNPCs.map((npc) => (
-            <article 
-              className="host-player-card npc-card" 
+            <article
+              className="host-player-card npc-card"
               key={npc.id}
-              style={npc.color ? { borderColor: `${npc.color}50`, boxShadow: `0 4px 15px ${npc.color}15` } : undefined}
+              style={npc.color ? ({ "--pc": npc.color } as CSSProperties) : undefined}
             >
               <Avatar portraitUrl={npc.portraitUrl} name={npc.name} />
               <div className="player-details">
-                <strong style={npc.color ? { color: npc.color } : undefined}>
+                <strong>
                   {npc.name}
                 </strong>
                 <span className="small">{npc.status || "Active"}</span>
