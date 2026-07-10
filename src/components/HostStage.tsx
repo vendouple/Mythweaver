@@ -3,6 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Campaign, DisplayEvent, Player, StoryCharacter } from "@/lib/campaign/types";
 import { api, accentColor } from "@/lib/client/api";
+import { bgmDuck, bgmIsMuted, bgmResume, bgmSetMuted, subscribeBgm } from "@/lib/client/audio";
+import { playSfx, sfxSetMuted } from "@/lib/client/sfx";
+import { parseInline, plainText, renderInline, renderTokens } from "@/lib/client/markup";
 import StageAtmosphere, { AtmosphereHandle } from "@/components/three/StageAtmosphere";
 import DiceTheater, { DiceRollData } from "@/components/three/DiceTheater";
 
@@ -19,8 +22,14 @@ const MOOD_GRADES: Record<string, string> = {
 
 type Beat = DisplayEvent;
 
-function beatHold(content: string) {
-  return Math.min(2200 + content.length * 34, 11000);
+/**
+ * How long a fully-revealed beat stays on screen. Paced by *words* at a
+ * comfortable couch reading speed (~170 wpm ≈ 350ms/word) rather than a
+ * tight character cap, so long paragraphs no longer vanish mid-read.
+ */
+function beatHold(plain: string) {
+  const words = plain.split(/\s+/).filter(Boolean).length;
+  return Math.max(3200, Math.min(2400 + words * 350, 32000));
 }
 
 /**
@@ -52,10 +61,16 @@ export default function HostStage({ campaign, onExit }: { campaign: Campaign; on
   const queueRef = useRef<Beat[]>([]);
   const [currentBeat, setCurrentBeat] = useState<Beat | null>(null);
   const [shownChars, setShownChars] = useState(0);
+  const [holdMs, setHoldMs] = useState(0);
   const [activeDice, setActiveDice] = useState<DiceRollData | null>(null);
   const [tomeOpen, setTomeOpen] = useState(false);
   const advanceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [pump, setPump] = useState(0);
+
+  // Parse the beat's inline markdown once; the typewriter walks visible
+  // characters only, so *marks* never flash on screen mid-reveal.
+  const beatTokens = useMemo(() => parseInline(currentBeat?.content || ""), [currentBeat]);
+  const beatPlain = useMemo(() => plainText(beatTokens), [beatTokens]);
 
   // Ingest new display events into the playback queue (never replay history).
   useEffect(() => {
@@ -66,7 +81,7 @@ export default function HostStage({ campaign, onExit }: { campaign: Campaign; on
       );
       if (recap) {
         setCurrentBeat(recap);
-        setShownChars((recap.content || "").length);
+        setShownChars(plainText(parseInline(recap.content || "")).length);
       }
       return;
     }
@@ -93,6 +108,7 @@ export default function HostStage({ campaign, onExit }: { campaign: Campaign; on
       advanceTimer.current = null;
     }
     setCurrentBeat(null);
+    setHoldMs(0);
     setPump((n) => n + 1);
   }, []);
 
@@ -118,33 +134,35 @@ export default function HostStage({ campaign, onExit }: { campaign: Campaign; on
     }
     setCurrentBeat(next);
     setShownChars(0);
+    setHoldMs(0);
+    playSfx("beat");
   }, [pump, currentBeat, activeDice, playersById]);
 
-  // Typewriter + auto-advance.
+  // Typewriter + auto-advance (paced over visible characters only).
   useEffect(() => {
     if (!currentBeat) return;
-    const content = currentBeat.content || "";
-    if (shownChars >= content.length) {
-      advanceTimer.current = setTimeout(advance, beatHold(content));
+    if (shownChars >= beatPlain.length) {
+      const hold = beatHold(beatPlain);
+      setHoldMs(hold);
+      advanceTimer.current = setTimeout(advance, hold);
       return () => {
         if (advanceTimer.current) clearTimeout(advanceTimer.current);
       };
     }
-    const step = content.length > 420 ? 4 : 2;
-    const timer = setTimeout(() => setShownChars((n) => Math.min(n + step, content.length)), 24);
+    const step = beatPlain.length > 420 ? 4 : 2;
+    const timer = setTimeout(() => setShownChars((n) => Math.min(n + step, beatPlain.length)), 24);
     return () => clearTimeout(timer);
-  }, [currentBeat, shownChars, advance]);
+  }, [currentBeat, beatPlain, shownChars, advance]);
 
   // Space / click skips typing, then skips the hold.
   const skip = useCallback(() => {
     if (!currentBeat) return;
-    const content = currentBeat.content || "";
-    if (shownChars < content.length) {
-      setShownChars(content.length);
+    if (shownChars < beatPlain.length) {
+      setShownChars(beatPlain.length);
     } else {
       advance();
     }
-  }, [currentBeat, shownChars, advance]);
+  }, [currentBeat, beatPlain, shownChars, advance]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -188,10 +206,10 @@ export default function HostStage({ campaign, onExit }: { campaign: Campaign; on
       if (seen.has(fx.id)) continue;
       seen.add(fx.id);
       switch (fx.kind) {
-        case "shake": setShakeKey((k) => k + 1); break;
-        case "flash": setFlashKey((k) => k + 1); break;
-        case "darkness": setDarkUntil(Date.now() + 4500); break;
-        case "heartbeat": setPulseUntil(Date.now() + 5200); break;
+        case "shake": setShakeKey((k) => k + 1); playSfx("rumble", fx.strength); break;
+        case "flash": setFlashKey((k) => k + 1); playSfx("flash", fx.strength); break;
+        case "darkness": setDarkUntil(Date.now() + 4500); playSfx("darkness"); break;
+        case "heartbeat": setPulseUntil(Date.now() + 5200); playSfx("heartbeat"); break;
         default: atmosphereRef.current?.burst(fx.kind, fx.strength);
       }
     }
@@ -208,45 +226,26 @@ export default function HostStage({ campaign, onExit }: { campaign: Campaign; on
   const intensity = campaign.ambience?.intensity ?? 0.5;
 
   /* ------------------------------------------------------------------ */
-  /* Music                                                               */
+  /* Music — the shared bard (HostExperience picks the score by mood);   */
+  /* here we only duck under dice, mute, and unblock autoplay.           */
   /* ------------------------------------------------------------------ */
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const tracksRef = useRef<string[]>([]);
   const [soundBlocked, setSoundBlocked] = useState(false);
-  const [muted, setMuted] = useState(false);
+  const [muted, setMuted] = useState(() => bgmIsMuted());
+
+  useEffect(() => subscribeBgm(({ blocked }) => setSoundBlocked(blocked)), []);
 
   useEffect(() => {
-    let cancelled = false;
-    api.listMusic().then(({ tracks }) => {
-      if (cancelled || !tracks.length) return;
-      tracksRef.current = [...tracks].sort(() => Math.random() - 0.5);
-      const audio = new Audio(tracksRef.current[0]);
-      audio.volume = 0.3;
-      audioRef.current = audio;
-      let index = 0;
-      audio.addEventListener("ended", () => {
-        index = (index + 1) % tracksRef.current.length;
-        audio.src = tracksRef.current[index];
-        audio.play().catch(() => undefined);
-      });
-      audio.play().catch(() => setSoundBlocked(true));
-    }).catch(() => undefined);
-    return () => {
-      cancelled = true;
-      audioRef.current?.pause();
-      audioRef.current = null;
-    };
-  }, []);
+    bgmDuck(!!activeDice);
+  }, [activeDice]);
 
   useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    audio.volume = muted ? 0 : activeDice ? 0.1 : 0.3;
-  }, [muted, activeDice]);
+    bgmSetMuted(muted);
+    sfxSetMuted(muted);
+  }, [muted]);
 
   const enableSound = () => {
     setSoundBlocked(false);
-    audioRef.current?.play().catch(() => undefined);
+    bgmResume();
   };
 
   /* ------------------------------------------------------------------ */
@@ -308,18 +307,24 @@ export default function HostStage({ campaign, onExit }: { campaign: Campaign; on
     return line.slice(0, 2).join(" · ") || null;
   }, [campaign.showQuestOnTV, campaign.questLog]);
 
+  const playerBySpeaker = (beat: Beat): Player | undefined => {
+    if (beat.playerId) return playersById.get(beat.playerId);
+    if (!beat.speaker) return undefined;
+    const lower = beat.speaker.toLowerCase();
+    return campaign.players.find((p) => (p.characterName || p.name).toLowerCase() === lower);
+  };
+
   const speakerColor = (beat: Beat): string | undefined => {
-    if (beat.playerId) {
-      const player = playersById.get(beat.playerId);
-      if (player?.color) return accentColor(player.color);
-    }
+    const player = playerBySpeaker(beat);
+    if (player?.color) return accentColor(player.color);
     const npc = campaign.storyCharacters.find((item) => item.name === beat.speaker);
     if (npc?.color) return accentColor(npc.color);
     return undefined;
   };
 
   const speakerPortrait = (beat: Beat): string | undefined => {
-    if (beat.playerId) return playersById.get(beat.playerId)?.portraitUrl;
+    const player = playerBySpeaker(beat);
+    if (player?.portraitUrl) return player.portraitUrl;
     return campaign.storyCharacters.find((item) => item.name === beat.speaker)?.portraitUrl;
   };
 
@@ -431,9 +436,17 @@ export default function HostStage({ campaign, onExit }: { campaign: Campaign; on
               </div>
             ) : null}
             <p className={`beat-text ${currentBeat.type === "system" ? "system" : ""}`}>
-              {(currentBeat.content || "").slice(0, shownChars)}
-              {shownChars < (currentBeat.content || "").length ? <span className="beat-caret" aria-hidden>❘</span> : null}
+              {renderTokens(beatTokens, shownChars)}
+              {shownChars < beatPlain.length ? <span className="beat-caret" aria-hidden>❘</span> : null}
             </p>
+            {holdMs > 0 && shownChars >= beatPlain.length ? (
+              <span
+                key={`hold-${currentBeat.id}`}
+                className="beat-hold"
+                style={{ animationDuration: `${holdMs}ms` }}
+                aria-hidden
+              />
+            ) : null}
           </div>
         ) : campaign.dmStatus ? null : (
           <p className="chronicle-idle">{campaign.overview}</p>
@@ -482,7 +495,7 @@ export default function HostStage({ campaign, onExit }: { campaign: Campaign; on
                     ? `⚄ ${event.speaker || "Dice"} — ${event.dice.total}`
                     : event.speaker || "—"}
                 </span>
-                <span className="tome-content">{event.content}</span>
+                <span className="tome-content">{event.content ? renderInline(event.content) : null}</span>
               </div>
             ))}
           </div>

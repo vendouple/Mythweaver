@@ -20,20 +20,45 @@ type MoodRecipe = {
   count: number;
   fogOpacity: number;
   fogColor: string;
+  /** 0..1 — strength of the god-ray shafts falling from above. */
+  rays: number;
 };
 
 const MOODS: Record<AmbienceMood, MoodRecipe> = {
-  calm:    { colors: ["#e8c98a", "#c9a35c"], drift: 0.35,  wander: 0.5, size: 0.05,  opacity: 0.65, count: 240, fogOpacity: 0.10, fogColor: "#3a3222" },
-  tense:   { colors: ["#8fa8b8", "#5d7683"], drift: 0.18,  wander: 1.4, size: 0.04,  opacity: 0.5,  count: 260, fogOpacity: 0.22, fogColor: "#1d2733" },
-  battle:  { colors: ["#ffb35c", "#ff5c3c"], drift: 1.5,   wander: 2.0, size: 0.06,  opacity: 0.9,  count: 420, fogOpacity: 0.14, fogColor: "#3a1c12" },
-  mystery: { colors: ["#a98cff", "#5f6cff"], drift: 0.28,  wander: 1.8, size: 0.05,  opacity: 0.6,  count: 300, fogOpacity: 0.30, fogColor: "#221c3d" },
-  dread:   { colors: ["#6f7787", "#3d4351"], drift: -0.35, wander: 0.6, size: 0.045, opacity: 0.55, count: 300, fogOpacity: 0.38, fogColor: "#0d1017" },
-  triumph: { colors: ["#ffe08a", "#ffc23c"], drift: 1.1,   wander: 0.8, size: 0.065, opacity: 1.0,  count: 380, fogOpacity: 0.08, fogColor: "#3a2f14" },
-  wonder:  { colors: ["#8affd8", "#5cc9ff"], drift: 0.45,  wander: 1.2, size: 0.055, opacity: 0.8,  count: 320, fogOpacity: 0.16, fogColor: "#12343a" },
-  somber:  { colors: ["#aebdd6", "#7385a3"], drift: -0.22, wander: 0.4, size: 0.04,  opacity: 0.5,  count: 220, fogOpacity: 0.26, fogColor: "#151c29" }
+  calm:    { colors: ["#e8c98a", "#c9a35c"], drift: 0.35,  wander: 0.5, size: 0.05,  opacity: 0.65, count: 240, fogOpacity: 0.10, fogColor: "#3a3222", rays: 0.5 },
+  tense:   { colors: ["#8fa8b8", "#5d7683"], drift: 0.18,  wander: 1.4, size: 0.04,  opacity: 0.5,  count: 260, fogOpacity: 0.22, fogColor: "#1d2733", rays: 0.16 },
+  battle:  { colors: ["#ffb35c", "#ff5c3c"], drift: 1.5,   wander: 2.0, size: 0.06,  opacity: 0.9,  count: 420, fogOpacity: 0.14, fogColor: "#3a1c12", rays: 0.28 },
+  mystery: { colors: ["#a98cff", "#5f6cff"], drift: 0.28,  wander: 1.8, size: 0.05,  opacity: 0.6,  count: 300, fogOpacity: 0.30, fogColor: "#221c3d", rays: 0.45 },
+  dread:   { colors: ["#6f7787", "#3d4351"], drift: -0.35, wander: 0.6, size: 0.045, opacity: 0.55, count: 300, fogOpacity: 0.38, fogColor: "#0d1017", rays: 0.12 },
+  triumph: { colors: ["#ffe08a", "#ffc23c"], drift: 1.1,   wander: 0.8, size: 0.065, opacity: 1.0,  count: 380, fogOpacity: 0.08, fogColor: "#3a2f14", rays: 0.75 },
+  wonder:  { colors: ["#8affd8", "#5cc9ff"], drift: 0.45,  wander: 1.2, size: 0.055, opacity: 0.8,  count: 320, fogOpacity: 0.16, fogColor: "#12343a", rays: 0.65 },
+  somber:  { colors: ["#aebdd6", "#7385a3"], drift: -0.22, wander: 0.4, size: 0.04,  opacity: 0.5,  count: 220, fogOpacity: 0.26, fogColor: "#151c29", rays: 0.22 }
 };
 
 const MAX_PARTICLES = 900;
+
+/** Tall soft-edged shaft, bright at the top, dissolving downward. */
+function makeRayTexture() {
+  const canvas = document.createElement("canvas");
+  canvas.width = 128;
+  canvas.height = 512;
+  const ctx = canvas.getContext("2d")!;
+  const vertical = ctx.createLinearGradient(0, 0, 0, 512);
+  vertical.addColorStop(0, "rgba(255,255,255,0.7)");
+  vertical.addColorStop(0.65, "rgba(255,255,255,0.18)");
+  vertical.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = vertical;
+  ctx.fillRect(0, 0, 128, 512);
+  // Feather the sides so the shaft has no hard edges.
+  ctx.globalCompositeOperation = "destination-in";
+  const horizontal = ctx.createLinearGradient(0, 0, 128, 0);
+  horizontal.addColorStop(0, "rgba(255,255,255,0)");
+  horizontal.addColorStop(0.5, "rgba(255,255,255,1)");
+  horizontal.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = horizontal;
+  ctx.fillRect(0, 0, 128, 512);
+  return new THREE.CanvasTexture(canvas);
+}
 
 function makeFogTexture() {
   const canvas = document.createElement("canvas");
@@ -125,6 +150,25 @@ const StageAtmosphere = forwardRef<AtmosphereHandle, { mood: AmbienceMood; inten
         scene.add(sheet);
       }
 
+      // God rays — slanted shafts of mood-light falling from above.
+      const rayTexture = makeRayTexture();
+      const rays: Array<{ mesh: THREE.Mesh; seed: number }> = [];
+      for (let i = 0; i < 3; i += 1) {
+        const material = new THREE.MeshBasicMaterial({
+          map: rayTexture,
+          transparent: true,
+          opacity: 0,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+          side: THREE.DoubleSide
+        });
+        const mesh = new THREE.Mesh(new THREE.PlaneGeometry(2.4 + i * 0.9, 20), material);
+        mesh.position.set(-6 + i * 5.5, 4.5, -4 - i * 0.8);
+        mesh.rotation.z = -0.3 - i * 0.07;
+        rays.push({ mesh, seed: Math.random() * Math.PI * 2 });
+        scene.add(mesh);
+      }
+
       const colorA = new THREE.Color();
       const colorB = new THREE.Color();
       const mixed = new THREE.Color();
@@ -144,6 +188,9 @@ const StageAtmosphere = forwardRef<AtmosphereHandle, { mood: AmbienceMood; inten
         fogColor.set(recipe.fogColor);
         for (const sheet of fogSheets) {
           (sheet.material as THREE.MeshBasicMaterial).color.copy(fogColor);
+        }
+        for (const ray of rays) {
+          (ray.mesh.material as THREE.MeshBasicMaterial).color.copy(colorA);
         }
       };
       let lastMood: AmbienceMood | null = null;
@@ -217,6 +264,12 @@ const StageAtmosphere = forwardRef<AtmosphereHandle, { mood: AmbienceMood; inten
         material.size = recipe.size * (isRain ? 1.6 : 1) + surge * 0.02;
         material.opacity = recipe.opacity * (0.5 + level * 0.5) + surge * 0.25;
 
+        rays.forEach((ray, index) => {
+          const material = ray.mesh.material as THREE.MeshBasicMaterial;
+          material.opacity = recipe.rays * level * (0.16 + 0.1 * Math.sin(t * 0.22 + ray.seed));
+          ray.mesh.rotation.z = -0.3 - index * 0.07 + Math.sin(t * 0.08 + ray.seed) * 0.03;
+        });
+
         const fogBoost = surgeKind === "fog" ? surge * 0.5 : 0;
         fogSheets.forEach((sheet, index) => {
           sheet.position.x += dt * (0.25 + index * 0.12) * (index % 2 === 0 ? 1 : -1);
@@ -240,6 +293,11 @@ const StageAtmosphere = forwardRef<AtmosphereHandle, { mood: AmbienceMood; inten
         for (const sheet of fogSheets) {
           sheet.geometry.dispose();
           (sheet.material as THREE.Material).dispose();
+        }
+        rayTexture.dispose();
+        for (const ray of rays) {
+          ray.mesh.geometry.dispose();
+          (ray.mesh.material as THREE.Material).dispose();
         }
         if (renderer.domElement.parentElement === mount) mount.removeChild(renderer.domElement);
       };
