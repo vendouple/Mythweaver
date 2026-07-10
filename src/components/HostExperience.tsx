@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo } from "react";
 import { useCampaignPoll } from "@/lib/client/api";
-import { bgmSetContext, bgmStop } from "@/lib/client/audio";
+import { bgmSetContext, bgmSetTheme, bgmStop } from "@/lib/client/audio";
 import HostLobby from "@/components/HostLobby";
 import HostStage from "@/components/HostStage";
 import Weaving from "@/components/Weaving";
@@ -24,6 +24,12 @@ export default function HostExperience({ campaignId, onExit }: { campaignId: str
   // mood-matched stage score, crossfading at each transition.
   const mood = campaign?.ambience?.mood;
   const status = campaign?.status;
+  const campaignType = campaign?.campaignType;
+  useEffect(() => {
+    // D&D tables prefer fantasy-flavored shelves (BGM/<mood>/fantasy/) when
+    // they exist; other tabletop campaigns play the plain mood shelves.
+    bgmSetTheme(campaignType === "dnd" ? "fantasy" : null);
+  }, [campaignType]);
   useEffect(() => {
     if (!status) return;
     if (status === "lobby") bgmSetContext("lobby");

@@ -25,6 +25,41 @@
   --shadow: 0 24px 70px rgba(0, 0, 0, 0.55);
 }
 
+/* --------------------------------------------------------------------------
+   Table accent themes — swapped in-game via the theme picker (data-accent
+   on <html>, see src/lib/client/theme.ts).
+   -------------------------------------------------------------------------- */
+:root[data-accent="ember"] {
+  --gold: #e08b45;
+  --gold-bright: #ffb066;
+  --hairline: rgba(224, 139, 69, 0.28);
+  --hairline-strong: rgba(224, 139, 69, 0.55);
+}
+:root[data-accent="arcane"] {
+  --gold: #8d7fff;
+  --gold-bright: #b3a8ff;
+  --hairline: rgba(141, 127, 255, 0.28);
+  --hairline-strong: rgba(141, 127, 255, 0.55);
+}
+:root[data-accent="verdant"] {
+  --gold: #7fbf7a;
+  --gold-bright: #a4dd9f;
+  --hairline: rgba(127, 191, 122, 0.28);
+  --hairline-strong: rgba(127, 191, 122, 0.55);
+}
+:root[data-accent="crimson"] {
+  --gold: #d96459;
+  --gold-bright: #f28b80;
+  --hairline: rgba(217, 100, 89, 0.28);
+  --hairline-strong: rgba(217, 100, 89, 0.55);
+}
+:root[data-accent="azure"] {
+  --gold: #5fa8c9;
+  --gold-bright: #8bcbe8;
+  --hairline: rgba(95, 168, 201, 0.28);
+  --hairline-strong: rgba(95, 168, 201, 0.55);
+}
+
 * { box-sizing: border-box; }
 
 html, body {
@@ -780,13 +815,19 @@ button:disabled { cursor: default; opacity: 0.45; }
 /* --------------------------------------------------------------------------
    The Weaving — loading interlude
    -------------------------------------------------------------------------- */
-.weaving { display: grid; place-items: center; }
+/* The loom world is the hero — chrome sits low so the 3D scene breathes. */
+.weaving { display: grid; place-items: end center; }
+.weaving-veil {
+  background:
+    radial-gradient(ellipse at 50% 42%, transparent 42%, rgba(5, 7, 13, 0.6) 100%),
+    linear-gradient(180deg, rgba(5, 7, 13, 0.35), transparent 30%, transparent 55%, rgba(5, 7, 13, 0.78));
+}
 .weaving-center {
   position: relative;
   z-index: 3;
   text-align: center;
-  padding: 2rem;
-  max-width: 46rem;
+  padding: 2rem 2rem 3.4rem;
+  max-width: 52rem;
   animation: rise-in 1s ease both;
 }
 .weaving-kicker { font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.34em; color: var(--gold); }
@@ -795,8 +836,9 @@ button:disabled { cursor: default; opacity: 0.45; }
   font-size: clamp(1.8rem, 4.5vw, 3rem);
   font-weight: 700;
   letter-spacing: 0.08em;
-  margin: 0.7rem 0 2.2rem;
+  margin: 0.7rem 0 1.6rem;
   color: var(--parchment);
+  text-shadow: 0 4px 30px rgba(0, 0, 0, 0.85);
 }
 .weaving-constellation {
   display: flex;
@@ -963,6 +1005,11 @@ button:disabled { cursor: default; opacity: 0.45; }
   font-size: 0.98rem;
   text-shadow: 0 2px 10px rgba(0, 0, 0, 0.9);
   max-width: 46rem;
+  /* Never spill over the hero rail below the mast. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 .stage-ambience-note {
   font-family: var(--font-serif), serif;
@@ -1101,6 +1148,7 @@ button:disabled { cursor: default; opacity: 0.45; }
 .beat-text {
   margin: 0;
   font-family: var(--font-serif), serif;
+  font-weight: 500; /* Cormorant's 400 is too hairline for couch distance. */
   font-size: clamp(1.15rem, 2.1vw, 1.5rem);
   line-height: 1.65;
   color: var(--parchment);
@@ -1110,6 +1158,15 @@ button:disabled { cursor: default; opacity: 0.45; }
 }
 .beat-narrator .beat-text { font-style: italic; text-align: center; color: #f0e6cd; }
 .beat-voiced .beat-text { text-align: left; }
+/* Spoken lines and player actions read like film subtitles: clean sans. */
+.beat-dialogue .beat-text,
+.beat-playerAction .beat-text {
+  font-family: var(--font-ui), system-ui, sans-serif;
+  font-weight: 500;
+  font-size: clamp(1.05rem, 1.85vw, 1.32rem);
+  line-height: 1.6;
+  letter-spacing: 0.005em;
+}
 
 /* Inline delivery marks from the Weaver (*italic* / **bold**). */
 .beat-text strong {
@@ -1384,6 +1441,19 @@ button:disabled { cursor: default; opacity: 0.45; }
   text-transform: uppercase;
 }
 .dice-dual-detail { color: var(--mist); font-size: 0.95rem; letter-spacing: 0.06em; }
+.dice-verdict {
+  font-size: 0.86rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  padding: 0.24rem 0.8rem;
+  border-radius: 999px;
+  border: 1px solid;
+}
+.dice-verdict.verdict-success,
+.dice-verdict.verdict-critical-success { color: #9ee493; border-color: rgba(158, 228, 147, 0.5); }
+.dice-verdict.verdict-failure,
+.dice-verdict.verdict-critical-failure { color: #ff9a8c; border-color: rgba(255, 154, 140, 0.5); }
 .dice-notation { color: var(--faint); font-size: 0.76rem; letter-spacing: 0.24em; text-transform: uppercase; }
 
 .dice-theater.compact { background: rgba(3, 4, 8, 0.88); }
@@ -1518,13 +1588,15 @@ button:disabled { cursor: default; opacity: 0.45; }
 }
 .story-text {
   margin: 0;
-  font-family: var(--font-serif), serif;
-  font-size: 1.02rem;
-  line-height: 1.55;
+  /* Phones read at arm's length — the UI sans is far clearer than thin serif. */
+  font-family: var(--font-ui), system-ui, sans-serif;
+  font-size: 0.98rem;
+  font-weight: 450;
+  line-height: 1.6;
   color: var(--parchment);
 }
 .story-text.muted { color: var(--mist); font-style: italic; }
-.story-text strong { color: var(--gold-bright); font-weight: 600; }
+.story-text strong { color: var(--gold-bright); font-weight: 650; }
 
 .controller-body {
   flex: 1;
@@ -1619,10 +1691,94 @@ button:disabled { cursor: default; opacity: 0.45; }
   margin: 0.2rem 0 0.4rem;
 }
 .sheet-prose.small { font-size: 0.9rem; color: var(--mist); }
-.stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem 1rem; }
-.stat-cell { display: flex; flex-direction: column; gap: 0.25rem; }
-.stat-name { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.12em; color: var(--mist); }
-.stat-cell .rail-hp { width: 100%; }
+
+/* Collapsible lore folds keep the sheet scannable. */
+.sheet-fold { border-bottom: 1px solid rgba(232, 220, 192, 0.1); padding: 0.15rem 0 0.5rem; }
+.sheet-fold summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0 0.3rem;
+}
+.sheet-fold summary::-webkit-details-marker { display: none; }
+.sheet-fold summary::after { content: "▾"; color: var(--faint); font-size: 0.7rem; transition: transform 0.2s; }
+.sheet-fold[open] summary::after { transform: rotate(180deg); }
+
+/* Trait meters: label row above a clean track — no text crammed inside. */
+.stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.7rem 1.2rem; margin-bottom: 0.5rem; }
+.stat-cell { display: flex; flex-direction: column; gap: 0.3rem; }
+.stat-head { display: flex; justify-content: space-between; align-items: baseline; gap: 0.5rem; }
+.stat-name {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--mist);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.stat-value { font-size: 0.74rem; font-weight: 700; letter-spacing: 0.06em; color: var(--parchment); font-variant-numeric: tabular-nums; }
+.stat-bar {
+  display: block;
+  height: 0.45rem;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(232, 220, 192, 0.14);
+  overflow: hidden;
+}
+.stat-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.9s cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+
+/* Ability & inventory cards: bold name, quiet description, tap to use. */
+.kit-stack { display: flex; flex-direction: column; gap: 0.45rem; margin-bottom: 0.55rem; }
+.kit-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: rgba(201, 163, 92, 0.06);
+  color: var(--parchment);
+  padding: 0.6rem 0.75rem;
+  transition: border-color 0.15s, background 0.15s;
+}
+.kit-card:active:not(:disabled) { background: rgba(201, 163, 92, 0.16); }
+.kit-card.ability { border-color: rgba(123, 108, 255, 0.35); background: rgba(123, 108, 255, 0.07); }
+.kit-card.ability:active:not(:disabled) { background: rgba(123, 108, 255, 0.16); }
+.kit-head { display: flex; align-items: baseline; gap: 0.5rem; }
+.kit-glyph { color: var(--gold-bright); flex-shrink: 0; font-size: 0.85rem; }
+.kit-card.ability .kit-glyph { color: #cfc6ff; }
+.kit-name { font-weight: 700; font-size: 0.92rem; letter-spacing: 0.01em; }
+.kit-use {
+  margin-left: auto;
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--faint);
+  white-space: nowrap;
+}
+.kit-detail { font-size: 0.8rem; line-height: 1.45; color: var(--mist); }
+
+/* Accent theme swatches. */
+.accent-row { display: flex; gap: 0.55rem; margin: 0.3rem 0 0.8rem; }
+.accent-swatch {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 2px solid rgba(232, 220, 192, 0.25);
+  cursor: pointer;
+  transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+}
+.accent-swatch:hover { transform: scale(1.12); }
+.accent-swatch.current { border-color: #fff; box-shadow: 0 0 14px rgba(255, 255, 255, 0.35); }
 
 .party-panel { display: flex; flex-direction: column; gap: 0.6rem; }
 .party-row {
@@ -1643,18 +1799,37 @@ button:disabled { cursor: default; opacity: 0.45; }
 
 .quest-panel { flex: 1; }
 .quest-text {
-  font-family: var(--font-serif), serif;
-  font-size: 1rem;
-  line-height: 1.65;
+  font-size: 0.95rem;
+  line-height: 1.6;
   color: var(--parchment);
-  white-space: pre-wrap;
   word-break: break-word;
   margin: 0;
-  padding: 1rem 1.1rem;
+  padding: 1rem 1.15rem;
   border: 1px solid var(--hairline);
   border-radius: 12px;
   background: rgba(9, 13, 24, 0.5);
 }
+/* Rendered quest-log markdown. */
+.quest-text .md-h1 {
+  font-family: var(--font-display), serif;
+  font-size: 1.02rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--gold-bright);
+  margin: 0.9rem 0 0.4rem;
+}
+.quest-text .md-h1:first-child { margin-top: 0; }
+.quest-text .md-h2 {
+  font-size: 0.82rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--gold);
+  margin: 0.8rem 0 0.3rem;
+}
+.quest-text .md-p { margin: 0.35rem 0; }
+.quest-text .md-list { margin: 0.3rem 0 0.6rem; padding-left: 1.2rem; display: flex; flex-direction: column; gap: 0.3rem; }
+.quest-text .md-list li::marker { color: var(--gold); }
+.quest-text strong { color: var(--gold-bright); font-weight: 650; }
 
 .controller-tabs {
   display: flex;

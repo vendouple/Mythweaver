@@ -11,6 +11,8 @@ export type DiceRollData = {
   modifier: number;
   total: number;
   d20Mode?: "normal" | "advantage" | "disadvantage";
+  dc?: number;
+  outcome?: "critical-success" | "success" | "failure" | "critical-failure";
   speaker?: string;
   color?: string;
 };
@@ -525,6 +527,11 @@ export default function DiceTheater({
             </span>
           ) : roll.rolls.length > 1 ? (
             <span className="dice-dual-detail">{roll.rolls.join(" + ")} = {roll.total}</span>
+          ) : null}
+          {roll.dc && roll.outcome ? (
+            <span className={`dice-verdict verdict-${roll.outcome}`}>
+              vs DC {roll.dc} — {roll.outcome === "critical-success" ? "Triumph" : roll.outcome === "critical-failure" ? "Catastrophe" : roll.outcome === "success" ? "Success" : "Failure"}
+            </span>
           ) : null}
           <span className="dice-notation">{roll.notation}</span>
         </div>

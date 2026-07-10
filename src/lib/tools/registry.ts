@@ -11,12 +11,13 @@ export const toolDefinitions: AquaToolDefinition[] = [
     type: "function",
     function: {
       name: "roll_dice",
-      description: "Roll dice. For ability checks/attacks/saves, prefer omitting notation and passing d20Mode. If the player's class feature, ability, item, spell or environmental edge clearly helps, use d20Mode='advantage' (NEVER add a flat +2 - advantage replaces such bonuses). If the situation hinders, use 'disadvantage'. Otherwise 'normal'. Only use modifiers in notation (e.g. 2d6+3) for real damage math or explicit sheet modifiers, never as a stand-in for advantage.",
+      description: "Roll dice on the server (true random — you never pick or predict the number; only this tool's result counts). For checks, omit notation and pass dc + d20Mode. Difficulty lives in the DC, shifted by ability fit: a character whose special ability directly covers the task gets an easier DC (-2 to -3, they 'do it well'); a specialist task attempted WITHOUT any fitting ability/tool gets a harder DC (+2 to +5). d20Mode is almost always 'normal'. 'advantage' is RARE — reserve it for overwhelming situational dominance (target stunned/restrained/helpless, attacking a completely unaware enemy point-blank, a flawlessly prepared setup). 'disadvantage' mirrors that for severe impairment (blinded, injured, acting in chaos). Never use flat +N modifiers as a stand-in for ability fit; modifiers in notation (2d6+3) are for real damage math only.",
       parameters: {
         type: "object",
         properties: {
-          notation: { type: "string", description: "Optional dice notation like 1d20, 2d6+3, or 4d8-1. Leave empty for a d20 ability check and use d20Mode instead." },
-          d20Mode: { type: "string", enum: ["normal", "advantage", "disadvantage"], description: "advantage = ability/item/feature helps (roll 2d20, keep higher). disadvantage = hindered (keep lower). normal = neither." },
+          notation: { type: "string", description: "Optional dice notation like 1d20, 2d6+3, or 4d8-1. Leave empty for a d20 check and use d20Mode + dc instead." },
+          d20Mode: { type: "string", enum: ["normal", "advantage", "disadvantage"], description: "Default 'normal'. 'advantage'/'disadvantage' only for rare overwhelming situational edges/impairments — never merely because an ability applies." },
+          dc: { type: "number", description: "Difficulty class for d20 checks: Easy 10, Medium 15, Hard 20, Very Hard 25 — after shifting for ability fit. The tool reports success/failure against it." },
           reason: { type: "string", description: "Short TV-visible reason, e.g. 'Persuasion check', 'Stealth', 'Sword strike'." },
           playerId: { type: "string", description: "Optional player id this roll is for, so the TV can show whose dice are tumbling." },
           playerName: { type: "string", description: "Optional character name for the roll, displayed on the TV." }
@@ -73,6 +74,7 @@ export const toolDefinitions: AquaToolDefinition[] = [
           currentImageUrl: { type: "string", description: "Set the current TV background scene by specifying its URL. Use this to cycle back to a previously generated background URL from the context instead of calling generate_image." },
           displayEvents: {
             type: "array",
+            description: "AVOID for story: narration and dialogue belong ONLY in your final JSON story[] — anything sent here AND in story[] plays twice on the TV. Use only for rare mid-turn system notices.",
             items: {
               type: "object",
               required: ["type", "content"],
@@ -80,7 +82,7 @@ export const toolDefinitions: AquaToolDefinition[] = [
                 type: { type: "string", enum: ["narration", "dialogue", "playerAction", "scene", "system"] },
                 speaker: { type: "string", description: "Narrator, NPC name, or player character name." },
                 playerId: { type: "string" },
-                content: { type: "string", description: "TV-visible narration/dialogue/result. Never include Suggested Actions lists." }
+                content: { type: "string", description: "TV-visible content. Never include Suggested Actions lists or dice results (the TV already animates rolls)." }
               }
             }
           },
@@ -217,17 +219,18 @@ export const toolDefinitions: AquaToolDefinition[] = [
     type: "function",
     function: {
       name: "generate_image",
-      description: "Generate a cinematic scene background or a player portrait. Store scene images on the TV, or assign portraits to players.",
+      description: "Generate a cinematic scene background, a player portrait, or an NPC portrait. Scene images become the TV backdrop; portraits attach to the player (playerId) or NPC (npcName) they belong to.",
       parameters: {
         type: "object",
         required: ["prompt"],
         properties: {
-          prompt: { 
-            type: "string", 
+          prompt: {
+            type: "string",
             description: "The detailed prompt for the image generator. IMPORTANT: The image generator is a text-to-image model and has NO knowledge of character names, specific campaigns, or in-game lore. Do NOT just pass a character's name like 'Agent Bravo' or 'Steve'. Instead, you MUST write a highly descriptive prompt describing their physical appearance, face features, gender, age, clothing, posture, and environmental style in detail (e.g. 'A close-up portrait of a rugged 35-year-old male secret agent, short dark hair, wearing a black trench coat, dark dramatic alleyway background, cinematic lighting, 8k resolution')."
           },
           kind: { type: "string", enum: ["scene", "portrait"] },
-          playerId: { type: "string", description: "Required when kind is portrait." }
+          playerId: { type: "string", description: "For a PLAYER portrait: the player's id." },
+          npcName: { type: "string", description: "For an NPC/monster portrait: the NPC's exact name. The portrait is attached to that NPC automatically (the NPC is created if it doesn't exist yet)." }
         }
       }
     }
@@ -244,6 +247,19 @@ export async function runTool(campaignId: string, name: string, rawArgs: string)
     const campaign = await getCampaign(campaignId);
     const reason = String(args.reason || "Dice roll");
     const playerId = typeof args.playerId === "string" ? args.playerId : undefined;
+
+    // Judge the check server-side so the narrator can't fudge the outcome.
+    const dcRaw = Number(args.dc);
+    const dc = Number.isFinite(dcRaw) && dcRaw > 0 ? Math.round(dcRaw) : undefined;
+    const isD20Check = roll.notation.toLowerCase().startsWith("1d20") || !!mode;
+    const natural = isD20Check ? roll.total - roll.modifier : undefined;
+    let outcome: "critical-success" | "success" | "failure" | "critical-failure" | undefined;
+    if (isD20Check) {
+      if (natural === 20) outcome = "critical-success";
+      else if (natural === 1) outcome = "critical-failure";
+      else if (dc !== undefined) outcome = roll.total >= dc ? "success" : "failure";
+    }
+
     const rawSpeaker = typeof args.playerName === "string" && args.playerName.trim()
       ? args.playerName.trim()
       : undefined;
@@ -257,10 +273,10 @@ export async function runTool(campaignId: string, name: string, rawArgs: string)
       speaker: speaker || "Dice",
       playerId,
       content: reason,
-      dice: { ...roll, reason, d20Mode: mode }
+      dice: { ...roll, reason, d20Mode: mode, dc, outcome }
     });
     await saveCampaign(campaign);
-    return { ...roll, reason };
+    return { ...roll, reason, dc, outcome };
   }
 
   if (name === "get_date") return getCurrentDate();
@@ -388,25 +404,59 @@ export async function runTool(campaignId: string, name: string, rawArgs: string)
     const image = await generateImage(String(args.prompt));
     const campaign = await getCampaign(campaignId);
     if (args.kind === "portrait") {
-      const player = campaign.players.find((item) => item.id === String(args.playerId || ""));
-      if (!player) throw new Error("playerId is required for portrait images");
-      
-      const localUrl = await downloadAndSaveImage(campaignId, image.url, "players", player.id);
-      player.portraitUrl = localUrl;
-      player.portraitPrompt = image.prompt;
-      
-      if (!campaign.portraits) campaign.portraits = [];
-      const portraitEntry = {
-        id: createId("portrait"),
-        url: localUrl,
-        prompt: image.prompt,
-        characterName: player.characterName || player.name,
-        createdAt: new Date().toISOString()
-      };
-      campaign.portraits.push(portraitEntry);
-      
-      await saveCampaign(campaign);
-      return { playerId: player.id, url: localUrl, prompt: image.prompt };
+      const playerIdArg = String(args.playerId || "");
+      const player = campaign.players.find((item) => item.id === playerIdArg) ||
+                     campaign.players.find((item) => (item.characterName || item.name).toLowerCase() === playerIdArg.toLowerCase());
+      const npcName = typeof args.npcName === "string" ? args.npcName.trim() : "";
+
+      if (player) {
+        const localUrl = await downloadAndSaveImage(campaignId, image.url, "players", player.id);
+        player.portraitUrl = localUrl;
+        player.portraitPrompt = image.prompt;
+
+        if (!campaign.portraits) campaign.portraits = [];
+        campaign.portraits.push({
+          id: createId("portrait"),
+          url: localUrl,
+          prompt: image.prompt,
+          characterName: player.characterName || player.name,
+          createdAt: new Date().toISOString()
+        });
+
+        await saveCampaign(campaign);
+        return { playerId: player.id, url: localUrl, prompt: image.prompt };
+      }
+
+      if (npcName) {
+        let npc = campaign.storyCharacters.find((c) => c.name.toLowerCase() === npcName.toLowerCase());
+        if (!npc) {
+          npc = {
+            id: createId("character"),
+            name: npcName,
+            description: "",
+            inventory: [],
+            abilities: [],
+            stats: []
+          };
+          campaign.storyCharacters.push(npc);
+        }
+        const localUrl = await downloadAndSaveImage(campaignId, image.url, "npcs", npc.id);
+        npc.portraitUrl = localUrl;
+
+        if (!campaign.portraits) campaign.portraits = [];
+        campaign.portraits.push({
+          id: createId("portrait"),
+          url: localUrl,
+          prompt: image.prompt,
+          characterName: npc.name,
+          createdAt: new Date().toISOString()
+        });
+
+        await saveCampaign(campaign);
+        return { npcId: npc.id, npcName: npc.name, url: localUrl, prompt: image.prompt };
+      }
+
+      throw new Error("Portraits need a target: pass playerId for a player, or npcName for an NPC/monster.");
     }
     
     const localUrl = await downloadAndSaveImage(campaignId, image.url, "backgrounds");

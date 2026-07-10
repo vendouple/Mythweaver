@@ -6,6 +6,7 @@ import { api, accentColor } from "@/lib/client/api";
 import { bgmDuck, bgmIsMuted, bgmResume, bgmSetMuted, subscribeBgm } from "@/lib/client/audio";
 import { playSfx, sfxSetMuted } from "@/lib/client/sfx";
 import { parseInline, plainText, renderInline, renderTokens } from "@/lib/client/markup";
+import { ACCENT_THEMES, applyAccent, currentAccent, initAccent } from "@/lib/client/theme";
 import StageAtmosphere, { AtmosphereHandle } from "@/components/three/StageAtmosphere";
 import DiceTheater, { DiceRollData } from "@/components/three/DiceTheater";
 
@@ -127,6 +128,8 @@ export default function HostStage({ campaign, onExit }: { campaign: Campaign; on
         modifier: next.dice.modifier,
         total: next.dice.total,
         d20Mode: next.dice.d20Mode,
+        dc: next.dice.dc,
+        outcome: next.dice.outcome,
         speaker: next.speaker !== "Dice" ? next.speaker : undefined,
         color: roller ? accentColor(roller.color) : undefined
       });
@@ -252,6 +255,10 @@ export default function HostStage({ campaign, onExit }: { campaign: Campaign; on
   /* Director drawer                                                     */
   /* ------------------------------------------------------------------ */
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [accent, setAccent] = useState("gold");
+  useEffect(() => {
+    setAccent(initAccent() || currentAccent());
+  }, []);
   const [sway, setSway] = useState("");
   const [swayBusy, setSwayBusy] = useState(false);
   const [paintPrompt, setPaintPrompt] = useState("");
@@ -302,7 +309,13 @@ export default function HostStage({ campaign, onExit }: { campaign: Campaign; on
     if (!campaign.showQuestOnTV || !campaign.questLog) return null;
     const line = campaign.questLog
       .split(/\r?\n/)
-      .map((entry) => entry.replace(/^#+\s*/, "").replace(/^[-*]\s*/, "").trim())
+      .map((entry) =>
+        entry
+          .replace(/^#+\s*/, "")
+          .replace(/^[-*]\s*/, "")
+          .replace(/\*\*|\*|__|`/g, "")
+          .trim()
+      )
       .filter(Boolean);
     return line.slice(0, 2).join(" · ") || null;
   }, [campaign.showQuestOnTV, campaign.questLog]);
@@ -552,6 +565,20 @@ export default function HostStage({ campaign, onExit }: { campaign: Campaign; on
               </div>
             </>
           ) : null}
+
+          <label className="director-label">Table colors</label>
+          <div className="accent-row">
+            {ACCENT_THEMES.map((themeOption) => (
+              <button
+                key={themeOption.key}
+                className={`accent-swatch ${accent === themeOption.key ? "current" : ""}`}
+                style={{ background: themeOption.swatch }}
+                title={themeOption.label}
+                aria-label={themeOption.label}
+                onClick={() => { applyAccent(themeOption.key); setAccent(themeOption.key); }}
+              />
+            ))}
+          </div>
 
           <label className="director-label">Table settings</label>
           <div className="director-toggles">

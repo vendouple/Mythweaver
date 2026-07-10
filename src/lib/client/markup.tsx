@@ -69,3 +69,81 @@ export function renderTokens(tokens: InlineToken[], limit = Infinity): ReactNode
 export function renderInline(source: string): ReactNode[] {
   return renderTokens(parseInline(source));
 }
+
+/**
+ * Small block-level markdown renderer for DM-authored documents (the quest
+ * log). Supports headings, bullet lists, ordered lists, and paragraphs —
+ * inline bold and italic marks flow through the engine above. Anything
+ * fancier degrades gracefully to a paragraph.
+ */
+export function renderMarkdown(source: string): ReactNode[] {
+  const lines = source.replace(/\r\n/g, "\n").split("\n");
+  const nodes: ReactNode[] = [];
+  let key = 0;
+  let paragraph: string[] = [];
+  let list: { ordered: boolean; items: string[] } | null = null;
+
+  const flushParagraph = () => {
+    if (!paragraph.length) return;
+    nodes.push(<p key={key++} className="md-p">{renderInline(paragraph.join(" "))}</p>);
+    paragraph = [];
+  };
+  const flushList = () => {
+    if (!list) return;
+    const items = list.items.map((item, index) => <li key={index}>{renderInline(item)}</li>);
+    nodes.push(list.ordered ? <ol key={key++} className="md-list">{items}</ol> : <ul key={key++} className="md-list">{items}</ul>);
+    list = null;
+  };
+
+  for (const raw of lines) {
+    const line = raw.trimEnd();
+    if (!line.trim()) {
+      flushParagraph();
+      flushList();
+      continue;
+    }
+    const heading = line.match(/^(#{1,6})\s+(.*)$/);
+    if (heading) {
+      flushParagraph();
+      flushList();
+      const level = heading[1].length;
+      const content = renderInline(heading[2]);
+      nodes.push(
+        level <= 2
+          ? <h3 key={key++} className="md-h1">{content}</h3>
+          : <h4 key={key++} className="md-h2">{content}</h4>
+      );
+      continue;
+    }
+    const bullet = line.match(/^\s*[-*]\s+(.*)$/);
+    if (bullet) {
+      flushParagraph();
+      if (!list || list.ordered) {
+        flushList();
+        list = { ordered: false, items: [] };
+      }
+      list.items.push(bullet[1]);
+      continue;
+    }
+    const ordered = line.match(/^\s*\d+[.)]\s+(.*)$/);
+    if (ordered) {
+      flushParagraph();
+      if (!list || !list.ordered) {
+        flushList();
+        list = { ordered: true, items: [] };
+      }
+      list.items.push(ordered[1]);
+      continue;
+    }
+    // Indented continuation of a list item stays with the list.
+    if (list && /^\s{2,}/.test(raw)) {
+      list.items[list.items.length - 1] += ` ${line.trim()}`;
+      continue;
+    }
+    flushList();
+    paragraph.push(line.trim());
+  }
+  flushParagraph();
+  flushList();
+  return nodes;
+}
