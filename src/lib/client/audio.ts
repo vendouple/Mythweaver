@@ -34,6 +34,13 @@ const CONTEXT_FALLBACKS: Record<string, string[]> = {
 const BASE_VOLUME = 0.32;
 const DUCK_VOLUME = 0.08;
 const FADE_MS = 2600;
+/**
+ * Generated tracks do not loop natively, so the bard starts blending the next
+ * track this many seconds before the current one runs out. With a shelf of
+ * one track this crossfades the song into itself — not sample-perfect, but
+ * the score never falls silent.
+ */
+const LOOP_CROSSFADE_S = 4.5;
 
 type BgmState = {
   blocked: boolean;
@@ -55,6 +62,46 @@ let ducked = false;
 let playlist: string[] = [];
 let playlistIndex = 0;
 let contextKeyPlaying = "";
+/** Optional score flavor (e.g. "fantasy") — prefers `<mood>-<theme>` shelves. */
+let theme: string | null = null;
+/** True once the live deck has begun its end-of-track crossfade. */
+let loopBlendArmed = false;
+
+/* -- WebAudio tap: lets visual scenes (the Weaving loom) pulse with the score. */
+let audioCtx: AudioContext | null = null;
+let analyser: AnalyserNode | null = null;
+const deckSources = new WeakMap<HTMLAudioElement, MediaElementAudioSourceNode>();
+
+/**
+ * Lazily wire both decks through a shared AnalyserNode. Returns null until
+ * the decks exist (i.e. before any music has been requested). Safe to call
+ * every frame — the graph is built once.
+ */
+export function bgmGetAnalyser(): AnalyserNode | null {
+  if (typeof window === "undefined") return null;
+  ensureDecks();
+  try {
+    if (!audioCtx) {
+      const Ctor = window.AudioContext || (window as any).webkitAudioContext;
+      if (!Ctor) return null;
+      audioCtx = new Ctor();
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 256;
+      analyser.smoothingTimeConstant = 0.82;
+      analyser.connect(audioCtx.destination);
+    }
+    for (const deck of [deckA, deckB]) {
+      if (!deck || deckSources.has(deck)) continue;
+      const source = audioCtx.createMediaElementSource(deck);
+      source.connect(analyser!);
+      deckSources.set(deck, source);
+    }
+    if (audioCtx.state === "suspended") audioCtx.resume().catch(() => undefined);
+    return analyser;
+  } catch {
+    return analyser;
+  }
+}
 
 function notify() {
   for (const listener of listeners) listener({ ...state });
@@ -102,14 +149,38 @@ function shuffled<T>(items: T[]): T[] {
   return copy;
 }
 
-/** Resolve which shelf of tracks a context should play from. */
+/**
+ * Resolve which shelf of tracks a context should play from. Each fallback key
+ * is tried three ways: the themed variant first (`calm-fantasy` — a subfolder
+ * BGM/calm/fantasy/ or a folder literally named calm-fantasy), then the plain
+ * shelf, then the union of every themed variant of that mood.
+ */
 function resolveShelf(lib: MusicLibrary, context: BgmContext): { key: string; tracks: string[] } {
   const chain = CONTEXT_FALLBACKS[context] || ["main", "any"];
   for (const key of chain) {
+    if (theme) {
+      const themed = lib.byContext[`${key}-${theme}`];
+      if (themed && themed.length) return { key: `${key}-${theme}`, tracks: themed };
+    }
     const tracks = lib.byContext[key];
     if (tracks && tracks.length) return { key, tracks };
+    const variants = Object.keys(lib.byContext)
+      .filter((shelf) => shelf.startsWith(`${key}-`))
+      .flatMap((shelf) => lib.byContext[shelf]);
+    if (variants.length) return { key: `${key}-*`, tracks: variants };
   }
   return { key: "all", tracks: lib.tracks };
+}
+
+/**
+ * Bias shelf resolution toward a flavor of the current mood (e.g. "fantasy"
+ * for D&D campaigns). Pass null to play from the plain mood shelves.
+ */
+export function bgmSetTheme(next: string | null) {
+  const normalized = next ? next.toLowerCase().trim() : null;
+  if (normalized === theme) return;
+  theme = normalized;
+  if (state.context) bgmSetContext(state.context);
 }
 
 function targetVolume() {
@@ -123,6 +194,19 @@ function ensureDecks() {
   deckB = new Audio();
   for (const deck of [deckA, deckB]) {
     deck.volume = 0;
+    deck.preload = "auto";
+    // Blend into the next track shortly before this one runs dry so the
+    // score loops without a hard gap. Very short stingers fall through to
+    // the plain "ended" advance below.
+    deck.addEventListener("timeupdate", () => {
+      if (deck !== liveDeck || loopBlendArmed || deck.paused) return;
+      const remaining = deck.duration - deck.currentTime;
+      if (!Number.isFinite(remaining)) return;
+      if (remaining <= LOOP_CROSSFADE_S && deck.duration > LOOP_CROSSFADE_S * 2) {
+        loopBlendArmed = true;
+        advanceTrack();
+      }
+    });
     deck.addEventListener("ended", () => {
       if (deck === liveDeck) advanceTrack();
     });
@@ -159,6 +243,7 @@ function playUrl(url: string) {
   ensureDecks();
   const incoming = liveDeck ? otherDeck(liveDeck) : deckA!;
   const outgoing = liveDeck;
+  loopBlendArmed = false;
   incoming.src = url;
   incoming.volume = 0;
   liveDeck = incoming;

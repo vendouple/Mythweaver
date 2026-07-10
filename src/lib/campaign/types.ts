@@ -78,6 +78,10 @@ export type DiceEvent = {
   modifier: number;
   total: number;
   d20Mode?: "normal" | "advantage" | "disadvantage";
+  /** Difficulty class the check was judged against (server-side). */
+  dc?: number;
+  /** Server-judged result of the check — the narrator cannot fudge this. */
+  outcome?: "critical-success" | "success" | "failure" | "critical-failure";
 };
 
 export type DisplayEvent = {

@@ -40,11 +40,25 @@ export async function GET() {
     const entries = await readdir(bgmRoot, { withFileTypes: true }).catch(() => []);
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
-      const files = await listAudioFiles(path.join(bgmRoot, entry.name));
-      if (!files.length) continue;
-      const urls = files.map((file) => `/music/BGM/${entry.name}/${file}`);
-      byContext[entry.name.toLowerCase()] = urls;
-      tracks.push(...urls);
+      const contextKey = entry.name.toLowerCase();
+      const contextDir = path.join(bgmRoot, entry.name);
+      const files = await listAudioFiles(contextDir);
+      if (files.length) {
+        const urls = files.map((file) => `/music/BGM/${entry.name}/${file}`);
+        byContext[contextKey] = urls;
+        tracks.push(...urls);
+      }
+      // Themed variants one level down: BGM/calm/fantasy/*.mp3 becomes the
+      // "calm-fantasy" shelf, preferred when the client sets that theme.
+      const subEntries = await readdir(contextDir, { withFileTypes: true }).catch(() => []);
+      for (const sub of subEntries) {
+        if (!sub.isDirectory()) continue;
+        const subFiles = await listAudioFiles(path.join(contextDir, sub.name));
+        if (!subFiles.length) continue;
+        const subUrls = subFiles.map((file) => `/music/BGM/${entry.name}/${sub.name}/${file}`);
+        byContext[`${contextKey}-${sub.name.toLowerCase()}`] = subUrls;
+        tracks.push(...subUrls);
+      }
     }
 
     const sfx = (await listAudioFiles(path.join(musicRoot, "SFX"))).map((file) => `/music/SFX/${file}`);

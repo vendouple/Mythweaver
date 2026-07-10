@@ -4,11 +4,28 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { DisplayEvent } from "@/lib/campaign/types";
 import { api, accentColor, clearSeat, createActionId, StoredSeat, useCampaignPoll } from "@/lib/client/api";
 import { playSfx } from "@/lib/client/sfx";
-import { renderInline } from "@/lib/client/markup";
+import { renderInline, renderMarkdown } from "@/lib/client/markup";
+import { ACCENT_THEMES, applyAccent, currentAccent, initAccent } from "@/lib/client/theme";
 import DiceTheater, { DiceRollData } from "@/components/three/DiceTheater";
 import CosmosCanvas from "@/components/three/CosmosCanvas";
 
 type Tab = "act" | "sheet" | "party" | "quest";
+
+/**
+ * Split a sheet entry like "Pattern Recognition: Can spot anomalies…" or
+ * "Professional-grade lockpick set (concealed)" into a bold name and a
+ * quieter descriptive line, so the sheet reads at a glance.
+ */
+function splitEntry(entry: string): { name: string; detail?: string } {
+  const colon = entry.indexOf(":");
+  if (colon > 0 && colon <= 48) {
+    const detail = entry.slice(colon + 1).trim();
+    if (detail) return { name: entry.slice(0, colon).trim(), detail };
+  }
+  const paren = entry.match(/^(.{3,}?)\s*\((.+)\)\s*$/);
+  if (paren) return { name: paren[1].trim(), detail: paren[2].trim() };
+  return { name: entry.trim() };
+}
 
 /**
  * The phone becomes the character's talisman: their portrait and pulse up
@@ -23,7 +40,12 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
   const [sendError, setSendError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [miniDice, setMiniDice] = useState<DiceRollData | null>(null);
+  const [accent, setAccent] = useState("gold");
   const diceSeenRef = useRef<Set<string> | null>(null);
+
+  useEffect(() => {
+    setAccent(initAccent() || currentAccent());
+  }, []);
 
   const me = useMemo(
     () => campaign?.players.find((player) => player.id === seat.playerId) || null,
@@ -53,6 +75,8 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
           modifier: event.dice.modifier,
           total: event.dice.total,
           d20Mode: event.dice.d20Mode,
+          dc: event.dice.dc,
+          outcome: event.dice.outcome,
           speaker: event.speaker,
           color
         });
@@ -283,62 +307,98 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
 
         {tab === "sheet" ? (
           <section className="sheet-panel">
-            {me.background ? (
-              <>
-                <span className="director-label">Backstory</span>
-                <p className="sheet-prose">{me.background}</p>
-              </>
-            ) : null}
-            {me.personality ? (
-              <>
-                <span className="director-label">Personality</span>
-                <p className="sheet-prose">{me.personality}</p>
-              </>
-            ) : null}
             {otherStats.length ? (
               <>
                 <span className="director-label">Traits</span>
                 <div className="stat-grid">
                   {otherStats.map((stat) => (
                     <div key={stat.name} className="stat-cell">
-                      <span className="stat-name">{stat.name}</span>
-                      <span className="rail-hp">
+                      <div className="stat-head">
+                        <span className="stat-name">{stat.name}</span>
+                        <span className="stat-value">{stat.value}/{stat.maxValue}</span>
+                      </div>
+                      <span className="stat-bar">
                         <span
-                          className="rail-hp-fill"
+                          className="stat-bar-fill"
                           style={{
                             width: `${Math.max(0, Math.min(100, (stat.value / Math.max(stat.maxValue, 1)) * 100))}%`,
-                            background: accentColor(stat.color, "#c9a35c")
+                            background: accentColor(stat.color, "var(--gold)")
                           }}
                         />
-                        <span className="rail-hp-text">{stat.value}/{stat.maxValue}</span>
                       </span>
                     </div>
                   ))}
                 </div>
               </>
             ) : null}
-            <span className="director-label">Inventory</span>
-            <div className="chip-row">
-              {me.inventory.length ? me.inventory.map((item, index) => (
-                <button key={`${item}-${index}`} className="loot-chip" disabled={weaving || sending} onClick={() => { setTab("act"); setComposer(`I use my ${item}: `); }}>
-                  ✦ {item}
-                </button>
-              )) : <span className="panel-hint">Empty pockets, big dreams.</span>}
-            </div>
+
             <span className="director-label">Abilities</span>
-            <div className="chip-row">
-              {me.abilities.length ? me.abilities.map((ability, index) => (
-                <button key={`${ability}-${index}`} className="loot-chip ability" disabled={weaving || sending} onClick={() => { setTab("act"); setComposer(`I use ${ability}: `); }}>
-                  ✧ {ability}
-                </button>
-              )) : <span className="panel-hint">Raw talent only, so far.</span>}
+            <div className="kit-stack">
+              {me.abilities.length ? me.abilities.map((ability, index) => {
+                const { name, detail } = splitEntry(ability);
+                return (
+                  <button key={`${ability}-${index}`} className="kit-card ability" disabled={weaving || sending} onClick={() => { setTab("act"); setComposer(`I use ${name}: `); }}>
+                    <span className="kit-head">
+                      <span className="kit-glyph" aria-hidden>✧</span>
+                      <span className="kit-name">{name}</span>
+                      <span className="kit-use" aria-hidden>use ❯</span>
+                    </span>
+                    {detail ? <span className="kit-detail">{detail}</span> : null}
+                  </button>
+                );
+              }) : <span className="panel-hint">Raw talent only, so far.</span>}
             </div>
-            {me.notes ? (
-              <>
-                <span className="director-label">Notes</span>
-                <p className="sheet-prose small">{me.notes}</p>
-              </>
+
+            <span className="director-label">Inventory</span>
+            <div className="kit-stack">
+              {me.inventory.length ? me.inventory.map((item, index) => {
+                const { name, detail } = splitEntry(item);
+                return (
+                  <button key={`${item}-${index}`} className="kit-card" disabled={weaving || sending} onClick={() => { setTab("act"); setComposer(`I use my ${name}: `); }}>
+                    <span className="kit-head">
+                      <span className="kit-glyph" aria-hidden>✦</span>
+                      <span className="kit-name">{name}</span>
+                      <span className="kit-use" aria-hidden>use ❯</span>
+                    </span>
+                    {detail ? <span className="kit-detail">{detail}</span> : null}
+                  </button>
+                );
+              }) : <span className="panel-hint">Empty pockets, big dreams.</span>}
+            </div>
+
+            {me.background ? (
+              <details className="sheet-fold">
+                <summary className="director-label">Backstory</summary>
+                <p className="sheet-prose">{me.background}</p>
+              </details>
             ) : null}
+            {me.personality ? (
+              <details className="sheet-fold">
+                <summary className="director-label">Personality</summary>
+                <p className="sheet-prose">{me.personality}</p>
+              </details>
+            ) : null}
+            {me.notes ? (
+              <details className="sheet-fold">
+                <summary className="director-label">Notes</summary>
+                <p className="sheet-prose small">{me.notes}</p>
+              </details>
+            ) : null}
+
+            <span className="director-label">Table colors</span>
+            <div className="accent-row">
+              {ACCENT_THEMES.map((themeOption) => (
+                <button
+                  key={themeOption.key}
+                  className={`accent-swatch ${accent === themeOption.key ? "current" : ""}`}
+                  style={{ background: themeOption.swatch }}
+                  title={themeOption.label}
+                  aria-label={themeOption.label}
+                  onClick={() => { applyAccent(themeOption.key); setAccent(themeOption.key); playSfx("tap", 0.5); }}
+                />
+              ))}
+            </div>
+
             <button className="ghost-button leave" onClick={leave}>Leave the table</button>
           </section>
         ) : null}
@@ -393,7 +453,7 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
         {tab === "quest" ? (
           <section className="quest-panel">
             {campaign.showQuestOnController && campaign.questLog ? (
-              <pre className="quest-text">{campaign.questLog}</pre>
+              <div className="quest-text">{renderMarkdown(campaign.questLog)}</div>
             ) : (
               <p className="panel-hint center">The quest is kept close to the Weaver&apos;s chest.</p>
             )}

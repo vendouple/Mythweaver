@@ -30,22 +30,30 @@ Core rules:
 - Narrate external consequences only. Player names/characters are protected canon.
 - Use roll_dice for meaningful risk: attacks, persuasion, spell use, stealth, search, etc.
 
-Dice rules:
-- A d20 roll is the core check. Compare result to difficulty class (DC): Easy 10, Medium 15, Hard 20, Very Hard 25.
-- When player's ability/class/item helps, use roll_dice with d20Mode "advantage". Advantage replaces flat bonuses.
-- When hindered, use d20Mode "disadvantage".
-- Otherwise, use d20Mode "normal".
-- Only use +N/-N modifiers for genuine, explicit sheet stats/magical items. No arbitrary bonuses.
+Dice rules (the server rolls — you NEVER pick, predict, or invent numbers; narrate only from the tool result):
+- A d20 check: call roll_dice with d20Mode "normal" and a dc. Base DC: Easy 10, Medium 15, Hard 20, Very Hard 25.
+- Ability fit shifts the DC, never the die. A character whose listed special ability directly covers the task: DC -2 or -3 (they do it well). Anyone can attempt ordinary tasks at base DC. A specialist task with NO fitting ability, tool, or training: DC +2 to +5 (harder for them).
+- d20Mode "advantage" is RARE. Grant it only for overwhelming situational dominance: the target is stunned, restrained, or helpless; striking a completely unaware enemy point-blank; a flawlessly prepared setup. Having a relevant ability is NOT advantage — that's a DC shift.
+- d20Mode "disadvantage" mirrors it: only for severe impairment (blinded, badly wounded, acting in chaos).
+- Only use +N/-N modifiers in notation for real damage math or explicit sheet stats. Never as a stand-in for ability fit.
+- The tool returns dc + outcome (success/failure/critical). Honor it exactly; do not soften failures or invent extra rolls.
+- Do NOT restate the roll as a SYSTEM story beat — the TV already animates every roll with its result.
 
 Continuity & assets:
 - Track stats, inventory, abilities, NPCs, locations, quests.
-- For new NPCs/monsters, call generate_image first, then save returned URL in portraitUrl.
+- Every player ability should be distinctive to that character and matter mechanically (it defines their easy DCs). When granting new abilities, keep them specific ("Fieldcraft: improvised gadgets from spare parts"), not generic.
+- New NPC/monster on stage: call generate_image with kind "portrait" and npcName BEFORE introducing them; the portrait attaches to the NPC automatically.
+- When the party moves somewhere visually new, update the TV backdrop: reuse a previously generated background via update_campaign_state currentImageUrl if one fits, otherwise call generate_image (kind "scene"). Do not leave a stale backdrop after a location change.
 - Maintain quest_log.md with ONLY the current active objective and immediate tasks.
 
 Cinematic direction (you are also the stage director):
 - Call set_ambience when the emotional register shifts (combat begins, a mystery deepens, the party reaches safety, a tragedy lands). One call per shift, not per turn.
 - Call trigger_effect to punctuate big single beats: explosions (shake+flash), spellbursts (embers), horror stings (darkness/heartbeat), storms (rain/fog).
 - Prefer atmosphere over words: a mood change plus one tight paragraph beats three paragraphs.
+
+Story delivery (one channel only):
+- Your final JSON story[] is the ONLY place narration and dialogue go. NEVER send narration/dialogue through update_campaign_state displayEvents — the TV would play the same beat twice.
+- update_campaign_state is for state: scene, overview, actions, player/NPC updates, backdrop.
 
 Narration style (the TV performs each story beat one at a time, like film subtitles — write for that rhythm):
 - Keep each story[] entry SHORT: 1-3 sentences. Never pack a whole scene into one entry; split it into several beats (narration → NPC line → narration → reaction…). Many short beats play far better than one long one.
@@ -176,7 +184,7 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
           let isPortrait = false;
           try {
             const a = JSON.parse(call.function.arguments || "{}");
-            isPortrait = a && (a.kind === "portrait" || !!a.playerId);
+            isPortrait = a && (a.kind === "portrait" || !!a.playerId || !!a.npcName);
           } catch { /* ignore */ }
           toolStatus = isPortrait ? "Painting a character portrait..." : "Painting a cinematic scene...";
           toolPhase = "image";
@@ -316,12 +324,19 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
           }
         }
 
+        // Defense-in-depth: smaller models sometimes send the same beats via
+        // update_campaign_state displayEvents AND the final story[] — drop
+        // any beat whose text already sits in the recent TV timeline.
+        const recentContents = new Set(
+          latestCampaign.displayEvents.slice(-20).map((event) => (event.content || "").trim())
+        );
         for (const item of mergedStory) {
           const speaker = item.speaker;
           const contentText = item.content;
           const itemUsed = item.itemUsed;
           const abilityUsed = item.abilityUsed;
 
+          if ((contentText || "").trim() && recentContents.has(contentText.trim())) continue;
           if (latestCampaign.status !== "lobby") {
             safePushDisplayEvent(latestCampaign, {
               ...classifyStoryBeat(latestCampaign, speaker),

@@ -1,7 +1,7 @@
 "use client";
 
 import type { DmPhase } from "@/lib/campaign/types";
-import CosmosCanvas from "@/components/three/CosmosCanvas";
+import WeavingLoom from "@/components/three/WeavingLoom";
 
 const PHASES: Array<{ key: DmPhase; label: string }> = [
   { key: "signal", label: "Reaching the Weaver" },
@@ -13,17 +13,19 @@ const PHASES: Array<{ key: DmPhase; label: string }> = [
 ];
 
 /**
- * Full-screen interlude between the lobby and the living stage. The dice
- * cosmos churns at high drama while a constellation of phases lights up in
- * lockstep with what the server is actually doing (dmPhase).
+ * Full-screen interlude between the lobby and the living stage. A world is
+ * woven live in 3D — motes of light streaming onto a forming planet — while
+ * the constellation of phases lights up in lockstep with what the server is
+ * actually doing (dmPhase). The loom pulses with the weaving score.
  */
 export default function Weaving({ phase, status, title }: { phase?: DmPhase; status?: string; title: string }) {
   const activeIndex = Math.max(0, PHASES.findIndex((item) => item.key === (phase === "integrate" ? "sheet" : phase)));
+  const progress = (activeIndex + 1) / PHASES.length;
 
   return (
     <div className="weaving screen">
-      <CosmosCanvas drama={1} />
-      <div className="portal-veil deep" />
+      <WeavingLoom progress={progress} />
+      <div className="portal-veil weaving-veil" />
       <div className="weaving-center">
         <span className="weaving-kicker">The Weaving begins</span>
         <h1 className="weaving-title">{title}</h1>
