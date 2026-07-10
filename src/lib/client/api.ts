@@ -36,7 +36,8 @@ export const api = {
   generate: (body: Record<string, unknown>) => post<{ result: Record<string, any> }>("/api/generate", body),
   generateSceneImage: (campaignId: string, prompt: string) =>
     post<{ campaign: Campaign }>("/api/image", { campaignId, prompt }),
-  listMusic: () => request<{ tracks: string[] }>("/api/music")
+  listMusic: () =>
+    request<{ tracks: string[]; byContext: Record<string, string[]>; sfx: string[] }>("/api/music")
 };
 
 /**
