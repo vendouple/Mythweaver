@@ -384,10 +384,19 @@ button:disabled { cursor: default; opacity: 0.45; }
   letter-spacing: 0.22em;
   text-transform: uppercase;
   margin: 0.4rem 0 0.6rem;
-  background: linear-gradient(180deg, #f4e4bd 20%, var(--gold) 65%, #8a6a34);
+  background:
+    linear-gradient(100deg, rgba(255, 255, 255, 0) 42%, rgba(255, 246, 220, 0.95) 50%, rgba(255, 255, 255, 0) 58%),
+    linear-gradient(180deg, #f4e4bd 20%, var(--gold) 65%, #8a6a34);
+  background-size: 260% 100%, 100% 100%;
+  background-position: 130% 0, 0 0;
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
+  animation: title-sheen 8s ease-in-out infinite;
+}
+@keyframes title-sheen {
+  0%, 58% { background-position: 130% 0, 0 0; }
+  78%, 100% { background-position: -80% 0, 0 0; }
 }
 .brand-sub {
   color: var(--mist);
@@ -432,7 +441,16 @@ button:disabled { cursor: default; opacity: 0.45; }
   border-color: var(--hairline-strong);
   box-shadow: 0 18px 50px rgba(201, 163, 92, 0.14);
 }
-.portal-card-rune { font-size: 1.5rem; color: var(--gold-bright); text-shadow: 0 0 18px rgba(230, 195, 120, 0.6); }
+.portal-card-rune {
+  font-size: 1.5rem;
+  color: var(--gold-bright);
+  text-shadow: 0 0 18px rgba(230, 195, 120, 0.6);
+  transition: transform 0.3s cubic-bezier(0.2, 0.9, 0.3, 1.4), text-shadow 0.3s;
+}
+.portal-card:hover:not(:disabled) .portal-card-rune {
+  transform: translateY(-2px) scale(1.15) rotate(-8deg);
+  text-shadow: 0 0 30px rgba(230, 195, 120, 0.95);
+}
 .portal-card-title {
   font-family: var(--font-display), serif;
   font-size: 1.22rem;
@@ -697,6 +715,16 @@ button:disabled { cursor: default; opacity: 0.45; }
   to { opacity: 1; transform: scale(1) translateY(0); filter: blur(0); }
 }
 .hero-card.empty { border-style: dashed; opacity: 0.5; animation: none; }
+/* While the Weaver forges a likeness, the card breathes candle-light. */
+.hero-card.forging {
+  animation:
+    hero-materialize 0.8s cubic-bezier(0.2, 0.9, 0.3, 1.2) both,
+    forge-glow 2.6s ease-in-out 0.8s infinite;
+}
+@keyframes forge-glow {
+  0%, 100% { box-shadow: 0 0 0 rgba(230, 195, 120, 0); }
+  50% { box-shadow: 0 0 30px rgba(230, 195, 120, 0.24); }
+}
 .hero-portrait {
   position: relative;
   width: 92px;
@@ -727,6 +755,15 @@ button:disabled { cursor: default; opacity: 0.45; }
 .hero-player { color: var(--faint); font-size: 0.74rem; }
 .hero-status { color: var(--mist); font-size: 0.76rem; font-style: italic; line-height: 1.35; }
 .hero-status.failed { color: #ff9a8c; }
+
+.lobby-tools {
+  position: absolute;
+  left: 1.2rem;
+  bottom: 1.2rem;
+  z-index: 4;
+  display: flex;
+  gap: 0.5rem;
+}
 
 .lobby-foot {
   position: relative;
@@ -1073,6 +1110,51 @@ button:disabled { cursor: default; opacity: 0.45; }
 }
 .beat-narrator .beat-text { font-style: italic; text-align: center; color: #f0e6cd; }
 .beat-voiced .beat-text { text-align: left; }
+
+/* Inline delivery marks from the Weaver (*italic* / **bold**). */
+.beat-text strong {
+  font-weight: 700;
+  color: var(--gold-bright);
+  text-shadow: 0 0 20px rgba(230, 195, 120, 0.35);
+}
+.beat-text em { color: #f6efdd; }
+/* Narrator prose is already italic — emphasis inverts to roman type. */
+.beat-narrator .beat-text em { font-style: normal; }
+/* An illuminated initial for pure narration. */
+.beat-narrator .beat-text::first-letter {
+  font-family: var(--font-display), serif;
+  font-size: 1.45em;
+  font-style: normal;
+  color: var(--gold-bright);
+  text-shadow: 0 0 22px rgba(230, 195, 120, 0.5);
+}
+/* A small flourish crowns narrator beats. */
+.beat-narrator::before {
+  content: "· ✦ ·";
+  display: block;
+  text-align: center;
+  color: rgba(230, 195, 120, 0.55);
+  letter-spacing: 0.55em;
+  font-size: 0.7rem;
+  margin-bottom: 0.6rem;
+}
+.beat-dialogue .beat-text { color: #f3ebd8; }
+.beat-playerAction .beat-text { font-style: italic; }
+
+/* Auto-advance hold: a golden thread burning down while the beat rests. */
+.beat-hold {
+  display: block;
+  height: 2px;
+  margin-top: 1rem;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--gold-bright), rgba(230, 195, 120, 0.12));
+  transform-origin: left center;
+  animation: hold-drain linear both;
+}
+@keyframes hold-drain {
+  from { transform: scaleX(1); opacity: 0.7; }
+  to { transform: scaleX(0); opacity: 0.2; }
+}
 .beat-text.system {
   font-family: var(--font-ui), sans-serif;
   font-size: 1rem;
@@ -1184,6 +1266,7 @@ button:disabled { cursor: default; opacity: 0.45; }
 .tome-entry { display: flex; flex-direction: column; gap: 0.15rem; border-bottom: 1px solid rgba(232, 220, 192, 0.07); padding-bottom: 0.6rem; }
 .tome-speaker { font-family: var(--font-display), serif; font-size: 0.78rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--gold); }
 .tome-content { color: var(--mist); font-size: 0.88rem; line-height: 1.5; font-family: var(--font-serif), serif; }
+.tome-content strong { color: var(--gold-bright); font-weight: 600; }
 .tome-entry.type-system .tome-content { color: var(--faint); font-family: var(--font-ui), sans-serif; font-size: 0.8rem; }
 
 .director .oracle-button { align-self: flex-start; }
@@ -1441,6 +1524,7 @@ button:disabled { cursor: default; opacity: 0.45; }
   color: var(--parchment);
 }
 .story-text.muted { color: var(--mist); font-style: italic; }
+.story-text strong { color: var(--gold-bright); font-weight: 600; }
 
 .controller-body {
   flex: 1;
@@ -1474,6 +1558,8 @@ button:disabled { cursor: default; opacity: 0.45; }
   margin: 0.2rem 0 -0.1rem;
 }
 .action-card {
+  position: relative;
+  overflow: hidden;
   display: flex;
   align-items: center;
   gap: 0.75rem;
@@ -1488,6 +1574,26 @@ button:disabled { cursor: default; opacity: 0.45; }
   padding: 0.95rem 1.05rem;
   transition: all 0.18s;
   animation: rise-in 0.5s ease both;
+}
+/* A slow candle-light sweep keeps the fate cards alive under the thumb. */
+.action-card::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -70%;
+  width: 45%;
+  background: linear-gradient(100deg, transparent, rgba(230, 195, 120, 0.13), transparent);
+  transform: skewX(-16deg);
+  animation: card-sheen 7s ease-in-out infinite;
+  pointer-events: none;
+}
+.action-card:nth-child(2)::after { animation-delay: 0.9s; }
+.action-card:nth-child(3)::after { animation-delay: 1.8s; }
+.action-card:nth-child(4)::after { animation-delay: 2.7s; }
+@keyframes card-sheen {
+  0%, 62% { left: -70%; }
+  82%, 100% { left: 130%; }
 }
 .action-card:nth-child(2) { animation-delay: 0.06s; }
 .action-card:nth-child(3) { animation-delay: 0.12s; }

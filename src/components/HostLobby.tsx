@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { api, accentColor, Campaign } from "@/lib/client/api";
+import { bgmIsMuted, bgmResume, bgmSetMuted, subscribeBgm } from "@/lib/client/audio";
+import { playSfx, sfxSetMuted } from "@/lib/client/sfx";
 import CosmosCanvas from "@/components/three/CosmosCanvas";
 
 /**
@@ -14,10 +16,28 @@ export default function HostLobby({ campaign }: { campaign: Campaign }) {
   const [joinUrl, setJoinUrl] = useState("");
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
+  const [soundBlocked, setSoundBlocked] = useState(false);
+  const [muted, setMuted] = useState(() => bgmIsMuted());
+  const partySizeRef = useRef(campaign.players.length);
 
   useEffect(() => {
     setJoinUrl(`${window.location.origin}/?controller=1&code=${campaign.joinCode}`);
   }, [campaign.joinCode]);
+
+  useEffect(() => subscribeBgm(({ blocked }) => setSoundBlocked(blocked)), []);
+
+  // A soft chime as each hero materializes.
+  useEffect(() => {
+    if (campaign.players.length > partySizeRef.current) playSfx("join");
+    partySizeRef.current = campaign.players.length;
+  }, [campaign.players.length]);
+
+  const toggleMute = () => {
+    const next = !muted;
+    setMuted(next);
+    bgmSetMuted(next);
+    sfxSetMuted(next);
+  };
 
   const leader = useMemo(
     () => campaign.players.find((player) => player.id === campaign.partyLeaderId),
@@ -102,6 +122,16 @@ export default function HostLobby({ campaign }: { campaign: Campaign }) {
           </div>
         </section>
       </main>
+
+      <div className="lobby-tools">
+        {soundBlocked && !muted ? (
+          <button className="tool-chip attention" onClick={() => { setSoundBlocked(false); bgmResume(); }}>
+            ♪ Tap for music
+          </button>
+        ) : (
+          <button className="tool-chip" onClick={toggleMute}>{muted ? "♪ Unmute" : "♪ Mute"}</button>
+        )}
+      </div>
 
       <footer className="lobby-foot">
         {leader ? (

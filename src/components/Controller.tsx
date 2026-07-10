@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { DisplayEvent } from "@/lib/campaign/types";
 import { api, accentColor, clearSeat, createActionId, StoredSeat, useCampaignPoll } from "@/lib/client/api";
+import { playSfx } from "@/lib/client/sfx";
+import { renderInline } from "@/lib/client/markup";
 import DiceTheater, { DiceRollData } from "@/components/three/DiceTheater";
 import CosmosCanvas from "@/components/three/CosmosCanvas";
 
@@ -74,6 +76,7 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
     if (!campaign || !me || sending || weaving) return;
     setSending(true);
     setSendError(null);
+    playSfx("send");
     try {
       await api.chat({
         campaignId: campaign.id,
@@ -94,6 +97,7 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
   const begin = async () => {
     if (!campaign) return;
     setStarting(true);
+    playSfx("confirm");
     try {
       await api.party({ campaignId: campaign.id, action: "start", playerId: seat.playerId });
       await refresh();
@@ -203,7 +207,7 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
             {latestBeat.speaker && latestBeat.speaker.toUpperCase() !== "NARRATOR" ? (
               <span className="story-speaker">{latestBeat.speaker}</span>
             ) : null}
-            <p className="story-text">{(latestBeat.content || "").slice(0, 420)}{(latestBeat.content || "").length > 420 ? "…" : ""}</p>
+            <p className="story-text">{renderInline(latestBeat.content || "")}</p>
           </>
         ) : (
           <p className="story-text muted">{campaign.overview}</p>
@@ -404,7 +408,7 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
           ["party", "Party", "❖"],
           ["quest", "Quest", "⟡"]
         ] as Array<[Tab, string, string]>).map(([key, label, glyph]) => (
-          <button key={key} className={`tab-button ${tab === key ? "current" : ""}`} onClick={() => setTab(key)}>
+          <button key={key} className={`tab-button ${tab === key ? "current" : ""}`} onClick={() => { playSfx("tap", 0.6); setTab(key); }}>
             <span aria-hidden>{glyph}</span>
             {label}
           </button>

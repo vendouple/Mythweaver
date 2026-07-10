@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { useCampaignPoll } from "@/lib/client/api";
+import { bgmSetContext, bgmStop } from "@/lib/client/audio";
 import HostLobby from "@/components/HostLobby";
 import HostStage from "@/components/HostStage";
 import Weaving from "@/components/Weaving";
@@ -18,6 +19,18 @@ export default function HostExperience({ campaignId, onExit }: { campaignId: str
     () => !!campaign?.displayEvents.some((event) => event.type === "narration" || event.type === "dialogue"),
     [campaign?.displayEvents]
   );
+
+  // One bard for the whole host journey: lobby score → weaving score →
+  // mood-matched stage score, crossfading at each transition.
+  const mood = campaign?.ambience?.mood;
+  const status = campaign?.status;
+  useEffect(() => {
+    if (!status) return;
+    if (status === "lobby") bgmSetContext("lobby");
+    else if (!storyStarted) bgmSetContext("weaving");
+    else bgmSetContext(mood || "calm");
+  }, [status, storyStarted, mood]);
+  useEffect(() => () => bgmStop(), []);
 
   if (!campaign) {
     return (
