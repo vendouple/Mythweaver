@@ -4,17 +4,54 @@ import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 
+const AUDIO_EXT = /\.(mp3|ogg|m4a|wav)$/i;
+
+async function listAudioFiles(dirPath: string): Promise<string[]> {
+  const entries = await readdir(dirPath, { withFileTypes: true }).catch(() => []);
+  return entries
+    .filter((entry) => entry.isFile() && AUDIO_EXT.test(entry.name))
+    .map((entry) => entry.name)
+    .sort();
+}
+
+/**
+ * Music manifest.
+ *
+ * BGM lives in public/music/BGM/<context>/*.mp3 where <context> is a shelf
+ * the client asks for: lobby, weaving, main, calm, tense, battle, mystery,
+ * dread, triumph, wonder, somber. Loose files directly in BGM/ are exposed
+ * under the "any" shelf (a general-purpose pool). SFX overrides live in
+ * public/music/SFX/<cue>.mp3 (see src/lib/client/sfx.ts for cue names).
+ */
 export async function GET() {
   try {
-    const dirPath = path.join(process.cwd(), "public", "music", "BGM");
-    const entries = await readdir(dirPath).catch(() => []);
-    const mp3s = entries
-      .filter((file) => file.toLowerCase().endsWith(".mp3"))
-      .map((file) => `/music/BGM/${file}`);
-      
-    return NextResponse.json({ tracks: mp3s });
+    const musicRoot = path.join(process.cwd(), "public", "music");
+    const bgmRoot = path.join(musicRoot, "BGM");
+
+    const byContext: Record<string, string[]> = {};
+    const tracks: string[] = [];
+
+    const looseFiles = await listAudioFiles(bgmRoot);
+    if (looseFiles.length) {
+      byContext.any = looseFiles.map((file) => `/music/BGM/${file}`);
+      tracks.push(...byContext.any);
+    }
+
+    const entries = await readdir(bgmRoot, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const files = await listAudioFiles(path.join(bgmRoot, entry.name));
+      if (!files.length) continue;
+      const urls = files.map((file) => `/music/BGM/${entry.name}/${file}`);
+      byContext[entry.name.toLowerCase()] = urls;
+      tracks.push(...urls);
+    }
+
+    const sfx = (await listAudioFiles(path.join(musicRoot, "SFX"))).map((file) => `/music/SFX/${file}`);
+
+    return NextResponse.json({ tracks, byContext, sfx });
   } catch (error) {
-    console.error("Failed to list BGM music files:", error);
-    return NextResponse.json({ tracks: [] });
+    console.error("Failed to list music files:", error);
+    return NextResponse.json({ tracks: [], byContext: {}, sfx: [] });
   }
 }

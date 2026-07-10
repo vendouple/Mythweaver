@@ -47,9 +47,12 @@ Cinematic direction (you are also the stage director):
 - Call trigger_effect to punctuate big single beats: explosions (shake+flash), spellbursts (embers), horror stings (darkness/heartbeat), storms (rain/fog).
 - Prefer atmosphere over words: a mood change plus one tight paragraph beats three paragraphs.
 
-Speaker rules:
-- story[].speaker is "NARRATOR", "SYSTEM", or an NPC name.
-- Do not put NPC dialogue inside NARRATOR. Use the NPC's name as speaker.
+Narration style (the TV performs each story beat one at a time, like film subtitles — write for that rhythm):
+- Keep each story[] entry SHORT: 1-3 sentences. Never pack a whole scene into one entry; split it into several beats (narration → NPC line → narration → reaction…). Many short beats play far better than one long one.
+- Use inline markdown for delivery, like a director marking a script: *italics* for whispers, inner dread, sensory detail, and soft emphasis; **bold** for names spoken with weight, sudden dangers, and dramatic reveals; ***both*** only for the rarest thunderclap moments. A few marks per scene — not every line.
+- Give NPCs real voices: put their spoken lines in their own story entries with the NPC's name as speaker, mostly made of the words they say. Do not bury NPC dialogue inside NARRATOR text.
+- Dramatize player actions: when a player declares an action, you may open with a beat whose speaker is that character's EXACT character name, rendering their declared action as 1-2 sentences of third-person cinema ("*Kara slips between the stalls, blade low.*"). Only dramatize what they already declared or its direct physical execution — never invent decisions, words, thoughts, or feelings for them.
+- Speaker values: "NARRATOR", "SYSTEM", an NPC name, or a player character's exact name (only for the action-dramatization above).
 
 CRITICAL: Return ONLY a single, valid JSON object. No markdown code blocks (fences like \`\`\`json). No prose outside JSON. Run any tool calls first, then output the final JSON when you are ready to end your turn.`;
 
@@ -60,7 +63,7 @@ const turnChecklistPrompt = `Before responding:
 4. Return compact JSON with updates.
 
 Required JSON shape:
-{"story":[{"speaker":"NARRATOR|SYSTEM|NPC name","content":"narration/dialogue","itemUsed":"optional","abilityUsed":"optional"}],"title":"optional","currentScene":"optional","overview":"optional","playerActions":{"<playerId>":[{"title":"Look around","prompt":"I look around."}]},"partyActions":[{"title":"Shared Action","prompt":"We act together."}],"playerUpdates":[{"playerId":"...","characterName":"optional","background":"optional","portraitUrl":"optional","portraitPrompt":"optional","status":"Ready/Active/Stunned/etc.","inventory":["item"],"abilities":["ability"],"notes":"private notes","color":"cyan","stats":[{"name":"HP","value":15,"maxValue":20,"color":"red"}]}],"npcUpdates":[{"id":"existing id","renameFrom":"old name","name":"NPC name","description":"desc","portraitUrl":"url","status":"Ready","color":"orange","inventory":["item"],"abilities":["ability"],"stats":[{"name":"HP","value":15,"maxValue":15,"color":"red"}]}]}
+{"story":[{"speaker":"NARRATOR|SYSTEM|NPC name|player character name","content":"short beat (1-3 sentences, may use *italic*/**bold** inline markdown)","itemUsed":"optional","abilityUsed":"optional"}],"title":"optional","currentScene":"optional","overview":"optional","playerActions":{"<playerId>":[{"title":"Look around","prompt":"I look around."}]},"partyActions":[{"title":"Shared Action","prompt":"We act together."}],"playerUpdates":[{"playerId":"...","characterName":"optional","background":"optional","portraitUrl":"optional","portraitPrompt":"optional","status":"Ready/Active/Stunned/etc.","inventory":["item"],"abilities":["ability"],"notes":"private notes","color":"cyan","stats":[{"name":"HP","value":15,"maxValue":20,"color":"red"}]}],"npcUpdates":[{"id":"existing id","renameFrom":"old name","name":"NPC name","description":"desc","portraitUrl":"url","status":"Ready","color":"orange","inventory":["item"],"abilities":["ability"],"stats":[{"name":"HP","value":15,"maxValue":15,"color":"red"}]}]}
 
 Always provide playerActions (2-4 choices) for every active player unless incapacitated.`;
 
@@ -321,8 +324,7 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
 
           if (latestCampaign.status !== "lobby") {
             safePushDisplayEvent(latestCampaign, {
-              type: speaker === "SYSTEM" ? "system" : "narration",
-              speaker: speaker,
+              ...classifyStoryBeat(latestCampaign, speaker),
               content: contentText,
               itemUsed: itemUsed,
               abilityUsed: abilityUsed
@@ -335,11 +337,10 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
         const narratorText = parsedJson.narrator || "";
         const itemUsed = typeof parsedJson.itemUsed === "string" ? parsedJson.itemUsed : undefined;
         const abilityUsed = typeof parsedJson.abilityUsed === "string" ? parsedJson.abilityUsed : undefined;
-        
+
         if (latestCampaign.status !== "lobby") {
           safePushDisplayEvent(latestCampaign, {
-            type: speaker === "SYSTEM" ? "system" : "narration",
-            speaker: speaker,
+            ...classifyStoryBeat(latestCampaign, speaker),
             content: narratorText,
             itemUsed: itemUsed,
             abilityUsed: abilityUsed
@@ -530,6 +531,25 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
     }
     throw error;
   }
+}
+
+/**
+ * Map a story beat's speaker to a display-event type: NARRATOR stays pure
+ * narration, SYSTEM is table talk, a player's character name means the DM is
+ * dramatizing that player's declared action, anything else is NPC dialogue.
+ */
+function classifyStoryBeat(
+  campaign: { players: Array<{ id: string; name: string; characterName?: string }> },
+  speaker: string
+): { type: import("@/lib/campaign/types").DisplayEvent["type"]; speaker: string; playerId?: string } {
+  const upper = speaker.toUpperCase();
+  if (upper === "SYSTEM") return { type: "system", speaker };
+  if (upper === "NARRATOR") return { type: "narration", speaker };
+  const player = campaign.players.find(
+    (p) => (p.characterName || p.name).toLowerCase() === speaker.toLowerCase()
+  );
+  if (player) return { type: "playerAction", speaker, playerId: player.id };
+  return { type: "dialogue", speaker };
 }
 
 function stripSuggestedActions(content: string) {
