@@ -7,8 +7,16 @@ export type RollMode = "light" | "standard" | "heavy" | "all";
 /** Campaign challenge tuning — shifts DCs, damage willingness, enemy competence. */
 export type Difficulty = "easy" | "medium" | "hard" | "insane";
 
-/** How the saga closed (or is closing). */
-export type EndingKind = "victory" | "defeat" | "bittersweet" | "escape";
+/**
+ * How the saga closed (or is closing).
+ *   victory     – the party won
+ *   defeat      – the party lost / died / failed
+ *   bittersweet – mixed result, gains paid for in losses
+ *   escape      – survived by fleeing; the threat remains
+ *   draw        – stalemate; neither side prevailed
+ *   cliffhanger – the story stops mid-breath, deliberately unresolved
+ */
+export type EndingKind = "victory" | "defeat" | "bittersweet" | "escape" | "draw" | "cliffhanger";
 
 /**
  * High-level loading phase the host PC uses to drive the timeline UI.
@@ -200,7 +208,13 @@ export type PortraitImage = {
   createdAt: string;
 };
 
-/** Snapshot shown on the TV credits reel after the campaign ends. */
+/** One line of the outro's stats board, e.g. { label: "Dragons Slain", value: "1" }. */
+export type EndingStat = {
+  label: string;
+  value: string;
+};
+
+/** Snapshot shown on the TV outro cinematic after the campaign ends. */
 export type CampaignEnding = {
   kind: EndingKind;
   /** Short title, e.g. "The Fat Man Falls" or "Veridia Burns". */
@@ -209,8 +223,10 @@ export type CampaignEnding = {
   summary: string;
   /** When the ending was sealed. */
   endedAt: string;
-  /** Optional highlight lines for the credits (key moments, final stats). */
+  /** Optional highlight lines for the credits (key moments, final fates). */
   highlights?: string[];
+  /** Optional campaign statistics for the outro's stats board. */
+  stats?: EndingStat[];
 };
 
 export type Campaign = {

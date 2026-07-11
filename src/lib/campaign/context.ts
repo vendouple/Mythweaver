@@ -44,7 +44,7 @@ export function buildCampaignContext(campaign: Campaign) {
     `Campaign Length Setting: ${campaign.campaignLength || "auto"}`,
     campaign.ending
       ? `ENDING (campaign completed): kind=${campaign.ending.kind}; title="${campaign.ending.title}"; summary="${campaign.ending.summary}"`
-      : `Ending: not yet — call end_campaign when the saga reaches a decisive win/loss/bittersweet/escape (early endings allowed).`,
+      : `Ending: not yet — call end_campaign when the saga reaches a decisive win/loss/bittersweet/escape/draw/cliffhanger (early endings allowed).`,
     `Starting background story: ${campaign.startingStory || "None provided"}`,
     `Story characters from setup: ${JSON.stringify(campaign.storyCharacters)}`,
     `Player-controlled characters that you must not speak or decide for: ${JSON.stringify(playerState.map((player) => player.characterName || player.name))}`,

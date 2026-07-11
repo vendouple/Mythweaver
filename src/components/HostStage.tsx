@@ -1,14 +1,28 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { AmbienceMood, Campaign, DiceOutcome, DisplayEvent, Player, StageEffectKind, StoryCharacter } from "@/lib/campaign/types";
+import type {
+  AmbienceMood,
+  Campaign,
+  CampaignEnding,
+  DiceOutcome,
+  DisplayEvent,
+  EndingKind,
+  EndingStat,
+  Player,
+  StageEffectKind,
+  StoryCharacter
+} from "@/lib/campaign/types";
 import { api, accentColor } from "@/lib/client/api";
 import { bgmDuck, bgmIsMuted, subscribeBgm } from "@/lib/client/audio";
-import { playSfx } from "@/lib/client/sfx";
+import { playSfx, type SfxName } from "@/lib/client/sfx";
 import { parseInline, plainText, renderInline, renderTokens } from "@/lib/client/markup";
 import { ACCENT_THEMES, applyAccent, currentAccent, initAccent } from "@/lib/client/theme";
 import StageAtmosphere, { AtmosphereHandle } from "@/components/three/StageAtmosphere";
 import DiceTheater, { DiceRollData } from "@/components/three/DiceTheater";
+import CosmosCanvas from "@/components/three/CosmosCanvas";
+import WeavingLoom from "@/components/three/WeavingLoom";
+import OutroTheater from "@/components/three/OutroTheater";
 import { themeVisual, ThemeKey } from "@/components/three/themeVisuals";
 
 const MOOD_GRADES: Record<string, string> = {
@@ -35,6 +49,75 @@ const DEBUG_OUTCOMES: DiceOutcome[] = [
   "hard-failure",
   "critical-failure"
 ];
+const DEBUG_ENDINGS: EndingKind[] = ["victory", "defeat", "bittersweet", "escape", "draw", "cliffhanger"];
+const DEBUG_SFX: SfxName[] = ["tap", "confirm", "send", "join", "beat", "flash", "rumble", "darkness", "heartbeat"];
+const DEBUG_BEATS = ["narration", "dialogue", "playerAction", "system"] as const;
+type DebugScene = "cosmos" | "loom";
+
+/** Sample endings so every finale can be inspected without playing a saga to its close. */
+const DEBUG_ENDING_SAMPLES: Record<EndingKind, Pick<CampaignEnding, "title" | "summary" | "highlights" | "stats">> = {
+  victory: {
+    title: "The Weaver's Crown",
+    summary: "Against every prophecy, the party stood at the world's hinge and pushed. The dark tide broke, and dawn kept its appointment.",
+    highlights: ["The final roll was a natural 20", "The Adversary knelt at last", "The realm remembers its saviors"],
+    stats: [
+      { label: "Battles Won", value: "12" },
+      { label: "Natural 20s", value: "4" },
+      { label: "Allies Made", value: "7" },
+      { label: "Gold Squandered", value: "All of it" }
+    ]
+  },
+  defeat: {
+    title: "The Long Dark",
+    summary: "The party gave everything, and it was not enough. The last torch guttered out in the deep, and the world above learned to whisper their names.",
+    highlights: ["They fought to the final breath", "The Adversary's laughter still echoes", "Their story became a warning"],
+    stats: [
+      { label: "Last Stand", value: "4 rounds" },
+      { label: "Wounds Taken", value: "Countless" },
+      { label: "Regrets", value: "One" }
+    ]
+  },
+  bittersweet: {
+    title: "The Price of Dawn",
+    summary: "The city was saved, but not everyone walked out of the fire to see it. Victory tastes of ash and morning rain.",
+    highlights: ["The ritual was broken — at a cost", "A hero stayed behind", "The survivors carry the flame"],
+    stats: [
+      { label: "Lives Saved", value: "3,000" },
+      { label: "Lives Given", value: "1" },
+      { label: "Promises Kept", value: "Most" }
+    ]
+  },
+  escape: {
+    title: "Ashes at Our Heels",
+    summary: "There was no winning that night — only the door, the dark, and the running. The party lives, and the thing in the deep knows their scent.",
+    highlights: ["The bridge fell seconds behind them", "They left the gold, kept their lives", "Something followed them out"],
+    stats: [
+      { label: "Distance Fled", value: "40 leagues" },
+      { label: "Look-Backs", value: "Too many" },
+      { label: "Survivors", value: "All" }
+    ]
+  },
+  draw: {
+    title: "The Unbroken Scale",
+    summary: "Neither banner fell. When the smoke cleared, both armies stood staring across a field that belonged to no one — and both chose to walk away.",
+    highlights: ["The duel ended blade-to-blade", "A truce neither side wanted", "The ledger closed at zero"],
+    stats: [
+      { label: "Ground Gained", value: "None" },
+      { label: "Ground Lost", value: "None" },
+      { label: "Pride Swallowed", value: "Both sides" }
+    ]
+  },
+  cliffhanger: {
+    title: "The Door Was Already Open",
+    summary: "The vault stood empty. The seal was broken from the inside. And from somewhere far below, slow and patient, came the sound of applause.",
+    highlights: ["The true villain has no name yet", "One party member knows more than they said", "The map burns at the edges"],
+    stats: [
+      { label: "Questions Answered", value: "3" },
+      { label: "Questions Raised", value: "9" },
+      { label: "To Be Continued", value: "Yes" }
+    ]
+  }
+};
 
 type Beat = DisplayEvent;
 
@@ -67,8 +150,20 @@ export default function HostStage({
   const [debugOpen, setDebugOpen] = useState(debugMode);
   const [debugTheme, setDebugTheme] = useState<ThemeKey | null>(null);
   const [debugMood, setDebugMood] = useState<AmbienceMood | null>(null);
-  const [debugOutro, setDebugOutro] = useState(false);
+  const [debugOutro, setDebugOutro] = useState<EndingKind | null>(null);
+  const [debugScene, setDebugScene] = useState<DebugScene | null>(null);
+  const [debugSigil, setDebugSigil] = useState(false);
+  const [loomProgress, setLoomProgress] = useState(0.15);
   const visual = themeVisual(debugTheme || theme);
+
+  // The debug loom preview weaves itself over and over so the whole
+  // progress animation can be inspected, not just one frozen frame.
+  useEffect(() => {
+    if (debugScene !== "loom") return;
+    setLoomProgress(0.05);
+    const timer = setInterval(() => setLoomProgress((progress) => (progress >= 1 ? 0.05 : progress + 0.012)), 120);
+    return () => clearInterval(timer);
+  }, [debugScene]);
   /* ------------------------------------------------------------------ */
   /* Backdrop crossfade                                                  */
   /* ------------------------------------------------------------------ */
@@ -357,11 +452,81 @@ export default function HostStage({
     });
   };
 
+  /** Queue a sample story beat so the chronicle typewriter can be tested live. */
+  const previewBeat = (type: (typeof DEBUG_BEATS)[number]) => {
+    const hero = campaign.players[0];
+    const heroName = hero?.characterName || hero?.name || "The Hero";
+    const npcName = campaign.storyCharacters[0]?.name || "The Adversary";
+    const samples: Record<(typeof DEBUG_BEATS)[number], Beat> = {
+      narration: {
+        id: `debug-beat-${Date.now()}`,
+        type: "narration",
+        speaker: "NARRATOR",
+        content: "The lanterns gutter as something *vast* shifts beneath the floorboards — and every eye at the table turns toward the **sealed door**.",
+        createdAt: new Date().toISOString()
+      },
+      dialogue: {
+        id: `debug-beat-${Date.now()}`,
+        type: "dialogue",
+        speaker: npcName,
+        content: "\"You were never meant to find this place,\" the voice purrs. \"*Stay.* We have so much to discuss.\"",
+        createdAt: new Date().toISOString()
+      },
+      playerAction: {
+        id: `debug-beat-${Date.now()}`,
+        type: "playerAction",
+        speaker: heroName,
+        playerId: hero?.id,
+        content: `${heroName} draws steel in one fluid motion and steps between the party and the dark.`,
+        itemUsed: "Star-forged blade",
+        createdAt: new Date().toISOString()
+      },
+      system: {
+        id: `debug-beat-${Date.now()}`,
+        type: "system",
+        speaker: "SYSTEM",
+        content: "Debug preview: a system beat crosses the chronicle.",
+        createdAt: new Date().toISOString()
+      }
+    };
+    queueRef.current.push(samples[type]);
+    setPump((n) => n + 1);
+  };
+
+  /** Paint a procedural gradient backdrop so the Ken Burns crossfade can be tested without an image API. */
+  const previewBackdrop = () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 960;
+    canvas.height = 540;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const hue = Math.floor(Math.random() * 360);
+    const base = ctx.createLinearGradient(0, 0, 960, 540);
+    base.addColorStop(0, `hsl(${hue}, 42%, 16%)`);
+    base.addColorStop(1, `hsl(${(hue + 90) % 360}, 55%, 7%)`);
+    ctx.fillStyle = base;
+    ctx.fillRect(0, 0, 960, 540);
+    for (let i = 0; i < 6; i += 1) {
+      const x = Math.random() * 960;
+      const y = Math.random() * 540;
+      const radius = 80 + Math.random() * 220;
+      const glow = ctx.createRadialGradient(x, y, 0, x, y, radius);
+      glow.addColorStop(0, `hsla(${(hue + i * 40) % 360}, 70%, 55%, 0.22)`);
+      glow.addColorStop(1, "hsla(0, 0%, 0%, 0)");
+      ctx.fillStyle = glow;
+      ctx.fillRect(0, 0, 960, 540);
+    }
+    const url = canvas.toDataURL("image/jpeg", 0.85);
+    setLayers((prev) => [...prev, { url, key: (prev[prev.length - 1]?.key ?? 0) + 1 }].slice(-2));
+  };
+
   const closeDebug = () => {
     setDebugOpen(false);
     setDebugTheme(null);
     setDebugMood(null);
-    setDebugOutro(false);
+    setDebugOutro(null);
+    setDebugScene(null);
+    setDebugSigil(false);
   };
 
   /* ------------------------------------------------------------------ */
@@ -416,6 +581,37 @@ export default function HostStage({
 
   const dark = darkUntil > now;
   const pulsing = pulseUntil > now;
+
+  // Fallback stats board tallied from the chronicle itself, used whenever the
+  // AI didn't hand end_campaign an explicit stats array (and for debug outros).
+  const derivedStats = useMemo<EndingStat[]>(() => {
+    const diceEvents = campaign.displayEvents.filter((event) => event.type === "dice" && event.dice);
+    const beats = campaign.displayEvents.filter((event) => event.type === "narration" || event.type === "dialogue").length;
+    const nat20s = diceEvents.filter((event) => event.dice!.outcome === "critical-success").length;
+    const nat1s = diceEvents.filter((event) => event.dice!.outcome === "critical-failure").length;
+    const stats: EndingStat[] = [];
+    if (beats) stats.push({ label: "Story Beats", value: String(beats) });
+    if (diceEvents.length) stats.push({ label: "Fates Tempted", value: String(diceEvents.length) });
+    if (nat20s) stats.push({ label: "Natural 20s", value: String(nat20s) });
+    if (nat1s) stats.push({ label: "Natural 1s", value: String(nat1s) });
+    if (campaign.images.length) stats.push({ label: "Scenes Painted", value: String(campaign.images.length) });
+    stats.push({ label: "Heroes", value: String(campaign.players.length) });
+    return stats.slice(0, 6);
+  }, [campaign.displayEvents, campaign.images.length, campaign.players.length]);
+
+  // The outro plays for a truly completed saga, or for any finale picked in
+  // the debug gallery (which never touches the stored campaign).
+  const activeEnding = useMemo<CampaignEnding | null>(() => {
+    if (debugOutro) {
+      return {
+        kind: debugOutro,
+        ...DEBUG_ENDING_SAMPLES[debugOutro],
+        endedAt: new Date().toISOString()
+      };
+    }
+    if (campaign.status !== "completed" || !campaign.ending) return null;
+    return campaign.ending.stats?.length ? campaign.ending : { ...campaign.ending, stats: derivedStats };
+  }, [debugOutro, campaign.status, campaign.ending, derivedStats]);
 
   return (
     <div
@@ -544,33 +740,23 @@ export default function HostStage({
       </section>
 
       {/* Oracle sigil — the DM is weaving */}
-      {campaign.dmStatus ? (
+      {campaign.dmStatus || debugSigil ? (
         <div className="oracle-sigil" role="status">
           <span className="sigil-ring" aria-hidden />
-          <span className="sigil-text">{campaign.dmStatus}</span>
+          <span className="sigil-text">{campaign.dmStatus || "The Weaver is weaving…"}</span>
         </div>
       ) : null}
 
-      {/* Dice cinematic */}
-      
-      {(campaign.status === "completed" && campaign.ending) || debugOutro ? (
-        <div className="credits-reel" onClick={(e) => e.stopPropagation()}>
-          <div className={`credits-kind kind-${campaign.ending?.kind || "victory"}`}>{campaign.ending?.kind || "victory"}</div>
-          <h2 className="credits-title">{campaign.ending?.title || "The Weaver Rests"}</h2>
-          <p className="credits-summary">{campaign.ending?.summary || "A debug epilogue unfurls without advancing the campaign. The table fades, the final threads gleam, and every visual remains available for inspection."}</p>
-          {(campaign.ending?.highlights?.length || debugOutro) ? (
-            <ul className="credits-highlights">
-              {(campaign.ending?.highlights || ["The final roll was cast", "The party changed the world", "The story remains in the archive"]).map((h, i) => (
-                <li key={i}>{h}</li>
-              ))}
-            </ul>
-          ) : null}
-          <div className="credits-cast">
-            {campaign.players.map((p) => (
-              <span key={p.id} className="credits-cast-name">{p.characterName || p.name}</span>
-            ))}
-          </div>
-        </div>
+      {/* The Grand Outro — a Three.js finale choreographed by the ending kind */}
+      {activeEnding ? (
+        <OutroTheater
+          key={`${activeEnding.kind}-${visual.key}`}
+          ending={activeEnding}
+          players={campaign.players}
+          campaignTitle={campaign.title}
+          theme={visual.key}
+          onExit={debugOutro ? undefined : onExit}
+        />
       ) : null}
 
       {activeDice ? (
@@ -583,6 +769,20 @@ export default function HostStage({
         <button className="tool-chip" onClick={() => setDrawerOpen((open) => !open)}>Director</button>
         {debugMode ? <button className={`tool-chip ${debugOpen ? "attention" : ""}`} onClick={() => setDebugOpen((open) => !open)}>Gallery</button> : null}
       </div>
+
+      {/* Debug-only Three.js scene overlays (Cosmos backdrop / Weaving loom) */}
+      {debugMode && debugScene ? (
+        <div className="debug-scene-overlay" onClick={(event) => event.stopPropagation()}>
+          {debugScene === "cosmos" ? (
+            <CosmosCanvas accent={visual.accent} drama={0.85} theme={visual.key} />
+          ) : (
+            <WeavingLoom progress={loomProgress} accent={visual.accent} theme={visual.key} />
+          )}
+          <button className="ghost-button debug-scene-close" onClick={() => setDebugScene(null)}>
+            ✕ Close {debugScene === "cosmos" ? "cosmos" : `loom (${Math.round(loomProgress * 100)}%)`}
+          </button>
+        </div>
+      ) : null}
 
       {debugMode && debugOpen ? (
         <aside className="debug-menu panel" onClick={(event) => event.stopPropagation()}>
@@ -598,7 +798,34 @@ export default function HostStage({
           <div className="debug-grid menus">
             <button className="chip-toggle tiny" onClick={() => setTomeOpen(true)}>Tome</button>
             <button className="chip-toggle tiny" onClick={() => setDrawerOpen(true)}>Director</button>
-            <button className={`chip-toggle tiny ${debugOutro ? "selected" : ""}`} onClick={() => { setDebugOutro((shown) => !shown); setDebugMood("outro"); }}>Three.js Outro</button>
+            <button className={`chip-toggle tiny ${debugSigil ? "selected" : ""}`} onClick={() => setDebugSigil((shown) => !shown)}>Oracle sigil</button>
+          </div>
+
+          <label className="director-label">Three.js scenes</label>
+          <div className="debug-grid menus">
+            <button className={`chip-toggle tiny ${debugScene === "cosmos" ? "selected" : ""}`} onClick={() => setDebugScene((scene) => (scene === "cosmos" ? null : "cosmos"))}>Cosmos</button>
+            <button className={`chip-toggle tiny ${debugScene === "loom" ? "selected" : ""}`} onClick={() => setDebugScene((scene) => (scene === "loom" ? null : "loom"))}>Weaving Loom</button>
+            <button className="chip-toggle tiny" onClick={() => previewDice("success")}>Dice Theater</button>
+          </div>
+
+          <label className="director-label">Outro finales (Three.js)</label>
+          <div className="debug-grid">
+            {DEBUG_ENDINGS.map((endingKind) => (
+              <button
+                key={endingKind}
+                className={`chip-toggle tiny ${debugOutro === endingKind ? "selected" : ""}`}
+                onClick={() => {
+                  if (debugOutro === endingKind) {
+                    setDebugOutro(null);
+                  } else {
+                    setDebugOutro(endingKind);
+                    setDebugMood("outro");
+                  }
+                }}
+              >
+                {endingKind}
+              </button>
+            ))}
           </div>
 
           <label className="director-label">Themes</label>
@@ -622,6 +849,21 @@ export default function HostStage({
           <label className="director-label">Stage effects</label>
           <div className="debug-grid">
             {DEBUG_EFFECTS.map((effect) => <button key={effect} className="chip-toggle tiny" onClick={() => previewEffect(effect)}>{effect}</button>)}
+            <button className="chip-toggle tiny" onClick={() => previewBackdrop()}>backdrop fade</button>
+          </div>
+
+          <label className="director-label">Chronicle beats</label>
+          <div className="debug-grid">
+            {DEBUG_BEATS.map((beatType) => (
+              <button key={beatType} className="chip-toggle tiny" onClick={() => previewBeat(beatType)}>
+                {beatType === "playerAction" ? "player action" : beatType}
+              </button>
+            ))}
+          </div>
+
+          <label className="director-label">SFX cues</label>
+          <div className="debug-grid">
+            {DEBUG_SFX.map((cue) => <button key={cue} className="chip-toggle tiny" onClick={() => playSfx(cue)}>{cue}</button>)}
           </div>
 
           <label className="director-label">Dice outcomes</label>

@@ -19,6 +19,7 @@ public/music/BGM/
   triumph/   ← DM mood: victory, celebration
   wonder/    ← DM mood: awe, vistas, magic revealed
   somber/    ← DM mood: loss, mourning, quiet aftermath
+  outro/     ← end credits: the cinematic outro after end_campaign
 ```
 
 The AI Dungeon Master sets an ambience mood as the story shifts; the host
@@ -67,9 +68,11 @@ So the winning strategy:
 > keyword lists in `musicTheme.ts` decide which campaigns map to it.
 
 **Suggested fill order** for the empty mood roots (most-used first):
-`tense → battle → mystery → triumph → somber → dread → wonder`. `lobby/`,
-`weaving/`, `main/`, and `calm/` already have tracks. Fill themed folders
-only for the moods a given genre reaches for most.
+`tense → battle → mystery → triumph → somber → dread → wonder → outro`.
+`lobby/`, `weaving/`, `main/`, and `calm/` already have tracks. Fill themed
+folders only for the moods a given genre reaches for most. `outro/` plays
+exactly once per campaign but it's the last thing the table hears — worth
+stocking early (until then it falls back `outro → triumph → somber → main`).
 
 ## Format & looping
 
@@ -240,6 +243,30 @@ below the moods.
 > grey light, dignified grief, long silences between phrases, funeral for
 > a hero, quiet and restrained, instrumental
 
+### `outro/` — the end credits
+
+Plays when the AI calls `end_campaign` and the Three.js outro takes the TV.
+One shelf covers **every ending kind** — victory, defeat, bittersweet,
+escape, draw, and cliffhanger — so aim for *reflective end-credits* music:
+grand and warm but never gloating, tender but never funereal. Think "the
+book closes and the table sits back," not "we won." It loops under the
+credits until the host leaves the table, so the usual no-intro/no-outro
+rule still applies.
+
+**Neutral:**
+> Cinematic end-credits theme, warm strings and reflective piano over a
+> slow noble pulse, equal parts gratitude and farewell, grand but tender,
+> gentle swells that resolve and return, works over victory or loss alike,
+> seamless loop feel, no big intro or outro, no fade to silence,
+> instrumental
+
+**Fantasy** (`outro/fantasy/`):
+> Fantasy end-credits suite, noble horns and warm strings with harp
+> arpeggios, a reflective folk melody passed between flute and fiddle,
+> farewell to fellow travelers at the road's end, grand but tender, gentle
+> swells that resolve and return, seamless loop feel, no fade to silence,
+> instrumental
+
 ## Other genre themes
 
 Each theme below leads with a signature **palette** (its instruments and
@@ -263,6 +290,7 @@ electronic, chrome-and-starlight.
 - **triumph** (`triumph/scifi/`): > Triumphant sci-fi swell, soaring synth leads over bright pads, rising arpeggios and cymbal shimmer, a ship breaking orbit into dawn light, celebratory, resolves gently to loop, instrumental
 - **wonder** (`wonder/scifi/`): > Ethereal sci-fi wonder, glassy bells and lush synth pads, wordless vocalise used as an instrument, slow floating arpeggios, a nebula unfolding, weightless and luminous, no fade to silence, instrumental
 - **somber** (`somber/scifi/`): > Mournful sci-fi elegy, lone sustained synth pad and sparse piano, slow airy drone, cold starlight through a viewport, dignified grief, long silences, quiet and restrained, no fade to silence, instrumental
+- **outro** (`outro/scifi/`): > Sci-fi end-credits theme, warm analog synth pads and a slow soaring lead, gentle arpeggios like receding stars, reflective and vast, a farewell transmission from orbit, works over victory or loss alike, gentle swells that resolve and return, no fade to silence, instrumental
 
 ### `horror` — `<mood>/horror/`
 **Palette:** detuned strings, bowed metal, prepared piano, sub-bass swells,
@@ -279,6 +307,7 @@ sparse, wrong.
 - **triumph** (`triumph/horror/`): > Grim horror reprieve, a fragile major chord emerging from dissonance, warm strings pushing back the dark, uneasy relief rather than celebration, swells and resolves gently to loop, instrumental
 - **wonder** (`wonder/horror/`): > Eerie horror wonder, shimmering glassy bells over cold pads, wordless vocalise turned ghostly, beautiful but wrong, floating and weightless with a chill, no fade to silence, instrumental
 - **somber** (`somber/horror/`): > Mournful horror elegy, lone cello over hollow drone, sparse detuned piano, funeral in a haunted place, dignified grief shot through with dread, long silences, quiet, no fade to silence, instrumental
+- **outro** (`outro/horror/`): > Horror end-credits theme, a fragile piano melody over dark ambient drones, distant detuned music box, mournful strings, the dread recedes but never quite leaves, reflective and uneasy, works whether the survivors won or lost, no jump scares, no fade to silence, instrumental
 
 ### `noir` — `<mood>/noir/`
 **Palette:** smoky muted trumpet, brushed jazz drums, upright bass walking
@@ -295,6 +324,7 @@ world-weary.
 - **triumph** (`triumph/noir/`): > Bittersweet noir resolve, warm swelling strings with a lone muted trumpet, the case closed at dawn, hard-won and understated rather than cheesy, resolves gently to loop, instrumental
 - **wonder** (`wonder/noir/`): > Wistful noir wonder, shimmering vibraphone and soft strings, a sultry clarinet line, neon reflected in rain, weightless and bittersweet, floating, no fade to silence, instrumental
 - **somber** (`somber/noir/`): > Mournful noir elegy, lone muted trumpet over sparse piano and brushed cymbal, rainy grey light, dignified grief in a dim room, long silences between phrases, quiet, no fade to silence, instrumental
+- **outro** (`outro/noir/`): > Noir end-credits theme, smoky muted trumpet over brushed drums and lounge piano, one last slow walk into the rain, world-weary but warm, bittersweet resolve that suits a closed case or a cold one, gentle swells that resolve and return, no fade to silence, instrumental
 
 ### `modern` — `<mood>/modern/`
 Spy / thriller / heist / present-day.
@@ -312,6 +342,7 @@ tense, contemporary.
 - **triumph** (`triumph/modern/`): > Triumphant modern swell, soaring strings and bright brass over a driving pulse, mission accomplished at sunrise, celebratory but sleek, resolves gently to loop, instrumental
 - **wonder** (`wonder/modern/`): > Contemporary wonder, shimmering synth bells and lush pads, wordless vocalise, a city skyline at night, weightless and luminous, floating, no fade to silence, instrumental
 - **somber** (`somber/modern/`): > Mournful modern elegy, lone piano over a soft sustained synth pad, slow strings, grey rain on glass, dignified grief, long silences between phrases, quiet and restrained, no fade to silence, instrumental
+- **outro** (`outro/modern/`): > Modern end-credits theme, warm hybrid pads and reflective piano over a slow steady pulse, strings swelling with quiet resolve, the debrief after the operation, sleek and heartfelt, works over success or failure alike, resolves gently to loop, no fade to silence, instrumental
 
 ### `western` — `<mood>/western/`
 **Palette:** twanging reverb guitar, lonesome whistle, harmonica, upright bass,
@@ -328,6 +359,7 @@ sun-bleached.
 - **triumph** (`triumph/western/`): > Triumphant western swell, soaring fiddle and mariachi trumpet over full strings, a warm sunrise after the showdown, celebratory but rugged, resolves gently to loop, instrumental
 - **wonder** (`wonder/western/`): > Expansive western wonder, shimmering reverb guitar and soft strings, a lonesome whistle turned luminous, endless sky over the mesa, weightless and awed, floating, no fade to silence, instrumental
 - **somber** (`somber/western/`): > Mournful western elegy, lone reverb guitar over sparse strings and harmonica, dignified grief on the frontier, a grave at dusk, long silences between phrases, quiet and restrained, no fade to silence, instrumental
+- **outro** (`outro/western/`): > Western end-credits theme, warm reverb guitar and fiddle over slow strings, a lonesome whistle bidding farewell, riding toward the horizon at dusk, dusty and tender, suits a won showdown or a lost one, gentle swells that resolve and return, no fade to silence, instrumental
 
 ## Sound effects — `public/music/SFX/`
 
