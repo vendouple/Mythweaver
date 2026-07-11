@@ -24,12 +24,14 @@ export default function HostExperience({ campaignId, onExit }: { campaignId: str
   // mood-matched stage score, crossfading at each transition.
   const mood = campaign?.ambience?.mood;
   const status = campaign?.status;
-  const campaignType = campaign?.campaignType;
+  // The campaign's genre theme (fantasy/scifi/modern/…) chosen at start; it
+  // biases the score toward BGM/<mood>/<theme>/ shelves, falling back to the
+  // neutral mood roots when that themed shelf is empty. D&D always reads as
+  // fantasy even before the classifier has run.
+  const musicTheme = campaign?.musicTheme || (campaign?.campaignType === "dnd" ? "fantasy" : null);
   useEffect(() => {
-    // D&D tables prefer fantasy-flavored shelves (BGM/<mood>/fantasy/) when
-    // they exist; other tabletop campaigns play the plain mood shelves.
-    bgmSetTheme(campaignType === "dnd" ? "fantasy" : null);
-  }, [campaignType]);
+    bgmSetTheme(musicTheme);
+  }, [musicTheme]);
   useEffect(() => {
     if (!status) return;
     if (status === "lobby") bgmSetContext("lobby");

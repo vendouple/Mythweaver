@@ -189,6 +189,12 @@ export type Campaign = {
   dmPhase?: DmPhase;
   messages: ChatMessage[];
   campaignType?: CampaignType;
+  /**
+   * Score instrumentation flavor for this campaign (e.g. "fantasy", "scifi",
+   * "modern"). Chosen once at campaign start; biases which music shelf plays.
+   * Undefined → the neutral mood roots. See lib/campaign/musicTheme.ts.
+   */
+  musicTheme?: string;
   isRandomized?: boolean;
   campaignLength?: "auto" | "short" | "medium" | "long" | "extra_long" | "infinite";
   rulesMode?: "casual" | "full";

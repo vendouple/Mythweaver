@@ -150,10 +150,12 @@ function shuffled<T>(items: T[]): T[] {
 }
 
 /**
- * Resolve which shelf of tracks a context should play from. Each fallback key
- * is tried three ways: the themed variant first (`calm-fantasy` — a subfolder
- * BGM/calm/fantasy/ or a folder literally named calm-fantasy), then the plain
- * shelf, then the union of every themed variant of that mood.
+ * Resolve which shelf of tracks a context should play from. At each fallback
+ * mood we try the themed variant first (`calm-fantasy` — the subfolder
+ * BGM/calm/fantasy/), then the neutral mood root (`calm`). If the themed
+ * shelf is empty we fall through to the root rather than borrowing another
+ * genre's music, so a half-stocked theme never bleeds (a modern campaign
+ * won't suddenly play lutes because only the fantasy shelf has tracks).
  */
 function resolveShelf(lib: MusicLibrary, context: BgmContext): { key: string; tracks: string[] } {
   const chain = CONTEXT_FALLBACKS[context] || ["main", "any"];
@@ -164,10 +166,6 @@ function resolveShelf(lib: MusicLibrary, context: BgmContext): { key: string; tr
     }
     const tracks = lib.byContext[key];
     if (tracks && tracks.length) return { key, tracks };
-    const variants = Object.keys(lib.byContext)
-      .filter((shelf) => shelf.startsWith(`${key}-`))
-      .flatMap((shelf) => lib.byContext[shelf]);
-    if (variants.length) return { key: `${key}-*`, tracks: variants };
   }
   return { key: "all", tracks: lib.tracks };
 }

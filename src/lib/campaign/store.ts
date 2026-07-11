@@ -2,6 +2,7 @@ import { mkdir, readFile, readdir, writeFile, appendFile, rm } from "fs/promises
 import path from "path";
 import { Ambience, AmbienceMood, Campaign, CampaignSummary, CampaignType, ChatMessage, DisplayEvent, Player, StageEffect, StageEffectKind, StoryCharacter, SuggestedAction } from "./types";
 import { createId, createJoinCode } from "@/lib/utils/ids";
+import { classifyMusicTheme } from "./musicTheme";
 
 const dataRoot = path.join(process.cwd(), "data", "campaigns");
 
@@ -181,6 +182,11 @@ export async function createCampaign(
     createdAt: now,
     updatedAt: now
   };
+
+  // Theme the score from whatever premise we have now. For sealed-envelope
+  // campaigns the premise is empty, so this stays undefined and the DM's
+  // opening turn fills it in once the world exists (see runDungeonMaster).
+  campaign.musicTheme = classifyMusicTheme(campaign) || undefined;
 
   await mkdir(campaignDir(campaign.id), { recursive: true });
   await saveCampaign(campaign);
