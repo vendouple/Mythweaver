@@ -252,15 +252,27 @@ export const toolDefinitions: AquaToolDefinition[] = [
     type: "function",
     function: {
       name: "end_campaign",
-      description: "End the campaign NOW with a clear win/loss/bittersweet/escape result. Call when the story reaches a decisive close — party dead, villain defeated, escape, or bittersweet resolution. Can end EARLY (TPK, total failure, sudden victory). Sets status to completed, plays credits on the TV, and clears controller actions. After calling this, write a short final story[] epilogue then stop offering player choices.",
+      description: "End the campaign NOW with a decisive result. Call when the story reaches a close — party dead, villain defeated, escape, stalemate, bittersweet resolution, or a deliberate cliffhanger. Can end EARLY (TPK, total failure, sudden victory). Sets status to completed, plays the cinematic outro on the TV, and clears controller actions. After calling this, write a short final story[] epilogue then stop offering player choices.",
       parameters: {
         type: "object",
         required: ["kind", "title", "summary"],
         properties: {
-          kind: { type: "string", enum: ["victory", "defeat", "bittersweet", "escape"], description: "victory = party won; defeat = party lost/dead/failed; bittersweet = mixed; escape = survived by fleeing." },
+          kind: { type: "string", enum: ["victory", "defeat", "bittersweet", "escape", "draw", "cliffhanger"], description: "victory = party won; defeat = party lost/dead/failed; bittersweet = mixed; escape = survived by fleeing; draw = stalemate, neither side prevailed; cliffhanger = the story cuts off mid-breath, deliberately unresolved (use for season-finale style stops)." },
           title: { type: "string", description: "Short credits title, e.g. 'The Fat Man Falls' or 'Veridia Burns'." },
-          summary: { type: "string", description: "1-3 sentence epilogue shown on the credits reel." },
-          highlights: { type: "array", items: { type: "string" }, description: "Optional bullet lines for credits (key moments, final fates)." }
+          summary: { type: "string", description: "1-3 sentence epilogue shown on the outro. For cliffhangers, end it on the unresolved question." },
+          highlights: { type: "array", items: { type: "string" }, description: "Optional bullet lines for credits (key moments, final fates)." },
+          stats: {
+            type: "array",
+            items: {
+              type: "object",
+              required: ["label", "value"],
+              properties: {
+                label: { type: "string", description: "Stat name, e.g. 'Dragons Slain', 'Lies Told', 'Gold Squandered'." },
+                value: { type: "string", description: "Stat value, e.g. '3', 'All of it', 'One too many'." }
+              }
+            },
+            description: "Optional 3-6 campaign statistics for the outro's stats board. Mix real tallies (battles won, NPCs met) with flavorful ones (curses ignored, taverns wrecked). Values can be numbers or short witty phrases."
+          }
         }
       }
     }
@@ -380,7 +392,13 @@ export async function runTool(campaignId: string, name: string, args: Record<str
         kind: String(args.kind || "bittersweet"),
         title: String(args.title || "The End"),
         summary: String(args.summary || "The saga closes."),
-        highlights: Array.isArray(args.highlights) ? (args.highlights as unknown[]).map(String) : undefined
+        highlights: Array.isArray(args.highlights) ? (args.highlights as unknown[]).map(String) : undefined,
+        stats: Array.isArray(args.stats)
+          ? (args.stats as Array<Record<string, unknown>>).map((stat) => ({
+              label: String(stat?.label || ""),
+              value: String(stat?.value ?? "")
+            }))
+          : undefined
       });
       await saveCampaign(campaign);
       return { ok: true, ending: campaign.ending };

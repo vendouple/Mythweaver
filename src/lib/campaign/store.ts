@@ -371,7 +371,20 @@ function normalizeCampaign(raw: Partial<Campaign> & { suggestedActions?: unknown
 
 const AMBIENCE_MOODS: AmbienceMood[] = ["calm", "tense", "battle", "mystery", "dread", "triumph", "wonder", "somber", "outro"];
 const EFFECT_KINDS: StageEffectKind[] = ["shake", "flash", "embers", "fog", "rain", "snow", "darkness", "heartbeat"];
-const ENDING_KINDS: EndingKind[] = ["victory", "defeat", "bittersweet", "escape"];
+const ENDING_KINDS: EndingKind[] = ["victory", "defeat", "bittersweet", "escape", "draw", "cliffhanger"];
+
+function normalizeEndingStats(raw: unknown): CampaignEnding["stats"] {
+  if (!Array.isArray(raw)) return undefined;
+  const stats = raw
+    .filter((item): item is Record<string, unknown> => !!item && typeof item === "object")
+    .map((item) => ({
+      label: String(item.label || "").trim(),
+      value: String(item.value ?? "").trim()
+    }))
+    .filter((item) => item.label && item.value)
+    .slice(0, 8);
+  return stats.length ? stats : undefined;
+}
 
 function normalizeEnding(raw: unknown): CampaignEnding | undefined {
   if (!raw || typeof raw !== "object") return undefined;
@@ -386,7 +399,8 @@ function normalizeEnding(raw: unknown): CampaignEnding | undefined {
     endedAt: String(item.endedAt || new Date().toISOString()),
     highlights: Array.isArray(item.highlights)
       ? item.highlights.map(String).map((h) => h.trim()).filter(Boolean).slice(0, 12)
-      : undefined
+      : undefined,
+    stats: normalizeEndingStats(item.stats)
   };
 }
 
@@ -446,10 +460,10 @@ export function pushStageEffect(
   campaign.effects = campaign.effects.slice(-12);
 }
 
-/** Seal the campaign with a win/loss/bittersweet/escape ending and clear controller actions. */
+/** Seal the campaign with a win/loss/draw/cliffhanger/bittersweet/escape ending and clear controller actions. */
 export function endCampaign(
   campaign: Campaign,
-  payload: { kind: string; title: string; summary: string; highlights?: string[] }
+  payload: { kind: string; title: string; summary: string; highlights?: string[]; stats?: Array<{ label: string; value: string }> }
 ) {
   const kind = ENDING_KINDS.includes(payload.kind as EndingKind) ? (payload.kind as EndingKind) : "bittersweet";
   const title = (payload.title || "The End").trim() || "The End";
@@ -457,9 +471,10 @@ export function endCampaign(
   const highlights = Array.isArray(payload.highlights)
     ? payload.highlights.map(String).map((h) => h.trim()).filter(Boolean).slice(0, 12)
     : undefined;
+  const stats = normalizeEndingStats(payload.stats);
   const endedAt = new Date().toISOString();
   campaign.status = "completed";
-  campaign.ending = { kind, title, summary, endedAt, highlights };
+  campaign.ending = { kind, title, summary, endedAt, highlights, stats };
   campaign.ambience = {
     mood: "outro",
     intensity: 0.7,
