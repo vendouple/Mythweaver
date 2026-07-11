@@ -4,6 +4,7 @@ import { createId } from "@/lib/utils/ids";
 import { aquaConfig, aquaFetch, AquaMessage, AquaToolCall } from "./client";
 import { runTool, toolDefinitions } from "@/lib/tools/registry";
 import { PlayerStat } from "@/lib/campaign/types";
+import { classifyMusicTheme } from "@/lib/campaign/musicTheme";
 
 export function serverLog(category: string, message: string, data?: any) {
   const timestamp = new Date().toLocaleTimeString();
@@ -523,9 +524,17 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
       }
     }
 
+    // Backfill the music theme once the world has content (covers sealed-
+    // envelope campaigns, whose premise was empty at creation). Set once,
+    // then left alone so the score stays consistent for the whole saga.
+    if (!latestCampaign.musicTheme) {
+      const theme = classifyMusicTheme(latestCampaign);
+      if (theme) latestCampaign.musicTheme = theme;
+    }
+
     latestCampaign.dmStatus = undefined; // Clear DM status
     latestCampaign.dmPhase = undefined;
-    
+
     finishCampaignDraft(campaignId);
     await saveCampaign(latestCampaign);
 

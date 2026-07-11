@@ -39,26 +39,37 @@ public/music/BGM/calm/            ← genre-neutral (plays for ANY campaign)
 public/music/BGM/calm/fantasy/    ← the "calm-fantasy" shelf
 ```
 
-- **D&D campaigns** automatically prefer the `fantasy/` variant of each
-  mood, then fall back to the neutral root if that folder is empty.
-- **All other tabletop campaigns** (modern, sci-fi, spy, horror, etc.)
-  play the neutral **root** shelf.
+**Each campaign picks one theme at start.** The theme is chosen once, when
+the table is raised, from the campaign's genre — D&D is always `fantasy`;
+Story Engine campaigns are classified from their premise text (see
+`src/lib/campaign/musicTheme.ts`). From then on the AI DM only ever sets
+*moods* (`calm`, `tense`, `battle`…); the engine combines the fixed theme
+with the current mood to pick the shelf:
+
+- It looks for `BGM/<mood>/<theme>/` first.
+- If that themed shelf is empty, it **falls back to the neutral `BGM/<mood>/`
+  root** — never to another genre's music. A half-stocked theme is safe.
+
+Supported themes (auto-detected from the premise): **`fantasy`**,
+**`scifi`**, **`horror`**, **`noir`**, **`modern`** (spy / thriller /
+heist / present-day), **`western`**. A campaign that matches none (e.g.
+slice-of-life) stays themeless and plays the neutral roots.
 
 So the winning strategy:
 
 1. Fill the **mood roots** with *genre-neutral cinematic / orchestral-hybrid*
    tracks that don't scream any single setting — these are the safety net
-   for every campaign and every genre.
-2. Add overtly **fantasy** tracks (lute, harp, hammered dulcimer, war
-   horns, tavern fiddle, choir) into `<mood>/fantasy/` for D&D tables.
+   for every campaign, and the fallback for every theme.
+2. Add themed tracks into `<mood>/<theme>/` for the genres you actually run
+   (start with `fantasy/` for D&D, then whichever others you play).
 
-> The engine supports arbitrary themes (`<mood>/<theme>/`), but only
-> `fantasy` is wired up right now (for `campaignType === "dnd"`). Other
-> themes are ready to activate when we map more campaign types.
+> Adding a new theme is just making folders — no code change. The classifier
+> keyword lists in `musicTheme.ts` decide which campaigns map to it.
 
 **Suggested fill order** for the empty mood roots (most-used first):
 `tense → battle → mystery → triumph → somber → dread → wonder`. `lobby/`,
-`weaving/`, `main/`, and `calm/` already have tracks.
+`weaving/`, `main/`, and `calm/` already have tracks. Fill themed folders
+only for the moods a given genre reaches for most.
 
 ## Format & looping
 
@@ -88,7 +99,9 @@ variations per prompt and keep the best.
 Each mood below gives a **Neutral** prompt (goes in the mood root — works
 for any genre) and a **Fantasy** prompt (goes in `<mood>/fantasy/` for D&D
 tables). `lobby/`, `weaving/`, and `main/` are app framing shared across
-genres — a fantasy variant is optional there.
+genres — a fantasy variant is optional there. Prompts for the other themes
+(`scifi`, `horror`, `noir`, `modern`, `western`) are in their own section
+below the moods.
 
 ### `lobby/` — the Gathering
 **Neutral:**
@@ -226,6 +239,61 @@ genres — a fantasy variant is optional there.
 > Mournful solo cello elegy with sparse piano, slow air on strings, rainy
 > grey light, dignified grief, long silences between phrases, funeral for
 > a hero, quiet and restrained, instrumental
+
+## Other genre themes
+
+Each theme has a signature **palette** (its instruments and tone). To fill a
+themed shelf, take the palette and bolt on the *mood energy* — reuse the mood
+descriptors from the sections above (calm = safe/tender/low dynamics, tense =
+coiled ostinato that never releases, battle = driving percussion + relentless
+momentum, mystery = sparse and curious, dread = glacial horror drone, triumph
+= bright swelling resolve, wonder = weightless and luminous, somber = mournful
+elegy). Always add `seamless loop feel, no big intro or outro, no fade to
+silence, instrumental`.
+
+Ready examples cover `calm`, `tense`, and `battle` (the widest spread — safe,
+suspense, action); build the rest from the palette + the mood descriptor.
+
+### `scifi` — `<mood>/scifi/`
+**Palette:** analog synths, pulsing arpeggiators, deep sub bass, metallic and
+glassy pads, granular sound-design textures, distant sonar blips; cold, vast,
+electronic, chrome-and-starlight.
+- **calm** (`calm/scifi/`): > Weightless ambient sci-fi underscore, slow warm synth pads and soft arpeggio, distant sonar pings, gentle sub bass, the quiet hum of a sleeping starship, unhurried and safe, no fade to silence, instrumental
+- **tense** (`tense/scifi/`): > Cold sci-fi suspense, pulsing low synth ostinato, ticking metallic textures, dissonant glassy pads, a reactor about to breach, coiled tension that never releases, no big intro or outro, instrumental
+- **battle** (`battle/scifi/`): > High-energy sci-fi action, driving electronic percussion and distorted synth bass, aggressive arpeggiators, brass-synth stabs, relentless momentum, cinematic space-combat trailer energy, instrumental
+
+### `horror` — `<mood>/horror/`
+**Palette:** detuned strings, bowed metal, prepared piano, sub-bass swells,
+breathy dissonant choir, scraping textures, distant music-box; dread-soaked,
+sparse, wrong.
+- **calm** (`calm/horror/`): > Uneasy quiet horror ambience, hollow sustained drone, faint detuned music box, distant creaks, a false calm that never feels safe, very sparse, low dynamics, no fade to silence, instrumental
+- **tense** (`tense/horror/`): > Horror suspense, scraping bowed-metal textures, sub-bass pulse like a held breath, dissonant string clusters swelling and receding, stalking dread, coiled and airless, instrumental
+- **battle** (`battle/horror/`): > Frantic horror chase, pounding irregular percussion, shrieking dissonant strings, distorted low brass, panic and adrenaline, relentless and ugly, no big intro or outro, instrumental
+
+### `noir` — `<mood>/noir/`
+**Palette:** smoky muted trumpet, brushed jazz drums, upright bass walking
+lines, lounge piano, vibraphone, sultry clarinet; rain-slick, 1940s, dim and
+world-weary.
+- **calm** (`calm/noir/`): > Late-night noir lounge, brushed drums and soft walking upright bass, muted trumpet and mellow piano, cigarette smoke and neon rain, slow and world-weary, low dynamics, no fade to silence, instrumental
+- **tense** (`tense/noir/`): > Noir suspense, sparse pizzicato bass, muted trumpet stabs, ticking brushed cymbal, a dark alley and a tail you can't shake, coiled tension that never resolves, instrumental
+- **battle** (`battle/noir/`): > Frantic noir chase, driving upright bass and snare, stabbing brass, dissonant piano, a shootout in the rain, breathless momentum, no big intro or outro, instrumental
+
+### `modern` — `<mood>/modern/`
+Spy / thriller / heist / present-day.
+**Palette:** hybrid orchestral + electronic, pulsing synth bass, taut string
+ostinatos, processed percussion, ticking clock textures, low brass; sleek,
+tense, contemporary.
+- **calm** (`calm/modern/`): > Sleek contemporary underscore, warm synth pads over soft piano, subtle processed percussion, quiet safehouse before the op, unhurried but alert, low dynamics, no fade to silence, instrumental
+- **tense** (`tense/modern/`): > Spy-thriller suspense, taut string ostinato and pulsing synth bass, ticking clock percussion, low brass swell, surveillance and a countdown, coiled tension that never releases, instrumental
+- **battle** (`battle/modern/`): > Modern action, driving hybrid percussion and distorted synth bass, aggressive string ostinatos, brass hits, a rooftop firefight, relentless trailer momentum, no big intro or outro, instrumental
+
+### `western` — `<mood>/western/`
+**Palette:** twanging reverb guitar, lonesome whistle, harmonica, upright bass,
+fiddle, sparse mariachi trumpet, distant coyote-night ambience; dusty, wide,
+sun-bleached.
+- **calm** (`calm/western/`): > Lonesome western dusk, soft reverb guitar and distant whistle, gentle harmonica, wide open prairie at sundown, unhurried and weary, low dynamics, no fade to silence, instrumental
+- **tense** (`tense/western/`): > Western standoff tension, single twanging guitar notes, low tremolo strings, creaking silence and a ticking pocket watch, coiled tension before the draw, never releasing, instrumental
+- **battle** (`battle/western/`): > Western action, galloping percussion and driving upright bass, frantic fiddle and stabbing brass, a chase across the badlands, relentless momentum, no big intro or outro, instrumental
 
 ## Sound effects — `public/music/SFX/`
 
