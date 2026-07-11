@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
+import type { DiceOutcome } from "@/lib/campaign/types";
 
 export type DiceRollData = {
   id: string;
@@ -12,15 +13,28 @@ export type DiceRollData = {
   total: number;
   d20Mode?: "normal" | "advantage" | "disadvantage";
   dc?: number;
-  outcome?: "critical-success" | "success" | "failure" | "critical-failure";
+  outcome?: DiceOutcome;
   speaker?: string;
   color?: string;
+  /** True when this roll is for an NPC/enemy. */
+  isNpc?: boolean;
 };
 
 type Phase = "tumble" | "settle" | "reveal";
 
 const TUMBLE_SECONDS = 2.1;
 const SETTLE_SECONDS = 0.65;
+
+const OUTCOME_LABELS: Record<DiceOutcome, string> = {
+  "critical-success": "Triumph",
+  "strong-success": "Strong Success",
+  success: "Success",
+  "partial-success": "Partial Success",
+  failure: "Failure",
+  "hard-failure": "Hard Failure",
+  "critical-failure": "Catastrophe"
+};
+
 
 /* ------------------------------------------------------------------ */
 /* Textures                                                            */
@@ -266,10 +280,20 @@ export default function DiceTheater({
         : (roll.rolls[0] <= roll.rolls[1] ? 0 : 1))
     : 0;
   const headline = isDual ? roll.rolls[chosenIndex] : roll.total;
-  const critical: "high" | "low" | null = isD20
-    ? (headline === 20 ? "high" : headline === 1 ? "low" : null)
-    : null;
-  const accent = critical === "high" ? "#ffd76a" : critical === "low" ? "#ff6a5c" : "#e6c378";
+  const critical: "high" | "low" | null =
+    roll.outcome === "critical-success" || (isD20 && headline === 20)
+      ? "high"
+      : roll.outcome === "critical-failure" || (isD20 && headline === 1)
+        ? "low"
+        : null;
+  const accent = roll.isNpc
+    ? "#c48a8a"
+    : critical === "high"
+      ? "#ffd76a"
+      : critical === "low"
+        ? "#ff6a5c"
+        : "#e6c378";
+  const outcomeLabel = roll.outcome ? OUTCOME_LABELS[roll.outcome] : null;
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -505,11 +529,12 @@ export default function DiceTheater({
   const modeLabel = roll.d20Mode === "advantage" ? "Advantage" : roll.d20Mode === "disadvantage" ? "Disadvantage" : null;
 
   return (
-    <div className={`dice-theater ${compact ? "compact" : ""} phase-${phase} ${critical ? `crit-${critical}` : ""}`}>
+    <div className={`dice-theater ${compact ? "compact" : ""} phase-${phase} ${critical ? `crit-${critical}` : ""} ${roll.isNpc ? "npc-roll" : ""}`}>
       <div className="dice-theater-canvas" ref={mountRef} />
       <div className="dice-theater-chrome">
         <div className="dice-reason">
-          {roll.speaker ? <span className="dice-speaker" style={{ color: roll.color || undefined }}>{roll.speaker}</span> : null}
+          {roll.speaker ? <span className="dice-speaker" style={{ color: roll.color || accent }}>{roll.speaker}</span> : null}
+          {roll.isNpc ? <span className="dice-mode mode-npc">Enemy</span> : null}
           <span className="dice-reason-text">{roll.reason}</span>
           {modeLabel ? <span className={`dice-mode mode-${roll.d20Mode}`}>{modeLabel}</span> : null}
         </div>
@@ -519,18 +544,18 @@ export default function DiceTheater({
           {critical === "low" ? <span className="dice-crit-label">Catastrophe</span> : null}
           {isDual ? (
             <span className="dice-dual-detail">
-              {roll.rolls[0]} / {roll.rolls[1]} — kept {roll.rolls[chosenIndex]}
+              {roll.rolls[0]} / {roll.rolls[1]} - kept {roll.rolls[chosenIndex]}
             </span>
           ) : roll.modifier ? (
             <span className="dice-dual-detail">
-              {roll.rolls.join(" + ")} {roll.modifier > 0 ? `+ ${roll.modifier}` : `− ${Math.abs(roll.modifier)}`} = {roll.total}
+              {roll.rolls.join(" + ")} {roll.modifier > 0 ? `+ ${roll.modifier}` : `- ${Math.abs(roll.modifier)}`} = {roll.total}
             </span>
           ) : roll.rolls.length > 1 ? (
             <span className="dice-dual-detail">{roll.rolls.join(" + ")} = {roll.total}</span>
           ) : null}
-          {roll.dc && roll.outcome ? (
+          {roll.dc && outcomeLabel ? (
             <span className={`dice-verdict verdict-${roll.outcome}`}>
-              vs DC {roll.dc} — {roll.outcome === "critical-success" ? "Triumph" : roll.outcome === "critical-failure" ? "Catastrophe" : roll.outcome === "success" ? "Success" : "Failure"}
+              vs DC {roll.dc} - {outcomeLabel}
             </span>
           ) : null}
           <span className="dice-notation">{roll.notation}</span>

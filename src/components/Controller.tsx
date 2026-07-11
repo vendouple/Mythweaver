@@ -78,7 +78,8 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
           dc: event.dice.dc,
           outcome: event.dice.outcome,
           speaker: event.speaker,
-          color
+          color,
+          isNpc: event.dice.isNpc
         });
       }
     }

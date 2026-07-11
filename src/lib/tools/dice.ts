@@ -1,9 +1,20 @@
-export type DiceRoll = {
+﻿export type DiceRoll = {
   notation: string;
   rolls: number[];
   modifier: number;
   total: number;
 };
+
+export type DiceOutcome =
+  | "critical-success"
+  | "strong-success"
+  | "success"
+  | "partial-success"
+  | "failure"
+  | "hard-failure"
+  | "critical-failure";
+
+export type Difficulty = "easy" | "medium" | "hard" | "insane";
 
 const dicePattern = /^(\d*)d(\d+)([+-]\d+)?$/i;
 
@@ -30,4 +41,41 @@ export function rollD20Mode(mode: "normal" | "advantage" | "disadvantage" = "nor
   const rolls = [rollDice("1d20").rolls[0], rollDice("1d20").rolls[0]];
   const chosen = mode === "advantage" ? Math.max(...rolls) : Math.min(...rolls);
   return { notation: `1d20 ${mode}`, rolls, modifier: 0, total: chosen };
+}
+
+/**
+ * Judge a d20 check against a DC with a full outcome spectrum.
+ * Difficulty gates partial successes: easy/medium allow them; hard/insane do not
+ * (a near-miss is still a failure under pressure).
+ */
+export function judgeD20Outcome(opts: {
+  total: number;
+  natural?: number;
+  dc?: number;
+  difficulty?: Difficulty | string;
+}): { outcome?: DiceOutcome; margin?: number } {
+  const { total, natural, dc, difficulty } = opts;
+  if (natural === 20) return { outcome: "critical-success", margin: dc !== undefined ? total - dc : undefined };
+  if (natural === 1) return { outcome: "critical-failure", margin: dc !== undefined ? total - dc : undefined };
+  if (dc === undefined || !Number.isFinite(dc)) return {};
+
+  const margin = total - dc;
+  const allowPartial = difficulty === "easy" || difficulty === "medium" || !difficulty;
+
+  if (margin >= 5) return { outcome: "strong-success", margin };
+  if (margin >= 0) return { outcome: "success", margin };
+  if (margin >= -4) {
+    return { outcome: allowPartial ? "partial-success" : "failure", margin };
+  }
+  return { outcome: "hard-failure", margin };
+}
+
+/** Base DC shift applied by campaign difficulty (before ability fit). */
+export function difficultyDcBias(difficulty?: Difficulty | string): number {
+  switch (difficulty) {
+    case "easy": return -2;
+    case "hard": return 2;
+    case "insane": return 4;
+    default: return 0;
+  }
 }

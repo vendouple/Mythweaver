@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Campaign, DisplayEvent, Player, StoryCharacter } from "@/lib/campaign/types";
+import type { AmbienceMood, Campaign, DiceOutcome, DisplayEvent, Player, StageEffectKind, StoryCharacter } from "@/lib/campaign/types";
 import { api, accentColor } from "@/lib/client/api";
 import { bgmDuck, bgmIsMuted, subscribeBgm } from "@/lib/client/audio";
 import { playSfx } from "@/lib/client/sfx";
@@ -19,8 +19,22 @@ const MOOD_GRADES: Record<string, string> = {
   dread: "linear-gradient(180deg, rgba(6,8,12,0.5), rgba(2,3,5,0.8))",
   triumph: "linear-gradient(180deg, rgba(48,34,6,0.18), rgba(8,6,2,0.5))",
   wonder: "linear-gradient(180deg, rgba(6,34,38,0.26), rgba(3,8,12,0.58))",
-  somber: "linear-gradient(180deg, rgba(14,18,28,0.4), rgba(4,6,10,0.72))"
+  somber: "linear-gradient(180deg, rgba(14,18,28,0.4), rgba(4,6,10,0.72))",
+  outro: "linear-gradient(180deg, rgba(48,36,12,0.28), rgba(8,6,4,0.7))"
 };
+
+const DEBUG_THEMES: ThemeKey[] = ["none", "fantasy", "scifi", "horror", "noir", "modern", "western"];
+const DEBUG_MOODS: AmbienceMood[] = ["calm", "tense", "battle", "mystery", "dread", "triumph", "wonder", "somber", "outro"];
+const DEBUG_EFFECTS: StageEffectKind[] = ["shake", "flash", "embers", "fog", "rain", "snow", "darkness", "heartbeat"];
+const DEBUG_OUTCOMES: DiceOutcome[] = [
+  "critical-success",
+  "strong-success",
+  "success",
+  "partial-success",
+  "failure",
+  "hard-failure",
+  "critical-failure"
+];
 
 type Beat = DisplayEvent;
 
@@ -48,7 +62,11 @@ export default function HostStage({
   onExit: () => void;
   theme?: ThemeKey | string | null;
 }) {
-  const visual = themeVisual(theme);
+  const [debugOpen, setDebugOpen] = useState(false);
+  const [debugTheme, setDebugTheme] = useState<ThemeKey | null>(null);
+  const [debugMood, setDebugMood] = useState<AmbienceMood | null>(null);
+  const [debugOutro, setDebugOutro] = useState(false);
+  const visual = themeVisual(debugTheme || theme);
   /* ------------------------------------------------------------------ */
   /* Backdrop crossfade                                                  */
   /* ------------------------------------------------------------------ */
@@ -141,7 +159,8 @@ export default function HostStage({
         dc: next.dice.dc,
         outcome: next.dice.outcome,
         speaker: next.speaker !== "Dice" ? next.speaker : undefined,
-        color: roller ? accentColor(roller.color) : undefined
+        isNpc: next.dice.isNpc,
+        color: roller ? accentColor(roller.color) : (next.dice.isNpc ? "#c48a8a" : undefined)
       });
       return;
     }
@@ -179,6 +198,11 @@ export default function HostStage({
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target) {
+        const tag = (target.tagName || "").toLowerCase();
+        if (tag === "input" || tag === "textarea" || target.isContentEditable) return;
+      }
       if (event.code === "Space") {
         event.preventDefault();
         skip();
@@ -218,12 +242,20 @@ export default function HostStage({
     for (const fx of effects) {
       if (seen.has(fx.id)) continue;
       seen.add(fx.id);
-      switch (fx.kind) {
-        case "shake": setShakeKey((k) => k + 1); playSfx("rumble", fx.strength); break;
-        case "flash": setFlashKey((k) => k + 1); playSfx("flash", fx.strength); break;
-        case "darkness": setDarkUntil(Date.now() + 4500); playSfx("darkness"); break;
-        case "heartbeat": setPulseUntil(Date.now() + 5200); playSfx("heartbeat"); break;
-        default: atmosphereRef.current?.burst(fx.kind, fx.strength);
+      const times = Math.max(1, Math.min(8, Number(fx.repeat) || 1));
+      const gap = Math.max(0, Math.min(5000, Number(fx.delayMs) || 0));
+      const fire = () => {
+        switch (fx.kind) {
+          case "shake": setShakeKey((k) => k + 1); playSfx("rumble", fx.strength); break;
+          case "flash": setFlashKey((k) => k + 1); playSfx("flash", fx.strength); break;
+          case "darkness": setDarkUntil(Date.now() + 4500); playSfx("darkness"); break;
+          case "heartbeat": setPulseUntil(Date.now() + 5200); playSfx("heartbeat"); break;
+          default: atmosphereRef.current?.burst(fx.kind, fx.strength);
+        }
+      };
+      for (let i = 0; i < times; i += 1) {
+        if (i === 0 || gap === 0) fire();
+        else setTimeout(fire, gap * i);
       }
     }
   }, [campaign.effects]);
@@ -235,7 +267,7 @@ export default function HostStage({
     return () => clearInterval(timer);
   }, [darkUntil, pulseUntil, now]);
 
-  const mood = campaign.ambience?.mood || "calm";
+  const mood = debugMood || campaign.ambience?.mood || "calm";
   const intensity = campaign.ambience?.intensity ?? 0.5;
 
   /* ------------------------------------------------------------------ */
@@ -295,6 +327,41 @@ export default function HostStage({
     api.party({ campaignId: campaign.id, action: "updateSettings", [key]: value }).catch(() => undefined);
   };
 
+  const previewEffect = (kind: StageEffectKind) => {
+    switch (kind) {
+      case "shake": setShakeKey((key) => key + 1); playSfx("rumble", 0.8); break;
+      case "flash": setFlashKey((key) => key + 1); playSfx("flash", 0.8); break;
+      case "darkness": setDarkUntil(Date.now() + 4500); playSfx("darkness"); break;
+      case "heartbeat": setPulseUntil(Date.now() + 5200); playSfx("heartbeat"); break;
+      default: atmosphereRef.current?.burst(kind, 0.85);
+    }
+  };
+
+  const previewDice = (outcome: DiceOutcome, isNpc = false) => {
+    const total = outcome === "critical-success" ? 20 : outcome === "critical-failure" ? 1 : outcome.includes("failure") ? 8 : 18;
+    setActiveDice({
+      id: `debug-${outcome}-${Date.now()}`,
+      notation: "1d20+3",
+      reason: `Debug preview: ${outcome.replaceAll("-", " ")}`,
+      rolls: [Math.max(1, total - 3)],
+      modifier: 3,
+      total,
+      d20Mode: "normal",
+      dc: 15,
+      outcome,
+      speaker: isNpc ? "The Adversary" : "UI Preview Hero",
+      isNpc,
+      color: isNpc ? "#c48a8a" : visual.accentBright
+    });
+  };
+
+  const closeDebug = () => {
+    setDebugOpen(false);
+    setDebugTheme(null);
+    setDebugMood(null);
+    setDebugOutro(false);
+  };
+
   /* ------------------------------------------------------------------ */
   /* Derived                                                             */
   /* ------------------------------------------------------------------ */
@@ -350,7 +417,7 @@ export default function HostStage({
 
   return (
     <div
-      className={`stage screen ${shaking ? "stage-shake" : ""} ${pulsing ? "stage-pulse" : ""}`}
+      className={`stage screen ${shaking ? "stage-shake" : ""} ${pulsing ? "stage-pulse" : ""} ${campaign.status === "completed" ? "stage-completed" : ""}`}
       data-music-theme={visual.key}
       onClick={skip}
     >
@@ -483,6 +550,27 @@ export default function HostStage({
       ) : null}
 
       {/* Dice cinematic */}
+      
+      {(campaign.status === "completed" && campaign.ending) || debugOutro ? (
+        <div className="credits-reel" onClick={(e) => e.stopPropagation()}>
+          <div className={`credits-kind kind-${campaign.ending?.kind || "victory"}`}>{campaign.ending?.kind || "victory"}</div>
+          <h2 className="credits-title">{campaign.ending?.title || "The Weaver Rests"}</h2>
+          <p className="credits-summary">{campaign.ending?.summary || "A debug epilogue unfurls without advancing the campaign. The table fades, the final threads gleam, and every visual remains available for inspection."}</p>
+          {(campaign.ending?.highlights?.length || debugOutro) ? (
+            <ul className="credits-highlights">
+              {(campaign.ending?.highlights || ["The final roll was cast", "The party changed the world", "The story remains in the archive"]).map((h, i) => (
+                <li key={i}>{h}</li>
+              ))}
+            </ul>
+          ) : null}
+          <div className="credits-cast">
+            {campaign.players.map((p) => (
+              <span key={p.id} className="credits-cast-name">{p.characterName || p.name}</span>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
       {activeDice ? (
         <DiceTheater key={activeDice.id} roll={activeDice} muted={muted} onDone={() => setActiveDice(null)} />
       ) : null}
@@ -491,7 +579,53 @@ export default function HostStage({
       <div className="stage-tools" onClick={(event) => event.stopPropagation()}>
         <button className="tool-chip" onClick={() => setTomeOpen((open) => !open)}>Tome</button>
         <button className="tool-chip" onClick={() => setDrawerOpen((open) => !open)}>Director</button>
+        <button className={`tool-chip ${debugOpen ? "attention" : ""}`} onClick={() => setDebugOpen((open) => !open)}>Debug</button>
       </div>
+
+      {debugOpen ? (
+        <aside className="debug-menu panel" onClick={(event) => event.stopPropagation()}>
+          <div className="tome-head">
+            <h3 className="panel-subtitle">UI Debug Gallery</h3>
+            <button className="ghost-button" onClick={closeDebug}>Close</button>
+          </div>
+
+          <label className="director-label">Menus</label>
+          <div className="debug-grid menus">
+            <button className="chip-toggle tiny" onClick={() => setTomeOpen(true)}>Tome</button>
+            <button className="chip-toggle tiny" onClick={() => setDrawerOpen(true)}>Director</button>
+            <button className={`chip-toggle tiny ${debugOutro ? "selected" : ""}`} onClick={() => { setDebugOutro((shown) => !shown); setDebugMood("outro"); }}>Three.js Outro</button>
+          </div>
+
+          <label className="director-label">Themes</label>
+          <div className="debug-grid">
+            {DEBUG_THEMES.map((themeKey) => (
+              <button key={themeKey} className={`chip-toggle tiny ${visual.key === themeKey ? "selected" : ""}`} onClick={() => setDebugTheme(themeKey)}>
+                {themeKey}
+              </button>
+            ))}
+          </div>
+
+          <label className="director-label">Atmosphere moods</label>
+          <div className="debug-grid">
+            {DEBUG_MOODS.map((moodKey) => (
+              <button key={moodKey} className={`chip-toggle tiny ${mood === moodKey ? "selected" : ""}`} onClick={() => setDebugMood(moodKey)}>
+                {moodKey}
+              </button>
+            ))}
+          </div>
+
+          <label className="director-label">Stage effects</label>
+          <div className="debug-grid">
+            {DEBUG_EFFECTS.map((effect) => <button key={effect} className="chip-toggle tiny" onClick={() => previewEffect(effect)}>{effect}</button>)}
+          </div>
+
+          <label className="director-label">Dice outcomes</label>
+          <div className="debug-grid">
+            {DEBUG_OUTCOMES.map((outcome) => <button key={outcome} className="chip-toggle tiny" onClick={() => previewDice(outcome)}>{outcome.replaceAll("-", " ")}</button>)}
+            <button className="chip-toggle tiny" onClick={() => previewDice("hard-failure", true)}>NPC roll</button>
+          </div>
+        </aside>
+      ) : null}
 
       {/* The Tome — scrollback */}
       {tomeOpen ? (

@@ -1,5 +1,14 @@
-export type Role = "system" | "user" | "assistant" | "tool";
+﻿export type Role = "system" | "user" | "assistant" | "tool";
 export type CampaignType = "tabletop" | "dnd";
+
+/** How often the DM should call for d20 checks. */
+export type RollMode = "light" | "standard" | "heavy" | "all";
+
+/** Campaign challenge tuning — shifts DCs, damage willingness, enemy competence. */
+export type Difficulty = "easy" | "medium" | "hard" | "insane";
+
+/** How the saga closed (or is closing). */
+export type EndingKind = "victory" | "defeat" | "bittersweet" | "escape";
 
 /**
  * High-level loading phase the host PC uses to drive the timeline UI.
@@ -71,6 +80,25 @@ export type MessageSegment = {
   content: string;
 };
 
+/**
+ * Server-judged d20 result spectrum. Not binary — margin vs DC matters.
+ *   critical-success  – natural 20
+ *   strong-success    – beat DC by 5+
+ *   success           – meet/beat DC by 0–4
+ *   partial-success   – miss by 1–4 (progress with a cost) — only when difficulty allows
+ *   failure           – miss by 1–4 (or any miss when partials are off)
+ *   hard-failure      – miss by 5+
+ *   critical-failure  – natural 1
+ */
+export type DiceOutcome =
+  | "critical-success"
+  | "strong-success"
+  | "success"
+  | "partial-success"
+  | "failure"
+  | "hard-failure"
+  | "critical-failure";
+
 export type DiceEvent = {
   notation: string;
   reason: string;
@@ -80,8 +108,12 @@ export type DiceEvent = {
   d20Mode?: "normal" | "advantage" | "disadvantage";
   /** Difficulty class the check was judged against (server-side). */
   dc?: number;
+  /** How far the total sits from the DC (total - dc). Positive = over. */
+  margin?: number;
   /** Server-judged result of the check — the narrator cannot fudge this. */
-  outcome?: "critical-success" | "success" | "failure" | "critical-failure";
+  outcome?: DiceOutcome;
+  /** True when this roll is for an NPC/enemy (not a player). */
+  isNpc?: boolean;
 };
 
 export type DisplayEvent = {
@@ -108,6 +140,7 @@ export type ChatMessage = {
 /**
  * Mood palette the DM can set with the set_ambience tool. The host TV maps
  * each mood to a particle palette, fog density, color grade, and music bias.
+ * "outro" is reserved for the closing credits after the campaign ends.
  */
 export type AmbienceMood =
   | "calm"
@@ -117,7 +150,8 @@ export type AmbienceMood =
   | "dread"
   | "triumph"
   | "wonder"
-  | "somber";
+  | "somber"
+  | "outro";
 
 export type Ambience = {
   mood: AmbienceMood;
@@ -138,12 +172,16 @@ export type StageEffectKind =
   | "darkness"
   | "heartbeat";
 
-/** One-shot cinematic effect queued by the DM via trigger_effect. */
+/** Cinematic effect queued by the DM via trigger_effect. Supports repeats. */
 export type StageEffect = {
   id: string;
   kind: StageEffectKind;
   /** 0..1 strength. */
   strength: number;
+  /** How many times to fire (default 1). */
+  repeat?: number;
+  /** Delay in ms between repeats (default 0). */
+  delayMs?: number;
   createdAt: string;
 };
 
@@ -162,11 +200,25 @@ export type PortraitImage = {
   createdAt: string;
 };
 
+/** Snapshot shown on the TV credits reel after the campaign ends. */
+export type CampaignEnding = {
+  kind: EndingKind;
+  /** Short title, e.g. "The Fat Man Falls" or "Veridia Burns". */
+  title: string;
+  /** 1–3 sentence epilogue. */
+  summary: string;
+  /** When the ending was sealed. */
+  endedAt: string;
+  /** Optional highlight lines for the credits (key moments, final stats). */
+  highlights?: string[];
+};
+
 export type Campaign = {
   id: string;
   title: string;
   joinCode: string;
-  status: "lobby" | "active";
+  /** lobby → active → completed (after win/loss credits). */
+  status: "lobby" | "active" | "completed";
   hostStartedAt?: string;
   hostActiveAt?: string;
   partyLeaderId?: string;
@@ -198,6 +250,12 @@ export type Campaign = {
   isRandomized?: boolean;
   campaignLength?: "auto" | "short" | "medium" | "long" | "extra_long" | "infinite";
   rulesMode?: "casual" | "full";
+  /** Challenge tuning. Default medium. */
+  difficulty?: Difficulty;
+  /** How often d20 checks fire. Default standard (risk-gated). */
+  rollMode?: RollMode;
+  /** Filled when the campaign reaches a win/loss/bittersweet close. */
+  ending?: CampaignEnding;
   questLog?: string;
   showQuestOnTV?: boolean;
   showQuestOnController?: boolean;
@@ -209,7 +267,22 @@ export type Campaign = {
   updatedAt: string;
 };
 
-export type CampaignSummary = Pick<Campaign, "id" | "title" | "joinCode" | "status" | "updatedAt" | "hostActiveAt" | "campaignType" | "isRandomized" | "campaignLength" | "rulesMode"> & {
+export type CampaignSummary = Pick<
+  Campaign,
+  | "id"
+  | "title"
+  | "joinCode"
+  | "status"
+  | "updatedAt"
+  | "hostActiveAt"
+  | "campaignType"
+  | "isRandomized"
+  | "campaignLength"
+  | "rulesMode"
+  | "difficulty"
+  | "rollMode"
+> & {
   playerCount: number;
   isHostActive?: boolean;
+  endingKind?: EndingKind;
 };

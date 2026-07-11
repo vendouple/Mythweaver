@@ -16,7 +16,8 @@ export function buildCampaignContext(campaign: Campaign) {
     isPartyLeader: campaign.partyLeaderId === player.id,
     inventory: player.inventory,
     abilities: player.abilities,
-    notes: player.notes
+    notes: player.notes,
+    stats: player.stats
   }));
 
   const recentMessages = campaign.messages.slice(-RECENT_MESSAGE_COUNT);
@@ -38,11 +39,16 @@ export function buildCampaignContext(campaign: Campaign) {
     `Campaign Type: ${campaign.campaignType === "dnd" ? "Dungeons & Dragons campaign" : "Standard tabletop RPG campaign (not D&D unless the setup explicitly says so)"}`,
     `Campaign Mode: ${campaign.isRandomized ? "Surprise / Randomized Campaign" : "Normal Campaign"}`,
     `Rules Mode: ${campaign.campaignType === "dnd" ? (campaign.rulesMode === "full" ? "Full D&D 5e" : "D&D-inspired rules-light") : "Rules-light tabletop"}`,
+    `Difficulty: ${campaign.difficulty || "medium"} (easy -2 DC / medium 0 / hard +2 / insane +4). Applies to attacks-to-hit, escape/flee, stealth, persuasion, and all contested checks. Enemy competence, HP, and damage scale with difficulty. Partials only on easy/medium.`,
+    `Roll Mode: ${campaign.rollMode || "standard"} (light = rare checks; standard = meaningful risk; heavy = frequent; all = nearly every uncertain action)`,
     `Campaign Length Setting: ${campaign.campaignLength || "auto"}`,
+    campaign.ending
+      ? `ENDING (campaign completed): kind=${campaign.ending.kind}; title="${campaign.ending.title}"; summary="${campaign.ending.summary}"`
+      : `Ending: not yet — call end_campaign when the saga reaches a decisive win/loss/bittersweet/escape (early endings allowed).`,
     `Starting background story: ${campaign.startingStory || "None provided"}`,
     `Story characters from setup: ${JSON.stringify(campaign.storyCharacters)}`,
     `Player-controlled characters that you must not speak or decide for: ${JSON.stringify(playerState.map((player) => player.characterName || player.name))}`,
-    `Players: ${JSON.stringify(playerState)}`,
+    `Players (include stats/HP): ${JSON.stringify(playerState)}`,
     `Current scene: ${campaign.currentScene}`,
     `Current TV overview: ${campaign.overview}`,
     `Current per-player controller actions: ${JSON.stringify(campaign.playerActions)}`,

@@ -28,7 +28,8 @@ const CONTEXT_FALLBACKS: Record<string, string[]> = {
   mystery: ["mystery", "tense", "main", "any"],
   dread:   ["dread", "somber", "mystery", "main", "any"],
   triumph: ["triumph", "calm", "main", "any"],
-  somber:  ["somber", "dread", "calm", "main", "any"]
+  somber:  ["somber", "dread", "calm", "main", "any"],
+  outro:   ["outro", "triumph", "somber", "main", "any"]
 };
 
 const BASE_VOLUME = 0.32;

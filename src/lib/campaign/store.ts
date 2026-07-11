@@ -1,6 +1,23 @@
 import { mkdir, readFile, readdir, writeFile, appendFile, rm } from "fs/promises";
 import path from "path";
-import { Ambience, AmbienceMood, Campaign, CampaignSummary, CampaignType, ChatMessage, DisplayEvent, Player, StageEffect, StageEffectKind, StoryCharacter, SuggestedAction } from "./types";
+import {
+  Ambience,
+  AmbienceMood,
+  Campaign,
+  CampaignEnding,
+  CampaignSummary,
+  CampaignType,
+  ChatMessage,
+  Difficulty,
+  DisplayEvent,
+  EndingKind,
+  Player,
+  RollMode,
+  StageEffect,
+  StageEffectKind,
+  StoryCharacter,
+  SuggestedAction
+} from "./types";
 import { createId, createJoinCode } from "@/lib/utils/ids";
 import { classifyMusicTheme, MUSIC_THEMES, MusicTheme } from "./musicTheme";
 
@@ -103,7 +120,10 @@ export async function listCampaigns(): Promise<CampaignSummary[]> {
             campaignType: campaign.campaignType,
             isRandomized: campaign.isRandomized,
             campaignLength: campaign.campaignLength,
-            rulesMode: campaign.rulesMode
+            rulesMode: campaign.rulesMode,
+            difficulty: campaign.difficulty,
+            rollMode: campaign.rollMode,
+            endingKind: campaign.ending?.kind
           };
         } catch {
           return null;
@@ -122,7 +142,9 @@ export async function createCampaign(
   isRandomized?: boolean,
   campaignLength?: string,
   rulesMode?: "casual" | "full",
-  campaignType?: CampaignType
+  campaignType?: CampaignType,
+  difficulty?: Difficulty | string,
+  rollMode?: RollMode | string
 ) {
   await ensureDataRoot();
   const now = new Date().toISOString();
@@ -140,6 +162,15 @@ export async function createCampaign(
     };
   }).filter((c) => c.name);
 
+  const validDifficulty: Difficulty[] = ["easy", "medium", "hard", "insane"];
+  const validRollMode: RollMode[] = ["light", "standard", "heavy", "all"];
+  const resolvedDifficulty: Difficulty = validDifficulty.includes(difficulty as Difficulty)
+    ? (difficulty as Difficulty)
+    : "medium";
+  const resolvedRollMode: RollMode = validRollMode.includes(rollMode as RollMode)
+    ? (rollMode as RollMode)
+    : "standard";
+
   const campaign: Campaign = {
     id: createId("campaign"),
     title: title.trim() || "Untitled Adventure",
@@ -150,6 +181,8 @@ export async function createCampaign(
     startingStory: cleanStory,
     storyCharacters: normalizedStoryCharacters,
     rulesMode: rulesMode || "casual",
+    difficulty: resolvedDifficulty,
+    rollMode: resolvedRollMode,
     currentScene: cleanStory || "A quiet chamber where legends begin. The air is thick with anticipation.",
     overview: "Gathering players. Prepare for adventure...",
     displayEvents: [
@@ -270,7 +303,6 @@ export function safePushDisplayEvent(campaign: Campaign, event: Omit<DisplayEven
   campaign.displayEvents = campaign.displayEvents.slice(-80);
 }
 
-
 export async function appendMessage(campaign: Campaign, message: Omit<ChatMessage, "id" | "createdAt">) {
   campaign.messages.push({ ...message, id: createId("msg"), createdAt: new Date().toISOString() });
   await saveCampaign(campaign);
@@ -284,13 +316,18 @@ function normalizeCampaign(raw: Partial<Campaign> & { suggestedActions?: unknown
   const now = new Date().toISOString();
   const players = Array.isArray(raw.players) ? raw.players.map((player) => normalizePlayer(player as Partial<Player>, now)) : [];
   const currentScene = String(raw.currentScene || "The adventure has not begun.");
-  const isCampaignActive = raw.status === "active";
-  const suggestedActions = normalizeSuggestedActions(raw.suggestedActions, !isCampaignActive);
+  const status: Campaign["status"] =
+
+    raw.status === "active" ? "active" : raw.status === "completed" ? "completed" : "lobby";
+  const isCampaignActive = status === "active";
+  const suggestedActions = normalizeSuggestedActions(raw.suggestedActions, !isCampaignActive && status !== "completed");
+  const validDifficulty: Difficulty[] = ["easy", "medium", "hard", "insane"];
+  const validRollMode: RollMode[] = ["light", "standard", "heavy", "all"];
   return {
     id: String(raw.id || createId("campaign")),
     title: String(raw.title || "Untitled Adventure"),
     joinCode: String(raw.joinCode || createJoinCode()).toUpperCase(),
-    status: isCampaignActive ? "active" : "lobby",
+    status,
     hostStartedAt: raw.hostStartedAt,
     hostActiveAt: raw.hostActiveAt,
     partyLeaderId: raw.partyLeaderId || players[0]?.id,
@@ -301,7 +338,7 @@ function normalizeCampaign(raw: Partial<Campaign> & { suggestedActions?: unknown
     overview: String(raw.overview || currentScene),
     displayEvents: normalizeDisplayEvents(raw.displayEvents, currentScene, now),
     suggestedActions,
-    playerActions: normalizePlayerActions(raw.playerActions, players, suggestedActions, !isCampaignActive),
+    playerActions: normalizePlayerActions(raw.playerActions, players, suggestedActions, !isCampaignActive && status !== "completed"),
     partyActions: normalizeOptionalSuggestedActions(raw.partyActions),
     memory: String(raw.memory || ""),
     images: Array.isArray(raw.images) ? raw.images : [],
@@ -317,6 +354,9 @@ function normalizeCampaign(raw: Partial<Campaign> & { suggestedActions?: unknown
     isRandomized: !!raw.isRandomized,
     campaignLength: raw.campaignLength || "auto",
     rulesMode: raw.rulesMode === "full" ? "full" : "casual",
+    difficulty: validDifficulty.includes(raw.difficulty as Difficulty) ? (raw.difficulty as Difficulty) : "medium",
+    rollMode: validRollMode.includes(raw.rollMode as RollMode) ? (raw.rollMode as RollMode) : "standard",
+    ending: normalizeEnding(raw.ending),
     questLog: raw.questLog,
     showQuestOnTV: raw.showQuestOnTV !== undefined ? !!raw.showQuestOnTV : true,
     showQuestOnController: raw.showQuestOnController !== undefined ? !!raw.showQuestOnController : true,
@@ -329,8 +369,26 @@ function normalizeCampaign(raw: Partial<Campaign> & { suggestedActions?: unknown
   };
 }
 
-const AMBIENCE_MOODS: AmbienceMood[] = ["calm", "tense", "battle", "mystery", "dread", "triumph", "wonder", "somber"];
+const AMBIENCE_MOODS: AmbienceMood[] = ["calm", "tense", "battle", "mystery", "dread", "triumph", "wonder", "somber", "outro"];
 const EFFECT_KINDS: StageEffectKind[] = ["shake", "flash", "embers", "fog", "rain", "snow", "darkness", "heartbeat"];
+const ENDING_KINDS: EndingKind[] = ["victory", "defeat", "bittersweet", "escape"];
+
+function normalizeEnding(raw: unknown): CampaignEnding | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const item = raw as Partial<CampaignEnding>;
+  const kind = ENDING_KINDS.includes(item.kind as EndingKind) ? (item.kind as EndingKind) : "bittersweet";
+  const title = typeof item.title === "string" && item.title.trim() ? item.title.trim() : "The End";
+  const summary = typeof item.summary === "string" && item.summary.trim() ? item.summary.trim() : "The saga closes.";
+  return {
+    kind,
+    title,
+    summary,
+    endedAt: String(item.endedAt || new Date().toISOString()),
+    highlights: Array.isArray(item.highlights)
+      ? item.highlights.map(String).map((h) => h.trim()).filter(Boolean).slice(0, 12)
+      : undefined
+  };
+}
 
 function normalizeAmbience(raw: unknown): Ambience | undefined {
   if (!raw || typeof raw !== "object") return undefined;
@@ -349,24 +407,76 @@ function normalizeEffects(raw: unknown): StageEffect[] {
   if (!Array.isArray(raw)) return [];
   return raw
     .filter((item): item is Record<string, unknown> => !!item && typeof item === "object")
-    .map((item) => ({
-      id: String(item.id || createId("fx")),
-      kind: EFFECT_KINDS.includes(item.kind as StageEffectKind) ? (item.kind as StageEffectKind) : "embers",
-      strength: Math.max(0, Math.min(1, Number(item.strength ?? 0.6))) || 0.6,
-      createdAt: String(item.createdAt || new Date().toISOString())
-    }))
+    .map((item) => {
+      const repeatRaw = Number(item.repeat ?? 1);
+      const delayRaw = Number(item.delayMs ?? 0);
+      return {
+        id: String(item.id || createId("fx")),
+        kind: EFFECT_KINDS.includes(item.kind as StageEffectKind) ? (item.kind as StageEffectKind) : "embers",
+        strength: Math.max(0, Math.min(1, Number(item.strength ?? 0.6))) || 0.6,
+        repeat: Number.isFinite(repeatRaw) ? Math.max(1, Math.min(8, Math.round(repeatRaw))) : undefined,
+        delayMs: Number.isFinite(delayRaw) ? Math.max(0, Math.min(5000, Math.round(delayRaw))) : undefined,
+        createdAt: String(item.createdAt || new Date().toISOString())
+      };
+    })
     .slice(-12);
 }
 
-export function pushStageEffect(campaign: Campaign, kind: StageEffectKind, strength: number) {
+export function pushStageEffect(
+  campaign: Campaign,
+  kind: StageEffectKind,
+  strength: number,
+  opts?: { repeat?: number; delayMs?: number }
+) {
   if (!campaign.effects) campaign.effects = [];
+  const repeat = opts?.repeat != null && Number.isFinite(opts.repeat)
+    ? Math.max(1, Math.min(8, Math.round(opts.repeat)))
+    : undefined;
+  const delayMs = opts?.delayMs != null && Number.isFinite(opts.delayMs)
+    ? Math.max(0, Math.min(5000, Math.round(opts.delayMs)))
+    : undefined;
   campaign.effects.push({
     id: createId("fx"),
     kind,
     strength: Math.max(0, Math.min(1, strength)),
+    repeat,
+    delayMs,
     createdAt: new Date().toISOString()
   });
   campaign.effects = campaign.effects.slice(-12);
+}
+
+/** Seal the campaign with a win/loss/bittersweet/escape ending and clear controller actions. */
+export function endCampaign(
+  campaign: Campaign,
+  payload: { kind: string; title: string; summary: string; highlights?: string[] }
+) {
+  const kind = ENDING_KINDS.includes(payload.kind as EndingKind) ? (payload.kind as EndingKind) : "bittersweet";
+  const title = (payload.title || "The End").trim() || "The End";
+  const summary = (payload.summary || "The saga closes.").trim() || "The saga closes.";
+  const highlights = Array.isArray(payload.highlights)
+    ? payload.highlights.map(String).map((h) => h.trim()).filter(Boolean).slice(0, 12)
+    : undefined;
+  const endedAt = new Date().toISOString();
+  campaign.status = "completed";
+  campaign.ending = { kind, title, summary, endedAt, highlights };
+  campaign.ambience = {
+    mood: "outro",
+    intensity: 0.7,
+    note: title,
+    updatedAt: endedAt
+  };
+  campaign.suggestedActions = [];
+  campaign.partyActions = [];
+  campaign.playerActions = {};
+  for (const player of campaign.players) {
+    campaign.playerActions[player.id] = [];
+  }
+  safePushDisplayEvent(campaign, {
+    type: "system",
+    speaker: "SYSTEM",
+    content: `The saga ends - ${kind.toUpperCase()}: ${title}`
+  });
 }
 
 function normalizeCampaignType(raw: Partial<Campaign>): CampaignType {
