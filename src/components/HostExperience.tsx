@@ -6,6 +6,7 @@ import { bgmSetContext, bgmSetTheme, bgmStop } from "@/lib/client/audio";
 import HostLobby from "@/components/HostLobby";
 import HostStage from "@/components/HostStage";
 import Weaving from "@/components/Weaving";
+import MusicWidget from "@/components/MusicWidget";
 import CosmosCanvas from "@/components/three/CosmosCanvas";
 
 /**
@@ -54,18 +55,31 @@ export default function HostExperience({ campaignId, onExit }: { campaignId: str
   }
 
   if (campaign.status === "lobby") {
-    return <HostLobby campaign={campaign} />;
+    return (
+      <>
+        <HostLobby campaign={campaign} />
+        <MusicWidget />
+      </>
+    );
   }
 
   if (!storyStarted) {
     return (
-      <Weaving
-        phase={campaign.dmPhase}
-        status={campaign.dmStatus}
-        title={campaign.isRandomized && !storyStarted ? "Breaking the seal…" : campaign.title}
-      />
+      <>
+        <Weaving
+          phase={campaign.dmPhase}
+          status={campaign.dmStatus}
+          title={campaign.isRandomized && !storyStarted ? "Breaking the seal…" : campaign.title}
+        />
+        <MusicWidget />
+      </>
     );
   }
 
-  return <HostStage campaign={campaign} onExit={onExit} />;
+  return (
+    <>
+      <HostStage campaign={campaign} onExit={onExit} />
+      <MusicWidget />
+    </>
+  );
 }

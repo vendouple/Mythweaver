@@ -24,8 +24,30 @@ let fileMap: Record<string, string> | null = null;
 let manifestRequested = false;
 let ctx: AudioContext | null = null;
 
+const SFX_VOLUME_KEY = "mythweaver-sfx-volume";
+
+/** User SFX volume 0..1, restored from a previous session. */
+let sfxVolume = 1;
+if (typeof window !== "undefined") {
+  const raw = window.localStorage.getItem(SFX_VOLUME_KEY);
+  const parsed = raw == null ? NaN : parseFloat(raw);
+  if (Number.isFinite(parsed)) sfxVolume = Math.min(1, Math.max(0, parsed));
+}
+
 export function sfxSetMuted(muted: boolean) {
   sfxMuted = muted;
+}
+
+/** Set the user SFX volume (0..1). Persists across sessions. */
+export function sfxSetVolume(next: number) {
+  sfxVolume = Math.min(1, Math.max(0, next));
+  if (typeof window !== "undefined") {
+    window.localStorage.setItem(SFX_VOLUME_KEY, String(sfxVolume));
+  }
+}
+
+export function sfxGetVolume() {
+  return sfxVolume;
 }
 
 function ensureManifest() {
@@ -174,20 +196,20 @@ const SYNTHS: Record<SfxName, (context: AudioContext, master: GainNode) => void>
 
 /** Fire a cue. Silently does nothing if audio is unavailable or muted. */
 export function playSfx(name: SfxName, volume = 1) {
-  if (sfxMuted) return;
+  if (sfxMuted || sfxVolume <= 0) return;
   ensureManifest();
   try {
     const fileUrl = fileMap?.[name];
     if (fileUrl) {
       const el = new Audio(fileUrl);
-      el.volume = Math.min(1, 0.55 * volume);
+      el.volume = Math.min(1, 0.55 * volume * sfxVolume);
       el.play().catch(() => undefined);
       return;
     }
     const context = audioContext();
     if (!context) return;
     const master = context.createGain();
-    master.gain.value = 0.16 * volume;
+    master.gain.value = 0.16 * volume * sfxVolume;
     master.connect(context.destination);
     SYNTHS[name]?.(context, master);
   } catch {
