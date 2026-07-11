@@ -56,13 +56,15 @@ function beatHold(plain: string) {
 export default function HostStage({
   campaign,
   onExit,
-  theme
+  theme,
+  debugMode = false
 }: {
   campaign: Campaign;
   onExit: () => void;
   theme?: ThemeKey | string | null;
+  debugMode?: boolean;
 }) {
-  const [debugOpen, setDebugOpen] = useState(false);
+  const [debugOpen, setDebugOpen] = useState(debugMode);
   const [debugTheme, setDebugTheme] = useState<ThemeKey | null>(null);
   const [debugMood, setDebugMood] = useState<AmbienceMood | null>(null);
   const [debugOutro, setDebugOutro] = useState(false);
@@ -579,14 +581,17 @@ export default function HostStage({
       <div className="stage-tools" onClick={(event) => event.stopPropagation()}>
         <button className="tool-chip" onClick={() => setTomeOpen((open) => !open)}>Tome</button>
         <button className="tool-chip" onClick={() => setDrawerOpen((open) => !open)}>Director</button>
-        <button className={`tool-chip ${debugOpen ? "attention" : ""}`} onClick={() => setDebugOpen((open) => !open)}>Debug</button>
+        {debugMode ? <button className={`tool-chip ${debugOpen ? "attention" : ""}`} onClick={() => setDebugOpen((open) => !open)}>Gallery</button> : null}
       </div>
 
-      {debugOpen ? (
+      {debugMode && debugOpen ? (
         <aside className="debug-menu panel" onClick={(event) => event.stopPropagation()}>
           <div className="tome-head">
             <h3 className="panel-subtitle">UI Debug Gallery</h3>
-            <button className="ghost-button" onClick={closeDebug}>Close</button>
+            <span className="debug-menu-actions">
+              <button className="ghost-button" onClick={closeDebug}>Hide</button>
+              <button className="ghost-button" onClick={onExit}>Title screen</button>
+            </span>
           </div>
 
           <label className="director-label">Menus</label>

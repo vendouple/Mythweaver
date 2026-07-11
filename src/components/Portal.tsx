@@ -11,11 +11,13 @@ import CosmosCanvas from "@/components/three/CosmosCanvas";
 export default function Portal({
   onCreate,
   onResume,
-  onJoin
+  onJoin,
+  onDebug
 }: {
   onCreate: () => void;
   onResume: (campaignId: string) => void;
   onJoin: () => void;
+  onDebug: () => void;
 }) {
   const [campaigns, setCampaigns] = useState<CampaignSummary[] | null>(null);
   const [sagasOpen, setSagasOpen] = useState(false);
@@ -58,6 +60,10 @@ export default function Portal({
         <h1 className="brand-title">Mythweaver</h1>
         <p className="brand-sub">An AI game master for the living room — the screen is the stage, your phones are the hands of fate.</p>
       </header>
+
+      <button className="portal-debug-button" onClick={onDebug} title="Open the UI and theme showcase">
+        Debug UI
+      </button>
 
       {!sagasOpen ? (
         <main className="portal-choices">

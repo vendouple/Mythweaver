@@ -8,12 +8,14 @@ import CreateWizard from "@/components/CreateWizard";
 import HostExperience from "@/components/HostExperience";
 import JoinFlow from "@/components/JoinFlow";
 import Controller from "@/components/Controller";
+import DebugShowcase from "@/components/DebugShowcase";
 
 type View =
   | { kind: "portal" }
   | { kind: "create" }
   | { kind: "host"; campaignId: string }
   | { kind: "join"; initialCode?: string }
+  | { kind: "debug" }
   | { kind: "controller"; seat: StoredSeat };
 
 /**
@@ -29,8 +31,11 @@ export default function Home() {
     const code = params.get("code") || undefined;
     const isController = params.get("controller") === "1" || !!code;
     const stage = params.get("stage");
+    const isDebug = params.get("debug") === "1";
 
-    if (isController) {
+    if (isDebug) {
+      setView({ kind: "debug" });
+    } else if (isController) {
       const seat = loadSeat();
       if (seat && !code) {
         setView({ kind: "controller", seat });
@@ -75,6 +80,10 @@ export default function Home() {
             setUrl("controller=1");
             setView({ kind: "join" });
           }}
+          onDebug={() => {
+            setUrl("debug=1");
+            setView({ kind: "debug" });
+          }}
         />
       );
     case "create":
@@ -83,6 +92,8 @@ export default function Home() {
       return <HostExperience campaignId={view.campaignId} onExit={toPortal} />;
     case "join":
       return <JoinFlow initialCode={view.initialCode} onSeated={seatPlayer} onBack={toPortal} />;
+    case "debug":
+      return <DebugShowcase onExit={toPortal} />;
     case "controller":
       return (
         <Controller

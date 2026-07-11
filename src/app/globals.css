@@ -492,6 +492,27 @@ button:disabled { cursor: default; opacity: 0.45; }
   margin: 0 auto;
   line-height: 1.55;
 }
+.portal-debug-button {
+  position: absolute;
+  top: 1.25rem;
+  right: 1.25rem;
+  z-index: 5;
+  padding: 0.55rem 0.85rem;
+  border: 1px solid rgba(232, 220, 192, 0.2);
+  border-radius: 8px;
+  background: rgba(5, 7, 13, 0.66);
+  color: var(--faint);
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  backdrop-filter: blur(10px);
+  transition: color 0.2s, border-color 0.2s, background 0.2s;
+}
+.portal-debug-button:hover {
+  color: var(--parchment);
+  border-color: var(--hairline-strong);
+  background: rgba(12, 15, 25, 0.86);
+}
 
 .portal-choices {
   position: relative;
@@ -1563,6 +1584,7 @@ button:disabled { cursor: default; opacity: 0.45; }
 }
 .debug-grid.menus { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .debug-grid .chip-toggle { min-width: 0; text-transform: capitalize; }
+.debug-menu-actions { display: flex; align-items: center; gap: 0.35rem; }
 @media (max-width: 560px) {
   .debug-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .debug-grid.menus { grid-template-columns: 1fr; }
