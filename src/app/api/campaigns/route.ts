@@ -18,6 +18,12 @@ export async function POST(request: Request) {
     serverLog("API campaigns", `Creating campaign: '${title}' | type: ${campaignType} | randomized: ${randomized} | length: ${length}`);
     
     const rulesMode = campaignType === "dnd" && body.rulesMode === "full" ? "full" : "casual";
+    const difficulty = ["easy", "medium", "hard", "insane"].includes(String(body.difficulty || ""))
+      ? String(body.difficulty)
+      : "medium";
+    const rollMode = ["light", "standard", "heavy", "all"].includes(String(body.rollMode || ""))
+      ? String(body.rollMode)
+      : "standard";
     const created = await createCampaign(
       title,
       String(body.startingStory || body.premise || ""),
@@ -25,7 +31,9 @@ export async function POST(request: Request) {
       randomized,
       length,
       rulesMode,
-      campaignType
+      campaignType,
+      difficulty,
+      rollMode
     );
 
     // Let the AI pick the score before we hand back the campaign, so the lobby

@@ -100,7 +100,13 @@ export default function Portal({
                   <span className="archive-title">{saga.title}</span>
                   <span className="archive-meta">
                     <span className={`archive-status status-${saga.status}`}>
-                      {saga.status === "active" ? "In progress" : "Gathering"}
+                      {saga.status === "active"
+                        ? "In progress"
+                        : saga.status === "completed"
+                          ? saga.endingKind
+                            ? `Ended — ${saga.endingKind}`
+                            : "Ended"
+                          : "Gathering"}
                     </span>
                     <span>{saga.playerCount} {saga.playerCount === 1 ? "hero" : "heroes"}</span>
                     <span>{saga.campaignType === "dnd" ? "D&D" : "Story RPG"}</span>

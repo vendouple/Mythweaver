@@ -36,6 +36,7 @@ export default function HostExperience({ campaignId, onExit }: { campaignId: str
   useEffect(() => {
     if (!status) return;
     if (status === "lobby") bgmSetContext("lobby");
+    else if (status === "completed") bgmSetContext(mood || "outro");
     else if (!storyStarted) bgmSetContext("weaving");
     else bgmSetContext(mood || "calm");
   }, [status, storyStarted, mood]);

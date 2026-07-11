@@ -33,7 +33,8 @@ const MOODS: Record<AmbienceMood, MoodRecipe> = {
   dread:   { colors: ["#6f7787", "#3d4351"], drift: -0.35, wander: 0.6, size: 0.045, opacity: 0.55, count: 300, fogOpacity: 0.38, fogColor: "#0d1017", rays: 0.12 },
   triumph: { colors: ["#ffe08a", "#ffc23c"], drift: 1.1,   wander: 0.8, size: 0.065, opacity: 1.0,  count: 380, fogOpacity: 0.08, fogColor: "#3a2f14", rays: 0.75 },
   wonder:  { colors: ["#8affd8", "#5cc9ff"], drift: 0.45,  wander: 1.2, size: 0.055, opacity: 0.8,  count: 320, fogOpacity: 0.16, fogColor: "#12343a", rays: 0.65 },
-  somber:  { colors: ["#aebdd6", "#7385a3"], drift: -0.22, wander: 0.4, size: 0.04,  opacity: 0.5,  count: 220, fogOpacity: 0.26, fogColor: "#151c29", rays: 0.22 }
+  somber:  { colors: ["#aebdd6", "#7385a3"], drift: -0.22, wander: 0.4, size: 0.04,  opacity: 0.5,  count: 220, fogOpacity: 0.26, fogColor: "#151c29", rays: 0.22 },
+  outro:   { colors: ["#ffe08a", "#aebdd6"], drift: 0.55,  wander: 0.7, size: 0.055, opacity: 0.85, count: 300, fogOpacity: 0.18, fogColor: "#2a2418", rays: 0.55 }
 };
 
 const MAX_PARTICLES = 900;

@@ -32,6 +32,8 @@ export default function CreateWizard({
   const [campaignType, setCampaignType] = useState<"tabletop" | "dnd">("tabletop");
   const [rulesMode, setRulesMode] = useState<"casual" | "full">("casual");
   const [campaignLength, setCampaignLength] = useState("auto");
+  const [difficulty, setDifficulty] = useState<"easy" | "medium" | "hard" | "insane">("medium");
+  const [rollMode, setRollMode] = useState<"light" | "standard" | "heavy" | "all">("standard");
   const [surprise, setSurprise] = useState(false);
   const [title, setTitle] = useState("");
   const [story, setStory] = useState("");
@@ -106,7 +108,9 @@ export default function CreateWizard({
         isRandomized: surprise,
         campaignLength,
         campaignType,
-        rulesMode: campaignType === "dnd" ? rulesMode : "casual"
+        rulesMode: campaignType === "dnd" ? rulesMode : "casual",
+        difficulty,
+        rollMode
       });
       onCreated(campaign);
     });
@@ -186,6 +190,42 @@ export default function CreateWizard({
                   onClick={() => setCampaignLength(length.value)}
                 >
                   {length.label} <em>{length.sub}</em>
+                </button>
+              ))}
+            </div>
+
+            <h3 className="panel-subtitle">How hard should fate push?</h3>
+            <div className="choice-row wrap">
+              {([
+                { value: "easy", label: "Easy", sub: "Forgiving DCs, partials" },
+                { value: "medium", label: "Medium", sub: "Balanced" },
+                { value: "hard", label: "Hard", sub: "Tougher, no partials" },
+                { value: "insane", label: "Insane", sub: "Brutal, lethal" }
+              ] as const).map((d) => (
+                <button
+                  key={d.value}
+                  className={`chip-toggle ${difficulty === d.value ? "selected" : ""}`}
+                  onClick={() => setDifficulty(d.value)}
+                >
+                  {d.label} <em>{d.sub}</em>
+                </button>
+              ))}
+            </div>
+
+            <h3 className="panel-subtitle">How often do the dice speak?</h3>
+            <div className="choice-row wrap">
+              {([
+                { value: "light", label: "Light", sub: "Climactic only" },
+                { value: "standard", label: "Standard", sub: "Meaningful risk" },
+                { value: "heavy", label: "Heavy", sub: "Most contested acts" },
+                { value: "all", label: "All", sub: "Nearly every uncertainty" }
+              ] as const).map((m) => (
+                <button
+                  key={m.value}
+                  className={`chip-toggle ${rollMode === m.value ? "selected" : ""}`}
+                  onClick={() => setRollMode(m.value)}
+                >
+                  {m.label} <em>{m.sub}</em>
                 </button>
               ))}
             </div>
@@ -281,6 +321,8 @@ export default function CreateWizard({
             <div className="summons-review">
               <div className="summons-line"><span>Discipline</span><strong>{campaignType === "dnd" ? `Dungeons & Dragons — ${rulesMode === "full" ? "full 5e" : "rules-light"}` : "Story Engine"}</strong></div>
               <div className="summons-line"><span>Length</span><strong>{LENGTHS.find((l) => l.value === campaignLength)?.label}</strong></div>
+              <div className="summons-line"><span>Difficulty</span><strong>{difficulty}</strong></div>
+              <div className="summons-line"><span>Dice</span><strong>{rollMode}</strong></div>
               {surprise ? (
                 <div className="summons-line"><span>Premise</span><strong>Sealed — revealed at the table</strong></div>
               ) : (
