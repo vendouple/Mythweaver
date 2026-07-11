@@ -76,7 +76,15 @@ function describeCurrentBackground(campaign: Campaign): string {
   const match = (campaign.images || []).find((img) => img.url === url);
   if (match?.prompt) {
     const prompt = match.prompt.length > 260 ? `${match.prompt.slice(0, 260)}…` : match.prompt;
-    return `"${prompt}" — change it (reuse a previous background URL or generate a new one) only if the scene has visibly moved somewhere this no longer depicts.`;
+    // If the backdrop was locked to an earlier scene and the party has clearly
+    // moved on, say so loudly — a stale backdrop is the #1 immersion complaint.
+    const depicts = (campaign.backdropScene || "").trim();
+    const nowScene = (campaign.currentScene || "").trim();
+    const stale = depicts && nowScene && depicts !== nowScene;
+    const staleNote = stale
+      ? ` ⚠️ This backdrop was painted for an EARLIER scene ("${depicts.slice(0, 120)}${depicts.length > 120 ? "…" : ""}"). If the party has moved somewhere it no longer depicts, CHANGE it this turn: reuse a listed background URL via update_campaign_state currentImageUrl, or generate_image (kind "scene").`
+      : "";
+    return `"${prompt}" — change it (reuse a previous background URL or generate a new one) only if the scene has visibly moved somewhere this no longer depicts.${staleNote}`;
   }
   return "A previously painted scene (prompt not found in the gallery).";
 }

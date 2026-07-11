@@ -3,6 +3,7 @@ import { getCampaign, saveCampaign, downloadAndSaveImage, logCampaignDebug, safe
 import { createId } from "@/lib/utils/ids";
 import { aquaConfig, aquaFetch, AquaMessage, AquaToolCall } from "./client";
 import { runTool, toolDefinitions } from "@/lib/tools/registry";
+import { generateImage } from "@/lib/aqua/images";
 import { Campaign, PlayerStat } from "@/lib/campaign/types";
 import { classifyMusicTheme, MUSIC_THEMES, MusicTheme } from "@/lib/campaign/musicTheme";
 
@@ -148,6 +149,9 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
   await logCampaignDebug(campaignId, `[runDungeonMaster] Called by: ${playerName}. Action: "${action}". Options: ${JSON.stringify(options)}`);
   serverLog("DM START", `Running DM for campaign: ${campaignId} | Player: ${playerName} | Action: "${action}"`);
   const campaign = await getCampaign(campaignId);
+  // Backdrop the party sees BEFORE this turn's tools run, so afterward we can
+  // tell whether the DM repainted it itself or left it stale.
+  const preTurnImageUrl = campaign.currentImageUrl;
   const isJoin = action.startsWith("A new player has joined") || action.startsWith("A new player joined");
   const isRejoin = action.startsWith("Player ") && action.includes("rejoined");
   const isInitialStart = action.startsWith("Start the couch campaign now.");
@@ -575,6 +579,28 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
       }
     }
 
+    // Backdrop guarantee: the small RP model paints the opening scene then
+    // forgets the backdrop exists (in playtesting it changed ambience 27× but
+    // the image 0× across 46 turns). So we reconcile server-side — if the scene
+    // has moved materially and the DM didn't repaint this turn, reuse a fitting
+    // past background or paint a fresh one. Non-fatal on failure.
+    if (latestCampaign.status === "active") {
+      try {
+        const scene = (latestCampaign.currentScene || "").trim();
+        const modelChangedBackdrop = latestCampaign.currentImageUrl !== preTurnImageUrl;
+        if (scene) {
+          if (modelChangedBackdrop) {
+            latestCampaign.backdropScene = scene; // the DM handled it this turn
+          } else if (!latestCampaign.backdropScene || sceneSimilarity(scene, latestCampaign.backdropScene) < 0.6) {
+            const decision = await chooseBackdrop(latestCampaign, false);
+            await applyBackdropDecision(latestCampaign, decision, scene, false);
+          }
+        }
+      } catch (err) {
+        serverError("Backdrop", "Scene-director reconcile failed (non-fatal)", err);
+      }
+    }
+
     // Backfill the music theme once the world has content (covers sealed-
     // envelope campaigns, whose premise was empty at creation). Set once,
     // then left alone so the score stays consistent for the whole saga.
@@ -606,6 +632,146 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
     }
     throw error;
   }
+}
+
+type BackdropDecision = { mode: "keep" | "reuse" | "new"; backgroundId?: string; prompt?: string };
+
+/**
+ * Word-overlap similarity (Jaccard on 4+ letter tokens) between two scene
+ * descriptions. Used as a cheap gate: near-identical scenes (same location,
+ * minor rewording) skip the scene-director AI call entirely.
+ */
+function sceneSimilarity(a: string, b: string): number {
+  const toks = (s: string) =>
+    new Set(s.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter((w) => w.length > 3));
+  const A = toks(a);
+  const B = toks(b);
+  if (!A.size || !B.size) return 0;
+  let inter = 0;
+  for (const w of A) if (B.has(w)) inter += 1;
+  return inter / (A.size + B.size - inter);
+}
+
+/** Plain-language description of the backdrop currently on the TV. */
+function describeBackdropPrompt(campaign: Campaign): string {
+  const url = campaign.currentImageUrl;
+  if (!url) return "nothing yet (no backdrop painted)";
+  const match = (campaign.images || []).find((img) => img.url === url);
+  return match?.prompt ? match.prompt : "a previously painted scene";
+}
+
+/**
+ * The scene-director pass: a standalone forced-tool call (like the theme
+ * picker) that decides the TV backdrop for the CURRENT scene — reuse a fitting
+ * past background, paint a new one, or keep what's showing. It runs on the
+ * small model but the DECISION is constrained to a strict tool schema, and the
+ * server applies it — the RP model is never trusted to remember on its own.
+ * When `force` is set (the host tapped Nudge), "keep" is not an option.
+ */
+async function chooseBackdrop(campaign: Campaign, force: boolean): Promise<BackdropDecision | null> {
+  const backgrounds = (campaign.images || []).slice(-12).map((img) => ({ id: img.id, depicts: img.prompt }));
+  const tool = {
+    type: "function" as const,
+    function: {
+      name: "set_backdrop",
+      description: "Choose the TV backdrop for the CURRENT scene. Prefer reuse when a listed background already depicts this place; choose new only when the party is somewhere none of them show; choose keep only if the current backdrop still fits.",
+      parameters: {
+        type: "object",
+        required: ["mode"],
+        properties: {
+          mode: { type: "string", enum: force ? ["reuse", "new"] : ["keep", "reuse", "new"], description: force ? "reuse an existing background, or new to paint a fresh one." : "keep the current backdrop, reuse an existing one, or paint a new one." },
+          backgroundId: { type: "string", description: "For reuse: the id of the existing background that best depicts the current place." },
+          prompt: { type: "string", description: "For new: a vivid, self-contained text-to-image scene prompt. Describe place, time of day, weather, lighting, and mood in concrete visual detail. NO character or proper names — the image model does not know them." }
+        }
+      }
+    }
+  };
+
+  const config = aquaConfig();
+  const system = `You are the TV scene director for a couch RPG. Read the CURRENT scene and the backdrop now showing, then call set_backdrop EXACTLY ONCE.${force ? " The host has asked you to refresh the backdrop, so you MUST change it — reuse a fitting past background or paint a new one." : " Prefer reuse; only paint new when the location is genuinely new; keep only if the current backdrop still depicts this place."}`;
+  const user = [
+    `Current scene: ${campaign.currentScene}`,
+    campaign.ambience ? `Atmosphere: ${campaign.ambience.mood}${campaign.ambience.note ? ` — ${campaign.ambience.note}` : ""}` : "",
+    `Backdrop currently on the TV depicts: ${describeBackdropPrompt(campaign)}`,
+    `Existing backgrounds you may reuse: ${JSON.stringify(backgrounds)}`
+  ].filter(Boolean).join("\n");
+
+  try {
+    const response = (await aquaFetch("/chat/completions", {
+      method: "POST",
+      body: JSON.stringify({
+        model: config.chatModel,
+        messages: [{ role: "system", content: system }, { role: "user", content: user }],
+        tools: [tool],
+        tool_choice: { type: "function", function: { name: "set_backdrop" } }
+      })
+    })) as ChatCompletionResponse;
+    const message = response.choices?.[0]?.message || response.message;
+    const call = Array.isArray(message?.tool_calls) ? message?.tool_calls?.[0] : null;
+    if (!call?.function?.arguments) return null;
+    const args = JSON.parse(call.function.arguments) as Record<string, unknown>;
+    const rawMode = String(args.mode || "");
+    const mode = (["keep", "reuse", "new"] as const).includes(rawMode as any) ? (rawMode as BackdropDecision["mode"]) : (force ? "new" : "keep");
+    return {
+      mode,
+      backgroundId: typeof args.backgroundId === "string" ? args.backgroundId : undefined,
+      prompt: typeof args.prompt === "string" ? args.prompt : undefined
+    };
+  } catch (err) {
+    serverError("Backdrop", "chooseBackdrop tool call failed", err);
+    return null;
+  }
+}
+
+/** Paint a fresh backdrop from a prompt and make it the live TV background. */
+async function paintNewBackdrop(campaign: Campaign, prompt: string) {
+  const image = await generateImage(prompt);
+  const localUrl = await downloadAndSaveImage(campaign.id, image.url, "backgrounds");
+  campaign.images.push({ id: createId("image"), url: localUrl, prompt: image.prompt, createdAt: new Date().toISOString() });
+  campaign.currentImageUrl = localUrl;
+  safePushDisplayEvent(campaign, { type: "scene", speaker: "Scene", content: "The TV scene background shifts." });
+}
+
+/** Apply a scene-director decision to the campaign, recording the scene it now depicts. */
+async function applyBackdropDecision(campaign: Campaign, decision: BackdropDecision | null, scene: string, force: boolean) {
+  const mode = decision?.mode || "keep";
+  let changed = false;
+  if (mode === "reuse" && decision?.backgroundId) {
+    const img = (campaign.images || []).find((i) => i.id === decision.backgroundId);
+    if (img && img.url !== campaign.currentImageUrl) {
+      campaign.currentImageUrl = img.url;
+      safePushDisplayEvent(campaign, { type: "scene", speaker: "Scene", content: "The TV scene background shifts." });
+      changed = true;
+    }
+  } else if (mode === "new" && decision?.prompt) {
+    await paintNewBackdrop(campaign, decision.prompt);
+    changed = true;
+  }
+  // Host tapped Nudge (force) but nothing actually changed — the director chose
+  // keep, gave no prompt, or named a background already showing. Repaint from
+  // the scene text so the button always visibly does something.
+  if (force && !changed) {
+    await paintNewBackdrop(campaign, campaign.currentScene || scene);
+  }
+  campaign.backdropScene = scene;
+}
+
+/**
+ * Repaint the TV backdrop to match the current scene, on demand (the Director's
+ * "Nudge" button). This is a pure visual refresh — no story turn, no touched
+ * choices. With force, the director must change the backdrop.
+ */
+export async function repaintBackdrop(campaignId: string, options: { force?: boolean } = {}): Promise<Campaign> {
+  const campaign = await getCampaign(campaignId);
+  if (campaign.status !== "active") return campaign;
+  const scene = (campaign.currentScene || "").trim();
+  if (!scene) return campaign;
+  const force = options.force !== false;
+  const decision = await chooseBackdrop(campaign, force);
+  await applyBackdropDecision(campaign, decision, scene, force);
+  await saveCampaign(campaign);
+  serverLog("Backdrop", `Nudge repaint applied for campaign ${campaignId} (mode=${decision?.mode || "keep"})`);
+  return campaign;
 }
 
 /**
