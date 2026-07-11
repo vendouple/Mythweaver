@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCampaign, getCampaignLock, saveCampaign } from "@/lib/campaign/store";
-import { runDungeonMaster, serverLog, serverError } from "@/lib/aqua/chat";
+import { runDungeonMaster, repaintBackdrop, serverLog, serverError } from "@/lib/aqua/chat";
 
 export const dynamic = "force-dynamic";
 
@@ -90,37 +90,10 @@ export async function POST(request: Request) {
         if (before.status !== "active") {
           return NextResponse.json({ error: "Can only nudge an active campaign" }, { status: 400 });
         }
-        const savedPlayerActions: Record<string, typeof before.partyActions> = { ...before.playerActions };
-        const savedPartyActions = before.partyActions;
-        const nudgeInstruction = [
-          "Stage Director (VISUAL REFRESH ONLY — this is NOT a story turn):",
-          "The TV backdrop no longer matches the current scene. Update it to fit the CURRENT location and moment.",
-          "- If a previously generated background already fits, set it via update_campaign_state currentImageUrl.",
-          "- Otherwise call generate_image with kind \"scene\" describing the current place in detail.",
-          "Do NOT advance the plot: return an EMPTY story[] array, and do NOT change playerActions or partyActions — the players' pending choices must survive untouched."
-        ].join("\n");
-        const result = await runDungeonMaster(campaignId, "Stage Director", nudgeInstruction, { hiddenUserMessage: true });
-        // A visual refresh must never strip pending choices. runDungeonMaster
-        // clears playerActions at the top of every active turn and only refills
-        // them from the model's JSON — so if this refresh returned none, put the
-        // choices we had before the nudge back.
-        const after = await getCampaign(campaignId);
-        let restored = false;
-        for (const player of after.players) {
-          if (!(after.playerActions[player.id]?.length) && savedPlayerActions[player.id]?.length) {
-            after.playerActions[player.id] = savedPlayerActions[player.id];
-            restored = true;
-          }
-        }
-        if (!(after.partyActions?.length) && savedPartyActions?.length) {
-          after.partyActions = savedPartyActions;
-          restored = true;
-        }
-        if (restored) {
-          await saveCampaign(after);
-          return NextResponse.json({ campaign: after });
-        }
-        return NextResponse.json(result);
+        // Pure visual refresh: the scene-director reuses a fitting past backdrop
+        // or paints a fresh one. No story turn, so pending choices are untouched.
+        const campaign = await repaintBackdrop(campaignId, { force: true });
+        return NextResponse.json({ campaign });
       }
 
       if (action === "editMessage") {

@@ -251,6 +251,13 @@ export type Campaign = {
   images: SceneImage[];
   portraits: PortraitImage[];
   currentImageUrl?: string;
+  /**
+   * The scene text the current backdrop depicts. The server compares this to
+   * currentScene after each turn: when the scene has moved materially and the
+   * DM didn't repaint, a scene-director pass reuses or paints a fresh backdrop.
+   * (The small RP model reliably forgets the backdrop — this is the guarantee.)
+   */
+  backdropScene?: string;
   ambience?: Ambience;
   effects?: StageEffect[];
   dmStatus?: string;

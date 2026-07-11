@@ -344,6 +344,7 @@ function normalizeCampaign(raw: Partial<Campaign> & { suggestedActions?: unknown
     images: Array.isArray(raw.images) ? raw.images : [],
     portraits: Array.isArray(raw.portraits) ? raw.portraits : [],
     currentImageUrl: raw.currentImageUrl,
+    backdropScene: raw.backdropScene ? String(raw.backdropScene) : undefined,
     ambience: normalizeAmbience(raw.ambience),
     effects: normalizeEffects(raw.effects),
     dmStatus: raw.dmStatus ? String(raw.dmStatus) : undefined,
