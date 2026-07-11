@@ -242,58 +242,92 @@ below the moods.
 
 ## Other genre themes
 
-Each theme has a signature **palette** (its instruments and tone). To fill a
-themed shelf, take the palette and bolt on the *mood energy* — reuse the mood
-descriptors from the sections above (calm = safe/tender/low dynamics, tense =
-coiled ostinato that never releases, battle = driving percussion + relentless
-momentum, mystery = sparse and curious, dread = glacial horror drone, triumph
-= bright swelling resolve, wonder = weightless and luminous, somber = mournful
-elegy). Always add `seamless loop feel, no big intro or outro, no fade to
-silence, instrumental`.
-
-Ready examples cover `calm`, `tense`, and `battle` (the widest spread — safe,
-suspense, action); build the rest from the palette + the mood descriptor.
+Each theme below leads with a signature **palette** (its instruments and
+tone), then gives a paste-ready prompt for every shelf. All are written for
+the auto-crossfade loop, so they avoid intros, outros, and silent tails.
+Only fill the shelves a given genre actually reaches for — an empty themed
+shelf simply falls back to the neutral mood root.
 
 ### `scifi` — `<mood>/scifi/`
 **Palette:** analog synths, pulsing arpeggiators, deep sub bass, metallic and
 glassy pads, granular sound-design textures, distant sonar blips; cold, vast,
 electronic, chrome-and-starlight.
-- **calm** (`calm/scifi/`): > Weightless ambient sci-fi underscore, slow warm synth pads and soft arpeggio, distant sonar pings, gentle sub bass, the quiet hum of a sleeping starship, unhurried and safe, no fade to silence, instrumental
+- **lobby** (`lobby/scifi/`): > Inviting sci-fi lobby ambience, soft warm synth pads and a slow gentle arpeggio, distant sonar pings, patient and anticipatory around 70 bpm, the calm bridge of a ship at dock, understated, no percussion climax, no fade to silence, instrumental
+- **weaving** (`weaving/scifi/`): > Sci-fi creation soundscape, building synth pads and shimmering digital bells, deep sub drone, granular textures assembling, a universe booting into existence, gradual swell without resolution, no fade to silence, instrumental
+- **main** (`main/scifi/`): > Cinematic sci-fi exploration bed, warm evolving synth pads with a light pulsing arpeggio, subtle electronic percussion, curious and hopeful with cold edges, mid tempo, loopable underscore that stays under a narrator, no big intro or outro, instrumental
+- **calm** (`calm/scifi/`): > Weightless ambient sci-fi underscore, slow warm synth pads and soft arpeggio, distant sonar pings, gentle sub bass, the quiet hum of a sleeping starship, unhurried and safe, low dynamics, no fade to silence, instrumental
 - **tense** (`tense/scifi/`): > Cold sci-fi suspense, pulsing low synth ostinato, ticking metallic textures, dissonant glassy pads, a reactor about to breach, coiled tension that never releases, no big intro or outro, instrumental
-- **battle** (`battle/scifi/`): > High-energy sci-fi action, driving electronic percussion and distorted synth bass, aggressive arpeggiators, brass-synth stabs, relentless momentum, cinematic space-combat trailer energy, instrumental
+- **battle** (`battle/scifi/`): > High-energy sci-fi action, driving electronic percussion and distorted synth bass, aggressive arpeggiators, brass-synth stabs, relentless momentum, cinematic space-combat trailer energy, no big intro or outro, instrumental
+- **mystery** (`mystery/scifi/`): > Enigmatic sci-fi underscore, sparse metallic pings and glassy pads, slow detuned synth phrases, faint radio-static shimmer, an anomaly in deep space, curious and unsettling, spacious, no fade to silence, instrumental
+- **dread** (`dread/scifi/`): > Sci-fi horror drone, groaning hull sub-bass swells, bowed metal and detuned synth, distant alarm pulse, something loose on the ship, very sparse, glacial pacing, no fade to silence, instrumental
+- **triumph** (`triumph/scifi/`): > Triumphant sci-fi swell, soaring synth leads over bright pads, rising arpeggios and cymbal shimmer, a ship breaking orbit into dawn light, celebratory, resolves gently to loop, instrumental
+- **wonder** (`wonder/scifi/`): > Ethereal sci-fi wonder, glassy bells and lush synth pads, wordless vocalise used as an instrument, slow floating arpeggios, a nebula unfolding, weightless and luminous, no fade to silence, instrumental
+- **somber** (`somber/scifi/`): > Mournful sci-fi elegy, lone sustained synth pad and sparse piano, slow airy drone, cold starlight through a viewport, dignified grief, long silences, quiet and restrained, no fade to silence, instrumental
 
 ### `horror` — `<mood>/horror/`
 **Palette:** detuned strings, bowed metal, prepared piano, sub-bass swells,
 breathy dissonant choir, scraping textures, distant music-box; dread-soaked,
 sparse, wrong.
+- **lobby** (`lobby/horror/`): > Uneasy horror lobby ambience, faint detuned music box over a hollow low drone, distant creaks, a waiting room that feels watched, patient and understated, no percussion climax, no fade to silence, instrumental
+- **weaving** (`weaving/horror/`): > Ominous horror creation soundscape, slowly gathering dissonant string clusters and breathy choir, sub-bass swell, a dread taking shape, gradual build without release, no fade to silence, instrumental
+- **main** (`main/horror/`): > Creeping horror underscore, sparse prepared piano and hollow drone, subtle scraping textures, wary and off-balance, mid-low dynamics, loopable bed that stays under a narrator, no big intro or outro, instrumental
 - **calm** (`calm/horror/`): > Uneasy quiet horror ambience, hollow sustained drone, faint detuned music box, distant creaks, a false calm that never feels safe, very sparse, low dynamics, no fade to silence, instrumental
-- **tense** (`tense/horror/`): > Horror suspense, scraping bowed-metal textures, sub-bass pulse like a held breath, dissonant string clusters swelling and receding, stalking dread, coiled and airless, instrumental
+- **tense** (`tense/horror/`): > Horror suspense, scraping bowed-metal textures, sub-bass pulse like a held breath, dissonant string clusters swelling and receding, stalking dread, coiled and airless, no big intro or outro, instrumental
 - **battle** (`battle/horror/`): > Frantic horror chase, pounding irregular percussion, shrieking dissonant strings, distorted low brass, panic and adrenaline, relentless and ugly, no big intro or outro, instrumental
+- **mystery** (`mystery/horror/`): > Unsettling horror mystery, lone music box and prepared-piano plinks, faint whispering textures, slow minor viola, dread curiosity in an abandoned place, very sparse and spacious, no fade to silence, instrumental
+- **dread** (`dread/horror/`): > Pure horror dread drone, deep sub-bass swells, bowed metal and detuned strings, distant heartbeat, breathy dissonant choir, creeping terror without jump scares, glacial and airless, no fade to silence, instrumental
+- **triumph** (`triumph/horror/`): > Grim horror reprieve, a fragile major chord emerging from dissonance, warm strings pushing back the dark, uneasy relief rather than celebration, swells and resolves gently to loop, instrumental
+- **wonder** (`wonder/horror/`): > Eerie horror wonder, shimmering glassy bells over cold pads, wordless vocalise turned ghostly, beautiful but wrong, floating and weightless with a chill, no fade to silence, instrumental
+- **somber** (`somber/horror/`): > Mournful horror elegy, lone cello over hollow drone, sparse detuned piano, funeral in a haunted place, dignified grief shot through with dread, long silences, quiet, no fade to silence, instrumental
 
 ### `noir` — `<mood>/noir/`
 **Palette:** smoky muted trumpet, brushed jazz drums, upright bass walking
 lines, lounge piano, vibraphone, sultry clarinet; rain-slick, 1940s, dim and
 world-weary.
+- **lobby** (`lobby/noir/`): > Smoky noir lounge ambience, soft brushed drums and mellow lounge piano, distant muted trumpet, a dim bar before the story starts, patient and inviting, low dynamics, no fade to silence, instrumental
+- **weaving** (`weaving/noir/`): > Noir mood-setting soundscape, slow sultry clarinet and vibraphone over a walking upright bass, rain on the window, a case coming into focus, gradual build without resolution, no fade to silence, instrumental
+- **main** (`main/noir/`): > Noir investigation underscore, brushed drums and walking upright bass, mellow piano and muted trumpet motif, world-weary and watchful, mid-slow tempo, loopable bed that stays under a narrator, no big intro or outro, instrumental
 - **calm** (`calm/noir/`): > Late-night noir lounge, brushed drums and soft walking upright bass, muted trumpet and mellow piano, cigarette smoke and neon rain, slow and world-weary, low dynamics, no fade to silence, instrumental
-- **tense** (`tense/noir/`): > Noir suspense, sparse pizzicato bass, muted trumpet stabs, ticking brushed cymbal, a dark alley and a tail you can't shake, coiled tension that never resolves, instrumental
+- **tense** (`tense/noir/`): > Noir suspense, sparse pizzicato bass, muted trumpet stabs, ticking brushed cymbal, a dark alley and a tail you can't shake, coiled tension that never resolves, no big intro or outro, instrumental
 - **battle** (`battle/noir/`): > Frantic noir chase, driving upright bass and snare, stabbing brass, dissonant piano, a shootout in the rain, breathless momentum, no big intro or outro, instrumental
+- **mystery** (`mystery/noir/`): > Enigmatic noir mystery, lone vibraphone and sparse piano, muted trumpet sighs, ticking clock, clues in the fog, curious and unsettling, spacious and slow, no fade to silence, instrumental
+- **dread** (`dread/noir/`): > Dark noir dread, low bowed bass drone, dissonant muted brass, distant siren-like clarinet, a body in the alley, very sparse and heavy, glacial pacing, no fade to silence, instrumental
+- **triumph** (`triumph/noir/`): > Bittersweet noir resolve, warm swelling strings with a lone muted trumpet, the case closed at dawn, hard-won and understated rather than cheesy, resolves gently to loop, instrumental
+- **wonder** (`wonder/noir/`): > Wistful noir wonder, shimmering vibraphone and soft strings, a sultry clarinet line, neon reflected in rain, weightless and bittersweet, floating, no fade to silence, instrumental
+- **somber** (`somber/noir/`): > Mournful noir elegy, lone muted trumpet over sparse piano and brushed cymbal, rainy grey light, dignified grief in a dim room, long silences between phrases, quiet, no fade to silence, instrumental
 
 ### `modern` — `<mood>/modern/`
 Spy / thriller / heist / present-day.
 **Palette:** hybrid orchestral + electronic, pulsing synth bass, taut string
 ostinatos, processed percussion, ticking clock textures, low brass; sleek,
 tense, contemporary.
+- **lobby** (`lobby/modern/`): > Sleek contemporary lobby ambience, warm synth pads over soft piano, a slow subtle pulse, poised and anticipatory around 70 bpm, understated, no percussion climax, no fade to silence, instrumental
+- **weaving** (`weaving/modern/`): > Modern thriller mood-setter, building pulsing synth bass and taut string swells, processed ticking textures, a plan coming together, gradual build without resolution, no fade to silence, instrumental
+- **main** (`main/modern/`): > Contemporary hybrid underscore, light processed percussion and warm synth pads with a subtle string ostinato, purposeful and alert, mid tempo, loopable bed that stays under a narrator, no big intro or outro, instrumental
 - **calm** (`calm/modern/`): > Sleek contemporary underscore, warm synth pads over soft piano, subtle processed percussion, quiet safehouse before the op, unhurried but alert, low dynamics, no fade to silence, instrumental
-- **tense** (`tense/modern/`): > Spy-thriller suspense, taut string ostinato and pulsing synth bass, ticking clock percussion, low brass swell, surveillance and a countdown, coiled tension that never releases, instrumental
+- **tense** (`tense/modern/`): > Spy-thriller suspense, taut string ostinato and pulsing synth bass, ticking clock percussion, low brass swell, surveillance and a countdown, coiled tension that never releases, no big intro or outro, instrumental
 - **battle** (`battle/modern/`): > Modern action, driving hybrid percussion and distorted synth bass, aggressive string ostinatos, brass hits, a rooftop firefight, relentless trailer momentum, no big intro or outro, instrumental
+- **mystery** (`mystery/modern/`): > Modern investigation mystery, sparse piano and glassy synth textures, a slow pulsing bass, faint ticking, following a lead in the dark, curious and unsettling, spacious, no fade to silence, instrumental
+- **dread** (`dread/modern/`): > Modern dread drone, deep synth sub-bass swells, dissonant sustained strings, distant low alarm, an operation gone wrong, very sparse and heavy, glacial pacing, no fade to silence, instrumental
+- **triumph** (`triumph/modern/`): > Triumphant modern swell, soaring strings and bright brass over a driving pulse, mission accomplished at sunrise, celebratory but sleek, resolves gently to loop, instrumental
+- **wonder** (`wonder/modern/`): > Contemporary wonder, shimmering synth bells and lush pads, wordless vocalise, a city skyline at night, weightless and luminous, floating, no fade to silence, instrumental
+- **somber** (`somber/modern/`): > Mournful modern elegy, lone piano over a soft sustained synth pad, slow strings, grey rain on glass, dignified grief, long silences between phrases, quiet and restrained, no fade to silence, instrumental
 
 ### `western` — `<mood>/western/`
 **Palette:** twanging reverb guitar, lonesome whistle, harmonica, upright bass,
 fiddle, sparse mariachi trumpet, distant coyote-night ambience; dusty, wide,
 sun-bleached.
+- **lobby** (`lobby/western/`): > Warm western porch ambience, soft reverb guitar and gentle harmonica, a lazy upright-bass sway, dusk on the frontier before the tale, patient and inviting, low dynamics, no fade to silence, instrumental
+- **weaving** (`weaving/western/`): > Western mood-setting soundscape, slow lonesome whistle and swelling reverb guitar over a low drone, wind across the plains, a legend taking shape, gradual build without resolution, no fade to silence, instrumental
+- **main** (`main/western/`): > Cinematic western exploration bed, ambling reverb guitar and light brushed percussion, distant whistle and fiddle motif, wide and weathered with hope at the edges, mid tempo, loopable underscore under a narrator, no big intro or outro, instrumental
 - **calm** (`calm/western/`): > Lonesome western dusk, soft reverb guitar and distant whistle, gentle harmonica, wide open prairie at sundown, unhurried and weary, low dynamics, no fade to silence, instrumental
-- **tense** (`tense/western/`): > Western standoff tension, single twanging guitar notes, low tremolo strings, creaking silence and a ticking pocket watch, coiled tension before the draw, never releasing, instrumental
+- **tense** (`tense/western/`): > Western standoff tension, single twanging guitar notes, low tremolo strings, creaking silence and a ticking pocket watch, coiled tension before the draw, never releasing, no big intro or outro, instrumental
 - **battle** (`battle/western/`): > Western action, galloping percussion and driving upright bass, frantic fiddle and stabbing brass, a chase across the badlands, relentless momentum, no big intro or outro, instrumental
+- **mystery** (`mystery/western/`): > Enigmatic western mystery, sparse muted guitar harmonics and lonesome whistle, low tremolo strings, dust and secrets in a ghost town, curious and unsettling, spacious and slow, no fade to silence, instrumental
+- **dread** (`dread/western/`): > Grim western dread, low bowed drone and detuned guitar, distant coyote wail, a scraping wind, something waiting in the dark canyon, very sparse, glacial pacing, no fade to silence, instrumental
+- **triumph** (`triumph/western/`): > Triumphant western swell, soaring fiddle and mariachi trumpet over full strings, a warm sunrise after the showdown, celebratory but rugged, resolves gently to loop, instrumental
+- **wonder** (`wonder/western/`): > Expansive western wonder, shimmering reverb guitar and soft strings, a lonesome whistle turned luminous, endless sky over the mesa, weightless and awed, floating, no fade to silence, instrumental
+- **somber** (`somber/western/`): > Mournful western elegy, lone reverb guitar over sparse strings and harmonica, dignified grief on the frontier, a grave at dusk, long silences between phrases, quiet and restrained, no fade to silence, instrumental
 
 ## Sound effects — `public/music/SFX/`
 

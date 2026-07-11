@@ -46,9 +46,32 @@ type BgmState = {
   blocked: boolean;
   muted: boolean;
   context: BgmContext | null;
+  /** Human-readable name of the track currently on the live deck (debug). */
+  track: string | null;
+  /** Resolved shelf key playing right now, e.g. "lobby-fantasy" (debug). */
+  shelf: string | null;
+  /** User music volume 0..1 (scales the base level, independent of ducking). */
+  volume: number;
 };
 
-const state: BgmState = { blocked: false, muted: false, context: null };
+const MUSIC_VOLUME_KEY = "mythweaver-music-volume";
+
+/** User music volume 0..1, restored from a previous session. */
+let userVolume = 1;
+if (typeof window !== "undefined") {
+  const raw = window.localStorage.getItem(MUSIC_VOLUME_KEY);
+  const parsed = raw == null ? NaN : parseFloat(raw);
+  if (Number.isFinite(parsed)) userVolume = Math.min(1, Math.max(0, parsed));
+}
+
+const state: BgmState = {
+  blocked: false,
+  muted: false,
+  context: null,
+  track: null,
+  shelf: null,
+  volume: userVolume
+};
 const listeners = new Set<(s: BgmState) => void>();
 
 let library: MusicLibrary | null = null;
@@ -183,7 +206,32 @@ export function bgmSetTheme(next: string | null) {
 
 function targetVolume() {
   if (state.muted) return 0;
-  return ducked ? DUCK_VOLUME : BASE_VOLUME;
+  return (ducked ? DUCK_VOLUME : BASE_VOLUME) * userVolume;
+}
+
+/** Pretty name for a track URL — the filename, decoded, sans extension. */
+function trackLabel(url: string): string {
+  const base = url.split("/").pop() || url;
+  try {
+    return decodeURIComponent(base).replace(/\.[a-z0-9]+$/i, "");
+  } catch {
+    return base.replace(/\.[a-z0-9]+$/i, "");
+  }
+}
+
+/** Set the user music volume (0..1). Persists and applies live. */
+export function bgmSetVolume(next: number) {
+  userVolume = Math.min(1, Math.max(0, next));
+  state.volume = userVolume;
+  if (typeof window !== "undefined") {
+    window.localStorage.setItem(MUSIC_VOLUME_KEY, String(userVolume));
+  }
+  if (liveDeck && !fadeTimer) liveDeck.volume = targetVolume();
+  notify();
+}
+
+export function bgmGetVolume() {
+  return userVolume;
 }
 
 function ensureDecks() {
@@ -245,6 +293,8 @@ function playUrl(url: string) {
   incoming.src = url;
   incoming.volume = 0;
   liveDeck = incoming;
+  state.track = trackLabel(url);
+  notify();
   const attempt = incoming.play();
   if (attempt) {
     attempt
@@ -281,6 +331,8 @@ export function bgmSetContext(context: BgmContext) {
     if (state.context !== context) return;
     const { key, tracks } = resolveShelf(lib, context);
     if (!tracks.length) return;
+    state.shelf = key;
+    notify();
     if (key === contextKeyPlaying && liveDeck && !liveDeck.paused) return;
     contextKeyPlaying = key;
     playlist = shuffled(tracks);
@@ -342,5 +394,7 @@ export function bgmStop() {
   contextKeyPlaying = "";
   playlist = [];
   state.context = null;
+  state.track = null;
+  state.shelf = null;
   notify();
 }

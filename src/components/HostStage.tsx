@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Campaign, DisplayEvent, Player, StoryCharacter } from "@/lib/campaign/types";
 import { api, accentColor } from "@/lib/client/api";
-import { bgmDuck, bgmIsMuted, bgmResume, bgmSetMuted, subscribeBgm } from "@/lib/client/audio";
-import { playSfx, sfxSetMuted } from "@/lib/client/sfx";
+import { bgmDuck, bgmIsMuted, subscribeBgm } from "@/lib/client/audio";
+import { playSfx } from "@/lib/client/sfx";
 import { parseInline, plainText, renderInline, renderTokens } from "@/lib/client/markup";
 import { ACCENT_THEMES, applyAccent, currentAccent, initAccent } from "@/lib/client/theme";
 import StageAtmosphere, { AtmosphereHandle } from "@/components/three/StageAtmosphere";
@@ -232,24 +232,15 @@ export default function HostStage({ campaign, onExit }: { campaign: Campaign; on
   /* Music — the shared bard (HostExperience picks the score by mood);   */
   /* here we only duck under dice, mute, and unblock autoplay.           */
   /* ------------------------------------------------------------------ */
-  const [soundBlocked, setSoundBlocked] = useState(false);
+  // Muting is owned by the floating MusicWidget now; we only mirror the shared
+  // bard state so the dice cinematic can silence its own foley when muted.
   const [muted, setMuted] = useState(() => bgmIsMuted());
 
-  useEffect(() => subscribeBgm(({ blocked }) => setSoundBlocked(blocked)), []);
+  useEffect(() => subscribeBgm(({ muted: isMuted }) => setMuted(isMuted)), []);
 
   useEffect(() => {
     bgmDuck(!!activeDice);
   }, [activeDice]);
-
-  useEffect(() => {
-    bgmSetMuted(muted);
-    sfxSetMuted(muted);
-  }, [muted]);
-
-  const enableSound = () => {
-    setSoundBlocked(false);
-    bgmResume();
-  };
 
   /* ------------------------------------------------------------------ */
   /* Director drawer                                                     */
@@ -484,11 +475,6 @@ export default function HostStage({ campaign, onExit }: { campaign: Campaign; on
 
       {/* Utility chrome */}
       <div className="stage-tools" onClick={(event) => event.stopPropagation()}>
-        {soundBlocked ? (
-          <button className="tool-chip attention" onClick={enableSound}>♪ Tap for sound</button>
-        ) : (
-          <button className="tool-chip" onClick={() => setMuted((value) => !value)}>{muted ? "♪ Unmute" : "♪ Mute"}</button>
-        )}
         <button className="tool-chip" onClick={() => setTomeOpen((open) => !open)}>Tome</button>
         <button className="tool-chip" onClick={() => setDrawerOpen((open) => !open)}>Director</button>
       </div>
