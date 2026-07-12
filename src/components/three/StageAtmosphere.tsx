@@ -28,7 +28,9 @@ type MoodRecipe = {
 const MOODS: Record<AmbienceMood, MoodRecipe> = {
   calm:    { colors: ["#e8c98a", "#c9a35c"], drift: 0.35,  wander: 0.5, size: 0.05,  opacity: 0.65, count: 240, fogOpacity: 0.10, fogColor: "#3a3222", rays: 0.5 },
   tense:   { colors: ["#8fa8b8", "#5d7683"], drift: 0.18,  wander: 1.4, size: 0.04,  opacity: 0.5,  count: 260, fogOpacity: 0.22, fogColor: "#1d2733", rays: 0.16 },
+  adrenaline: { colors: ["#ffd75c", "#4cd9c0"], drift: 1.35, wander: 2.5, size: 0.055, opacity: 0.85, count: 380, fogOpacity: 0.10, fogColor: "#1e2b26", rays: 0.4 },
   battle:  { colors: ["#ffb35c", "#ff5c3c"], drift: 1.5,   wander: 2.0, size: 0.06,  opacity: 0.9,  count: 420, fogOpacity: 0.14, fogColor: "#3a1c12", rays: 0.28 },
+  boss:    { colors: ["#ff4c5c", "#8a3cff"], drift: 0.9,   wander: 1.7, size: 0.065, opacity: 0.95, count: 480, fogOpacity: 0.32, fogColor: "#1c0a16", rays: 0.18 },
   mystery: { colors: ["#a98cff", "#5f6cff"], drift: 0.28,  wander: 1.8, size: 0.05,  opacity: 0.6,  count: 300, fogOpacity: 0.30, fogColor: "#221c3d", rays: 0.45 },
   dread:   { colors: ["#6f7787", "#3d4351"], drift: -0.35, wander: 0.6, size: 0.045, opacity: 0.55, count: 300, fogOpacity: 0.38, fogColor: "#0d1017", rays: 0.12 },
   triumph: { colors: ["#ffe08a", "#ffc23c"], drift: 1.1,   wander: 0.8, size: 0.065, opacity: 1.0,  count: 380, fogOpacity: 0.08, fogColor: "#3a2f14", rays: 0.75 },

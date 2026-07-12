@@ -210,7 +210,7 @@ export const toolDefinitions: AquaToolDefinition[] = [
         type: "object",
         required: ["mood"],
         properties: {
-          mood: { type: "string", enum: ["calm", "tense", "battle", "mystery", "dread", "triumph", "wonder", "somber", "outro"], description: "Emotional register of the current scene. Use 'outro' only when ending the campaign (end_campaign also sets it)." },
+          mood: { type: "string", enum: ["calm", "tense", "adrenaline", "battle", "boss", "mystery", "dread", "triumph", "wonder", "somber", "outro"], description: "Emotional register of the current scene. 'battle' = ordinary combat encounters; 'boss' = climactic showdowns against a major villain or endgame threat; 'adrenaline' = high-energy excitement that is NOT combat (chases, escapes, heists, races against time). Use 'outro' only when ending the campaign (end_campaign also sets it)." },
           intensity: { type: "number", description: "0.0 to 1.0 - how hard the TV leans into the mood. Default 0.6." },
           note: { type: "string", description: "Optional short sensory flavor, e.g. 'rain hammers the tin roof'. May be shown faintly on the TV." }
         }
@@ -221,12 +221,12 @@ export const toolDefinitions: AquaToolDefinition[] = [
     type: "function",
     function: {
       name: "set_theme",
-      description: "Choose the campaign's musical score shelf (fantasy/scifi/horror/noir/modern/western). Call EXACTLY ONCE on the opening turn when offered; never mid-campaign.",
+      description: "Choose the campaign's musical score shelf (fantasy/scifi/horror/noir/modern/western/postapoc). Call EXACTLY ONCE on the opening turn when offered; never mid-campaign.",
       parameters: {
         type: "object",
         required: ["theme"],
         properties: {
-          theme: { type: "string", enum: ["fantasy", "scifi", "horror", "noir", "modern", "western"] }
+          theme: { type: "string", enum: ["fantasy", "scifi", "horror", "noir", "modern", "western", "postapoc"] }
         }
       }
     }
@@ -345,7 +345,7 @@ export async function runTool(campaignId: string, name: string, args: Record<str
     if (name === "get_date") return getCurrentDate();
 
     if (name === "set_ambience") {
-      const moods: AmbienceMood[] = ["calm", "tense", "battle", "mystery", "dread", "triumph", "wonder", "somber", "outro"];
+      const moods: AmbienceMood[] = ["calm", "tense", "adrenaline", "battle", "boss", "mystery", "dread", "triumph", "wonder", "somber", "outro"];
       const mood = moods.includes(args.mood as AmbienceMood) ? (args.mood as AmbienceMood) : "calm";
       const rawIntensity = Number(args.intensity ?? 0.6);
       const campaign = await getCampaign(campaignId);
