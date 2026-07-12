@@ -10,9 +10,9 @@ import type { Campaign } from "./types";
  * The AI DM never touches this — it only ever picks *moods* (calm, tense,
  * battle…). The theme is orthogonal and fixed at campaign start.
  */
-export type MusicTheme = "fantasy" | "scifi" | "horror" | "noir" | "modern" | "western";
+export type MusicTheme = "fantasy" | "scifi" | "horror" | "noir" | "modern" | "western" | "postapoc";
 
-export const MUSIC_THEMES: MusicTheme[] = ["fantasy", "scifi", "horror", "noir", "modern", "western"];
+export const MUSIC_THEMES: MusicTheme[] = ["fantasy", "scifi", "horror", "noir", "modern", "western", "postapoc"];
 
 /** Whole-word-ish keyword signals per theme (matched case-insensitively). */
 const THEME_KEYWORDS: Record<MusicTheme, string[]> = {
@@ -47,6 +47,13 @@ const THEME_KEYWORDS: Record<MusicTheme, string[]> = {
     "western", "wild west", "frontier", "cowboy", "saloon", "sheriff", "outlaw", "gunslinger",
     "revolver", "six-shooter", "stagecoach", "ranch", "cattle", "prairie", "bounty hunter",
     "gold rush", "homestead", "desperado"
+  ],
+  postapoc: [
+    "post-apocal", "postapocal", "post apocal", "apocalypse", "apocalyptic", "wasteland",
+    "nuclear", "fallout", "radiation", "radioactive", "irradiated", "mutant", "raider",
+    "scaveng", "bunker", "vault dweller", "geiger", "after the bomb", "end of the world",
+    "ruined city", "collapsed civilization", "last survivors", "dust-choked", "warband",
+    "settlement", "the wastes", "overgrown ruins", "old world", "rustpunk", "dieselpunk"
   ]
 };
 
