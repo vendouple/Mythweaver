@@ -9,6 +9,29 @@ import type { MusicTheme } from "@/lib/campaign/musicTheme";
  */
 export type ThemeKey = MusicTheme | "none";
 
+/**
+ * Per-genre motion personality of the Weaving loom — how the unassembled
+ * halo swirls and drifts (rising fantasy embers, noir rain, post-apoc ash),
+ * how the glyph rings precess and sway, how the camera orbits, and whether
+ * the light gutters (horror candles, wasteland reactors).
+ */
+export type LoomMotion = {
+  /** Halo orbit speed multiplier (1 = stately). */
+  swirl: number;
+  /** Vertical drift of unassembled motes; positive rises, negative falls. */
+  rise: number;
+  /** Jitter amplitude of unassembled motes. */
+  wobble: number;
+  /** Glyph ring precession speed multiplier. */
+  ringSpeed: number;
+  /** Ring tilt sway amplitude (radians, small). */
+  ringSway: number;
+  /** Camera orbit speed. */
+  orbit: number;
+  /** 0..1 irregular light gutter. */
+  flicker: number;
+};
+
 export type ThemeVisual = {
   key: ThemeKey;
   /** Primary glow — dust, dice edges, key light, glyph rings. */
@@ -31,8 +54,8 @@ export type ThemeVisual = {
   /** Glyph alphabet worn by the loom's great rings. */
   glyphs: string;
   glyphFont: string;
-  /** Loom of Worlds palette. */
-  loom: { heart: string; world: string; wireBoost: number };
+  /** Loom of Worlds palette and motion personality. */
+  loom: { heart: string; world: string; wireBoost: number; motion: LoomMotion };
   copy: {
     kicker: string;
     join: string;
@@ -57,7 +80,10 @@ export const THEME_VISUALS: Record<ThemeKey, ThemeVisual> = {
     dice: { body: "#0d1322", roughness: 0.35, metalness: 0.75, opacity: 1, edge: "#c9a35c", edgeOpacity: 0.5 },
     glyphs: "ᚠᚢᚦᚨᚱᚲᚷᚹᚺᚾᛁᛃᛇᛈᛉᛊᛏᛒᛖᛗᛚᛜᛞᛟ",
     glyphFont: "44px serif",
-    loom: { heart: "230,195,120", world: "#0b1020", wireBoost: 1 },
+    loom: {
+      heart: "230,195,120", world: "#0b1020", wireBoost: 1,
+      motion: { swirl: 1, rise: 0, wobble: 1, ringSpeed: 1, ringSway: 0.02, orbit: 0.05, flicker: 0 }
+    },
     copy: {
       kicker: "The Weaving begins",
       join: "A new hero is woven in",
@@ -80,7 +106,11 @@ export const THEME_VISUALS: Record<ThemeKey, ThemeVisual> = {
     dice: { body: "#141126", roughness: 0.3, metalness: 0.8, opacity: 1, edge: "#ffd98a", edgeOpacity: 0.65 },
     glyphs: "ᚠᚢᚦᚨᚱᚲᚷᚹᚺᚾᛁᛃᛇᛈᛉᛊᛏᛒᛖᛗᛚᛜᛞᛟ",
     glyphFont: "44px serif",
-    loom: { heart: "255,214,138", world: "#0d1024", wireBoost: 1.1 },
+    loom: {
+      heart: "255,214,138", world: "#0d1024", wireBoost: 1.1,
+      // Rising embers, a graceful waltz of a swirl.
+      motion: { swirl: 1.3, rise: 0.35, wobble: 1.15, ringSpeed: 1, ringSway: 0.035, orbit: 0.06, flicker: 0 }
+    },
     copy: {
       kicker: "The Weaving begins",
       join: "A new hero is woven in",
@@ -103,7 +133,11 @@ export const THEME_VISUALS: Record<ThemeKey, ThemeVisual> = {
     dice: { body: "#04101c", roughness: 0.15, metalness: 0.4, opacity: 0.22, edge: "#4fd8ff", edgeOpacity: 0.95 },
     glyphs: "0123456789ABCDEF∆◇",
     glyphFont: "40px monospace",
-    loom: { heart: "120,220,255", world: "#04101e", wireBoost: 1.8 },
+    loom: {
+      heart: "120,220,255", world: "#04101e", wireBoost: 1.8,
+      // Fast, precise, machine-steady: quick rings, no jitter, brisk camera.
+      motion: { swirl: 2.3, rise: 0, wobble: 0.35, ringSpeed: 1.8, ringSway: 0.012, orbit: 0.085, flicker: 0 }
+    },
     copy: {
       kicker: "Reality compiles",
       join: "A new signal joins the constellation",
@@ -126,7 +160,11 @@ export const THEME_VISUALS: Record<ThemeKey, ThemeVisual> = {
     dice: { body: "#160f0d", roughness: 0.9, metalness: 0.1, opacity: 1, edge: "#9fb86a", edgeOpacity: 0.4 },
     glyphs: "†‡☽☾ΨΦΘΞΔϟζξ",
     glyphFont: "44px serif",
-    loom: { heart: "170,200,110", world: "#100a08", wireBoost: 0.8 },
+    loom: {
+      heart: "170,200,110", world: "#100a08", wireBoost: 0.8,
+      // Slow sinking dread; rings list like a derelict; candlelight gutters.
+      motion: { swirl: 0.55, rise: -0.25, wobble: 2.4, ringSpeed: 0.45, ringSway: 0.09, orbit: 0.03, flicker: 0.8 }
+    },
     copy: {
       kicker: "Something stirs in the dark",
       join: "Another soul wanders in",
@@ -149,7 +187,11 @@ export const THEME_VISUALS: Record<ThemeKey, ThemeVisual> = {
     dice: { body: "#0c0d12", roughness: 0.2, metalness: 0.9, opacity: 1, edge: "#d9c69a", edgeOpacity: 0.42 },
     glyphs: "?!•§¶†×—",
     glyphFont: "42px monospace",
-    loom: { heart: "217,198,154", world: "#0b0d13", wireBoost: 0.9 },
+    loom: {
+      heart: "217,198,154", world: "#0b0d13", wireBoost: 0.9,
+      // Rain streaks down past the streetlamp; a faint neon buzz in the light.
+      motion: { swirl: 0.45, rise: -0.9, wobble: 0.55, ringSpeed: 0.55, ringSway: 0.015, orbit: 0.035, flicker: 0.2 }
+    },
     copy: {
       kicker: "The case file opens",
       join: "A new face walks into the precinct",
@@ -172,7 +214,10 @@ export const THEME_VISUALS: Record<ThemeKey, ThemeVisual> = {
     dice: { body: "#0a1014", roughness: 0.15, metalness: 0.65, opacity: 1, edge: "#4fe0c4", edgeOpacity: 0.55 },
     glyphs: "0123456789°′″NSEW·",
     glyphFont: "40px monospace",
-    loom: { heart: "110,235,205", world: "#081014", wireBoost: 1.4 },
+    loom: {
+      heart: "110,235,205", world: "#081014", wireBoost: 1.4,
+      motion: { swirl: 1.6, rise: 0.1, wobble: 0.6, ringSpeed: 1.25, ringSway: 0.02, orbit: 0.07, flicker: 0 }
+    },
     copy: {
       kicker: "The operation goes live",
       join: "A new operative is being briefed",
@@ -195,7 +240,11 @@ export const THEME_VISUALS: Record<ThemeKey, ThemeVisual> = {
     dice: { body: "#170f0a", roughness: 0.6, metalness: 0.4, opacity: 1, edge: "#d9964a", edgeOpacity: 0.55 },
     glyphs: "★✶✦☆♠♦†$",
     glyphFont: "42px serif",
-    loom: { heart: "255,179,92", world: "#160d06", wireBoost: 1 },
+    loom: {
+      heart: "255,179,92", world: "#160d06", wireBoost: 1,
+      // Dust on a hot wind; campfire flicker in the light.
+      motion: { swirl: 1.1, rise: 0.12, wobble: 1.5, ringSpeed: 0.8, ringSway: 0.045, orbit: 0.045, flicker: 0.3 }
+    },
     copy: {
       kicker: "The frontier awakens",
       join: "A stranger rides into town",
@@ -218,7 +267,11 @@ export const THEME_VISUALS: Record<ThemeKey, ThemeVisual> = {
     dice: { body: "#141210", roughness: 0.85, metalness: 0.3, opacity: 1, edge: "#d98a3c", edgeOpacity: 0.5 },
     glyphs: "☢☣▲✚Ø×∅≡",
     glyphFont: "42px monospace",
-    loom: { heart: "217,138,60", world: "#12100c", wireBoost: 0.9 },
+    loom: {
+      heart: "217,138,60", world: "#12100c", wireBoost: 0.9,
+      // Ash sifts down; the world knits together under a failing reactor glow.
+      motion: { swirl: 0.8, rise: -0.55, wobble: 1.9, ringSpeed: 0.7, ringSway: 0.055, orbit: 0.04, flicker: 0.45 }
+    },
     copy: {
       kicker: "The old world stirs",
       join: "A survivor crests the ridge",
