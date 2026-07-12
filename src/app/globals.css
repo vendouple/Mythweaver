@@ -1768,8 +1768,8 @@ button:disabled { cursor: default; opacity: 0.45; }
   z-index: 2;
   height: 100%;
   overflow-y: auto;
-  display: grid;
-  place-items: center;
+  display: flex;
+  flex-direction: column;
   padding: clamp(1.5rem, 6vh, 3.5rem) 1.5rem;
   scrollbar-width: thin;
 }
@@ -1779,6 +1779,9 @@ button:disabled { cursor: default; opacity: 0.45; }
   display: flex;
   flex-direction: column;
   align-items: center;
+  /* auto margins center short credits yet let tall ones scroll from the top,
+     instead of grid-centering clipping everything above the fold */
+  margin: auto;
 }
 .outro-rise {
   opacity: 0;
@@ -1814,6 +1817,7 @@ button:disabled { cursor: default; opacity: 0.45; }
 .outro-bittersweet .outro-kind { color: #e6d48a; border-color: rgba(230, 212, 138, 0.5); }
 .outro-draw .outro-kind { color: #d9dde6; border-color: rgba(217, 221, 230, 0.42); box-shadow: 0 0 24px rgba(217, 221, 230, 0.12); }
 .outro-cliffhanger .outro-kind { color: #d0a8ff; border-color: rgba(208, 168, 255, 0.5); box-shadow: 0 0 24px rgba(177, 140, 255, 0.2); }
+.outro-generic .outro-kind { color: #e8dcc0; border-color: rgba(232, 220, 192, 0.42); box-shadow: 0 0 24px rgba(232, 220, 192, 0.12); }
 .outro-title {
   font-family: var(--font-display), serif;
   font-size: clamp(2.2rem, 6.5vw, 4.2rem);
