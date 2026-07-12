@@ -203,6 +203,29 @@ export const THEME_VISUALS: Record<ThemeKey, ThemeVisual> = {
       gathering: "Dust rises on the horizon…",
       joinGathering: "Hoofbeats approach the camp…"
     }
+  },
+  postapoc: {
+    key: "postapoc",
+    accent: "#d98a3c",
+    accentBright: "#ffc27a",
+    secondary: "#9fd23c",
+    fog: "#0a0806",
+    fogDensity: 0.065,
+    ambient: "#2e2a20",
+    dust: { color: "#b09a7a", size: 0.055, flow: [0.4, 0.08] },
+    nebulae: ["#5a3a1a", "#9fd23c", "#3a3430"],
+    effect: "frontier",
+    dice: { body: "#141210", roughness: 0.85, metalness: 0.3, opacity: 1, edge: "#d98a3c", edgeOpacity: 0.5 },
+    glyphs: "☢☣▲✚Ø×∅≡",
+    glyphFont: "42px monospace",
+    loom: { heart: "217,138,60", world: "#12100c", wireBoost: 0.9 },
+    copy: {
+      kicker: "The old world stirs",
+      join: "A survivor crests the ridge",
+      reconnect: "A survivor limps back to the fire",
+      gathering: "Ash settles over the meeting ground…",
+      joinGathering: "Another silhouette against the dust…"
+    }
   }
 };
 

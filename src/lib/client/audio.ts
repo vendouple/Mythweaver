@@ -27,7 +27,9 @@ const CONTEXT_FALLBACKS: Record<string, string[]> = {
   calm:    ["calm", "main", "wonder", "any"],
   wonder:  ["wonder", "calm", "main", "any"],
   tense:   ["tense", "mystery", "main", "any"],
-  battle:  ["battle", "tense", "main", "any"],
+  adrenaline: ["adrenaline", "battle", "tense", "main", "any"],
+  battle:  ["battle", "adrenaline", "tense", "main", "any"],
+  boss:    ["boss", "battle", "dread", "tense", "main", "any"],
   mystery: ["mystery", "tense", "main", "any"],
   dread:   ["dread", "somber", "mystery", "main", "any"],
   triumph: ["triumph", "calm", "main", "any"],
@@ -41,7 +43,7 @@ const CONTEXT_FALLBACKS: Record<string, string[]> = {
   "outro-victory":     ["outro-victory", "outro", "triumph", "wonder", "main", "any"],
   "outro-defeat":      ["outro-defeat", "outro", "somber", "dread", "main", "any"],
   "outro-bittersweet": ["outro-bittersweet", "outro", "somber", "calm", "triumph", "main", "any"],
-  "outro-escape":      ["outro-escape", "outro", "tense", "triumph", "main", "any"],
+  "outro-escape":      ["outro-escape", "outro", "adrenaline", "tense", "triumph", "main", "any"],
   "outro-draw":        ["outro-draw", "outro", "somber", "calm", "main", "any"],
   "outro-cliffhanger": ["outro-cliffhanger", "outro", "mystery", "dread", "tense", "main", "any"]
 };

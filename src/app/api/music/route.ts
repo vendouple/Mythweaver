@@ -18,8 +18,8 @@ async function listAudioFiles(dirPath: string): Promise<string[]> {
  * Music manifest.
  *
  * BGM lives in public/music/BGM/<context>/*.mp3 where <context> is a shelf
- * the client asks for: lobby, weaving, main, calm, tense, battle, mystery,
- * dread, triumph, wonder, somber. Loose files directly in BGM/ are exposed
+ * the client asks for: lobby, weaving, main, calm, tense, adrenaline, battle,
+ * boss, mystery, dread, triumph, wonder, somber. Loose files directly in BGM/ are exposed
  * under the "any" shelf (a general-purpose pool). SFX overrides live in
  * public/music/SFX/<cue>.mp3 (see src/lib/client/sfx.ts for cue names).
  */

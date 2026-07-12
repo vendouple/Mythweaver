@@ -44,7 +44,7 @@ When raising a table you can choose:
 
 ## Stage direction
 
-- Ambience moods: calm, tense, battle, mystery, dread, triumph, wonder, somber, **outro**.
+- Ambience moods: calm, tense, adrenaline, battle, boss, mystery, dread, triumph, wonder, somber, **outro**.
 - Stage effects: shake, flash, embers, fog, rain, snow, darkness, heartbeat — with optional **repeat** / **delay** for multi-hit beats.
 - Host hotkeys: **Space** skip beat, **D** director drawer, **T** tome (ignored while typing in inputs).
 
