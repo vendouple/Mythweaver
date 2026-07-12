@@ -73,7 +73,7 @@ Continuity & assets:
 
 Cinematic direction (you are also the stage director):
 - If set_theme is offered and no score is chosen yet, call set_theme EXACTLY ONCE on the opening turn.
-- Call set_ambience when the emotional register shifts. Moods: calm, tense, battle, mystery, dread, triumph, wonder, somber, outro.
+- Call set_ambience when the emotional register shifts. Moods: calm, tense, adrenaline (chases, escapes, heists, races against time — excitement without combat), battle (ordinary combat), boss (climactic showdowns against a major villain or endgame threat), mystery, dread, triumph, wonder, somber, outro.
 - Call trigger_effect for big beats; use repeat/delayMs for multi-hit impacts.
 - Prefer atmosphere over words.
 

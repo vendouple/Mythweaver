@@ -153,7 +153,9 @@ export type ChatMessage = {
 export type AmbienceMood =
   | "calm"
   | "tense"
+  | "adrenaline"
   | "battle"
+  | "boss"
   | "mystery"
   | "dread"
   | "triumph"

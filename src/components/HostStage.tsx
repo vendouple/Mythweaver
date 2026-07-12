@@ -28,7 +28,9 @@ import { themeVisual, ThemeKey } from "@/components/three/themeVisuals";
 const MOOD_GRADES: Record<string, string> = {
   calm: "linear-gradient(180deg, rgba(30,24,10,0.12), rgba(5,7,13,0.55))",
   tense: "linear-gradient(180deg, rgba(10,20,28,0.3), rgba(4,6,10,0.68))",
+  adrenaline: "linear-gradient(180deg, rgba(40,36,8,0.22), rgba(6,10,8,0.56))",
   battle: "linear-gradient(180deg, rgba(48,10,4,0.3), rgba(10,3,2,0.62))",
+  boss: "linear-gradient(180deg, rgba(34,6,26,0.42), rgba(6,2,8,0.74))",
   mystery: "linear-gradient(180deg, rgba(22,12,48,0.32), rgba(6,4,16,0.66))",
   dread: "linear-gradient(180deg, rgba(6,8,12,0.5), rgba(2,3,5,0.8))",
   triumph: "linear-gradient(180deg, rgba(48,34,6,0.18), rgba(8,6,2,0.5))",
@@ -37,8 +39,8 @@ const MOOD_GRADES: Record<string, string> = {
   outro: "linear-gradient(180deg, rgba(48,36,12,0.28), rgba(8,6,4,0.7))"
 };
 
-const DEBUG_THEMES: ThemeKey[] = ["none", "fantasy", "scifi", "horror", "noir", "modern", "western"];
-const DEBUG_MOODS: AmbienceMood[] = ["calm", "tense", "battle", "mystery", "dread", "triumph", "wonder", "somber", "outro"];
+const DEBUG_THEMES: ThemeKey[] = ["none", "fantasy", "scifi", "horror", "noir", "modern", "western", "postapoc"];
+const DEBUG_MOODS: AmbienceMood[] = ["calm", "tense", "adrenaline", "battle", "boss", "mystery", "dread", "triumph", "wonder", "somber", "outro"];
 const DEBUG_EFFECTS: StageEffectKind[] = ["shake", "flash", "embers", "fog", "rain", "snow", "darkness", "heartbeat"];
 const DEBUG_OUTCOMES: DiceOutcome[] = [
   "critical-success",
