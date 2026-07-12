@@ -24,33 +24,39 @@ function makeGlowTexture(inner: string, outer: string) {
   return new THREE.CanvasTexture(canvas);
 }
 
-/** Ring of faint glyphs — drawn once onto a canvas, worn by the great rings.
- *  The alphabet is the theme's: runes for fantasy, hex code for scifi,
- *  occult marks for horror, typewriter punctuation for noir… */
-function makeRuneRingTexture(accent: string, glyphs: string, font: string) {
-  const size = 1024;
+/** Strip of faint glyphs — drawn once onto a wide canvas and wrapped around
+ *  the great rings with polar UVs, so every letter sits fully inside the
+ *  visible band instead of being clipped by it. The alphabet is the theme's:
+ *  runes for fantasy, hex code for scifi, occult marks for horror,
+ *  typewriter punctuation for noir… */
+function makeGlyphBandTexture(accent: string, glyphs: string, font: string, anisotropy: number) {
+  const width = 4096;
+  const height = 160;
   const canvas = document.createElement("canvas");
-  canvas.width = size;
-  canvas.height = size;
+  canvas.width = width;
+  canvas.height = height;
   const ctx = canvas.getContext("2d")!;
-  ctx.translate(size / 2, size / 2);
-  const count = 36;
-  ctx.font = font;
+  // Hairlines along the band's edges so the ring reads as an etched circle.
+  ctx.fillStyle = accent;
+  ctx.globalAlpha = 0.3;
+  ctx.fillRect(0, 4, width, 2);
+  ctx.fillRect(0, height - 6, width, 2);
+  // Keep the theme's font family, but size the glyphs to the band itself.
+  const family = font.replace(/^[\d.]+px\s*/, "") || "serif";
+  ctx.font = `${Math.round(height * 0.6)}px ${family}`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
+  ctx.shadowColor = accent;
+  ctx.shadowBlur = 6;
+  const count = 32;
   for (let i = 0; i < count; i += 1) {
-    ctx.save();
-    ctx.rotate((i / count) * Math.PI * 2);
-    ctx.translate(0, -size * 0.46);
-    ctx.fillStyle = accent;
-    ctx.globalAlpha = 0.55 + (i % 3) * 0.15;
-    ctx.shadowColor = accent;
-    ctx.shadowBlur = 14;
-    ctx.fillText(glyphs[i % glyphs.length], 0, 0);
-    ctx.restore();
+    ctx.globalAlpha = 0.6 + (i % 3) * 0.14;
+    ctx.fillText(glyphs[i % glyphs.length], ((i + 0.5) / count) * width, height * 0.52);
   }
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.anisotropy = anisotropy;
   return texture;
 }
 
@@ -206,15 +212,26 @@ export default function WeavingLoom({
     }
 
     /* -- glyph rings ---------------------------------------------------------- */
-    const runeTexture = makeRuneRingTexture(accentHex, visual.glyphs, visual.glyphFont);
-    const rings: Array<{ mesh: THREE.Mesh; spin: number }> = [];
+    const anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+    const runeTexture = makeGlyphBandTexture(accentHex, visual.glyphs, visual.glyphFont, anisotropy);
+    const rings: Array<{ mesh: THREE.Mesh; spin: number; baseTilt: number; phase: number }> = [];
     const ringSpecs: Array<[number, number, number]> = [
       [4.4, 0.42, 0.012],
       [5.6, -0.62, -0.008],
       [7.1, 0.18, 0.005]
     ];
-    for (const [radius, tilt, spin] of ringSpecs) {
-      const geometry = new THREE.RingGeometry(radius * 0.94, radius, 128);
+    ringSpecs.forEach(([radius, tilt, spin], index) => {
+      // A wide band whose UVs run along the circumference, so the glyph strip
+      // wraps the ring exactly — no radial cropping, no smeared sampling.
+      const segments = 220;
+      const geometry = new THREE.RingGeometry(radius * 0.88, radius, segments, 1);
+      const uv = geometry.getAttribute("uv") as THREE.BufferAttribute;
+      for (let j = 0; j <= 1; j += 1) {
+        for (let i = 0; i <= segments; i += 1) {
+          uv.setXY(j * (segments + 1) + i, i / segments, j);
+        }
+      }
+      uv.needsUpdate = true;
       const material = new THREE.MeshBasicMaterial({
         map: runeTexture,
         color: accentColor,
@@ -227,9 +244,9 @@ export default function WeavingLoom({
       const mesh = new THREE.Mesh(geometry, material);
       mesh.rotation.x = Math.PI / 2 + tilt;
       scene.add(mesh);
-      rings.push({ mesh, spin });
+      rings.push({ mesh, spin, baseTilt: Math.PI / 2 + tilt, phase: index * 2.1 });
       disposables.push(geometry, material);
-    }
+    });
     disposables.push(runeTexture);
 
     /* -- deep starfield + nebulae ------------------------------------------- */
@@ -282,11 +299,13 @@ export default function WeavingLoom({
     observer.observe(mount);
 
     /* -- animation -------------------------------------------------------------- */
+    const motion = visual.loom.motion;
     const clock = new THREE.Clock();
     let frame = 0;
     let smoothProgress = Math.max(0.05, progressRef.current);
     let freqData: Uint8Array<ArrayBuffer> | null = null;
     let musicLevel = 0;
+    let scaleLevel = 0;
     const tmp = new THREE.Vector3();
 
     const renderFrame = () => {
@@ -312,30 +331,50 @@ export default function WeavingLoom({
         // No analyser (autoplay blocked / muted): breathe on a slow sine.
         musicLevel += ((0.24 + Math.sin(t * 0.9) * 0.1) - musicLevel) * Math.min(1, dt * 2);
       }
-      const pulse = 1 + musicLevel * 0.16;
+      // Geometry breathes on a slower envelope than the lights, so bass hits
+      // glow rather than physically jolting the half-woven world.
+      scaleLevel += (musicLevel - scaleLevel) * Math.min(1, dt * 2.5);
+      const pulse = 1 + scaleLevel * 0.09;
+
+      // Theme light gutter — layered sines, so the flicker is organic but
+      // never the single-frame strobe that random noise gives.
+      let glow = 1;
+      if (motion.flicker > 0) {
+        const g = Math.sin(t * 11.3) * Math.sin(t * 5.1 + 1.7) * Math.sin(t * 2.3 + 4.2);
+        glow = 1 - motion.flicker * (0.12 + 0.3 * Math.max(0, g));
+      }
 
       // Motes converge; each has a staggered window so the world knits
-      // outward in waves rather than snapping together.
+      // outward in waves rather than snapping together. The halo's orbit
+      // phase depends only on time — never on convergence — so a mote flies
+      // a clean arc home instead of unwinding its own swirl.
       const position = moteGeometry.getAttribute("position") as THREE.BufferAttribute;
+      const spinBase = t * 0.036 * motion.swirl;
       for (let i = 0; i < MOTES; i += 1) {
-        const k = easeOutCubic((smoothProgress * 1.35 - seeds[i] * 0.4) / 0.95);
-        const wobble = (1 - k) * 0.8;
+        const seed = seeds[i];
+        const k = easeOutCubic((smoothProgress * 1.35 - seed * 0.4) / 0.95);
+        const inv = 1 - k;
         const ox = origin[i * 3];
-        const oy = origin[i * 3 + 1];
         const oz = origin[i * 3 + 2];
-        // Unassembled motes orbit the loom slowly instead of hanging still.
-        const swirl = t * 0.12 * (1 - k) + seeds[i] * Math.PI * 2;
-        const cos = Math.cos(swirl * 0.3);
-        const sin = Math.sin(swirl * 0.3);
+        // Vertical drift of the unassembled halo: fantasy embers rise, noir
+        // rain and post-apoc ash sift down, wrapping seamlessly.
+        const oy = motion.rise !== 0
+          ? ((((origin[i * 3 + 1] + 7 + t * motion.rise * 1.4) % 14) + 14) % 14) - 7
+          : origin[i * 3 + 1];
+        const angle = spinBase * (0.7 + seed * 0.6) + seed * Math.PI * 2;
+        const cos = Math.cos(angle);
+        const sin = Math.sin(angle);
+        const bob = Math.sin(t * 1.3 + seed * 9) * 0.16 * motion.wobble * inv;
         tmp.set(
-          (ox * cos - oz * sin) * (1 - k) + target[i * 3] * k * pulse,
-          oy * (1 - k) + target[i * 3 + 1] * k * pulse + Math.sin(t * 1.6 + seeds[i] * 9) * 0.02 * wobble * 8,
-          (ox * sin + oz * cos) * (1 - k) + target[i * 3 + 2] * k * pulse
+          (ox * cos - oz * sin) * inv + target[i * 3] * k * pulse,
+          oy * inv + bob + target[i * 3 + 1] * k * pulse,
+          (ox * sin + oz * cos) * inv + target[i * 3 + 2] * k * pulse
         );
         position.setXYZ(i, tmp.x, tmp.y, tmp.z);
       }
       position.needsUpdate = true;
       motes.rotation.y = t * 0.05;
+      moteMaterial.opacity = 0.95 * (0.7 + 0.3 * glow);
 
       // The solid world crystallizes late so motes get their moment.
       const solidity = easeOutCubic((smoothProgress - 0.45) / 0.55);
@@ -345,9 +384,9 @@ export default function WeavingLoom({
       world.rotation.x = Math.sin(t * 0.11) * 0.08;
       world.scale.setScalar(pulse);
 
-      heartMaterial.opacity = 0.42 + musicLevel * 0.45 + Math.sin(t * 1.8) * 0.05;
+      heartMaterial.opacity = (0.42 + musicLevel * 0.45 + Math.sin(t * 1.8) * 0.05) * glow;
       heart.scale.setScalar(6.4 * pulse + solidity * 1.2);
-      coreLight.intensity = 30 + musicLevel * 50;
+      coreLight.intensity = (30 + musicLevel * 50) * glow;
 
       // Threads: flowing beads of light; they thin out as the world completes.
       const threadAlpha = 0.9 - solidity * 0.55;
@@ -363,8 +402,11 @@ export default function WeavingLoom({
       }
 
       for (const ring of rings) {
-        ring.mesh.rotation.z += ring.spin * (1 + musicLevel * 2) * dt * 60 * 0.016;
-        (ring.mesh.material as THREE.MeshBasicMaterial).opacity = 0.22 + musicLevel * 0.3 + solidity * 0.12;
+        ring.mesh.rotation.z += ring.spin * 4 * motion.ringSpeed * (1 + musicLevel * 2) * dt;
+        // Rings sway on their tilt axis — barely at all for scifi's gyros,
+        // a slow drunken list for horror's derelict seals.
+        ring.mesh.rotation.x = ring.baseTilt + Math.sin(t * (0.4 + ring.phase * 0.06) + ring.phase) * motion.ringSway * 4;
+        (ring.mesh.material as THREE.MeshBasicMaterial).opacity = (0.24 + musicLevel * 0.3 + solidity * 0.12) * glow;
       }
 
       nebulae.forEach((sprite, index) => {
@@ -372,12 +414,15 @@ export default function WeavingLoom({
       });
       starMaterial.opacity = 0.45 + musicLevel * 0.3;
 
-      // Slow heroic orbit + pointer parallax + faint bass push-in.
-      const orbit = t * 0.05;
-      const dolly = 14 - solidity * 1.6 - musicLevel * 0.5;
-      camera.position.x += (Math.sin(orbit) * 2.2 + pointer.x * 0.9 - camera.position.x) * 0.03;
-      camera.position.y += (1.2 - pointer.y * 0.7 - camera.position.y) * 0.03;
-      camera.position.z += (dolly - camera.position.z) * 0.02;
+      // Slow heroic orbit + pointer parallax + faint bass push-in — damped
+      // with exponential smoothing so the glide is identical at any framerate.
+      const orbit = t * motion.orbit;
+      const dampXY = 1 - Math.exp(-dt * 2.2);
+      const dampZ = 1 - Math.exp(-dt * 1.4);
+      const dolly = 14 - solidity * 1.6 - scaleLevel * 0.5;
+      camera.position.x += (Math.sin(orbit) * 2.2 + pointer.x * 0.9 - camera.position.x) * dampXY;
+      camera.position.y += (1.2 + Math.sin(t * 0.21) * 0.25 - pointer.y * 0.7 - camera.position.y) * dampXY;
+      camera.position.z += (dolly - camera.position.z) * dampZ;
       camera.lookAt(0, 0, 0);
 
       renderer.render(scene, camera);
