@@ -226,6 +226,37 @@ export async function POST(request: Request) {
         return NextResponse.json({ campaign });
       }
 
+      if (action === "resetTurn") {
+        // Host-triggered recovery for a stuck turn (item #1): force-clear
+        // dmStatus/dmPhase and restore whatever choices were on the table
+        // before the stuck turn, without waiting for the stale-status timeout.
+        // Use when a DM call is abandoned mid-retry (server restart, crashed
+        // process) and the table is frozen with a permanent "weaving" lock.
+        const campaign = await getCampaign(campaignId);
+        if (!campaign.dmStatus) return NextResponse.json({ campaign });
+        serverLog("API party", `Host force-reset a stuck turn for campaign: ${campaignId}`);
+        campaign.dmStatus = undefined;
+        campaign.dmPhase = undefined;
+        safePushDisplayEvent(campaign, {
+          type: "system",
+          speaker: "SYSTEM",
+          content: "The host reset a stalled turn — the table is unstuck."
+        });
+        await saveCampaign(campaign);
+        return NextResponse.json({ campaign });
+      }
+
+      if (action === "presenting") {
+        // Lightweight playback-progress broadcast from the TV: no DM turn, no
+        // saveCampaign lock contention beyond the usual mutex. Lets controllers
+        // stay locked until the TV actually finishes typing/holding this turn's
+        // beats (not just until the server finished generating them).
+        const campaign = await getCampaign(campaignId);
+        campaign.presenting = { active: !!body.active, updatedAt: Date.now() };
+        await saveCampaign(campaign);
+        return NextResponse.json({ campaign });
+      }
+
       if (action === "setBackground") {
         const campaign = await getCampaign(campaignId);
         const url = String(body.url || "").trim();

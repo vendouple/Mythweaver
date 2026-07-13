@@ -31,16 +31,23 @@ export function aquaConfig() {
     apiKey,
     baseUrl,
     chatModel: process.env.AQUA_CHAT_MODEL || "grok-4.3",
-    // Optional small/fast model for constrained ancillary tasks (backdrop
-    // director, theme picker, scene director). Empty → those fall back to the
-    // main chat model. The main narrative DM turn ALWAYS uses chatModel.
+    // Optional small/fast model for constrained HOUSEKEEPING ONLY (context
+    // summarization/compaction so the large RP model never context-collapses).
+    // It never directs live narration, ambience, effects, or backdrops — those
+    // ALWAYS run on chatModel. Empty → housekeeping is skipped; the transcript
+    // char budget below is the only safety net.
     fastModel: process.env.FAST_MODEL || process.env.AQUA_FAST_MODEL || "",
     // The small model may live on a DIFFERENT OpenAI-compatible provider. Each
     // field falls back to the main endpoint when left empty, so a same-provider
     // setup needs neither.
     fastBaseUrl: process.env.FAST_BASE_URL || process.env.AQUA_FAST_BASE_URL || baseUrl,
     fastApiKey: process.env.FAST_API_KEY || process.env.AQUA_FAST_API_KEY || apiKey,
-    imageModel: process.env.AQUA_IMAGE_MODEL || "gptimage-2"
+    imageModel: process.env.AQUA_IMAGE_MODEL || "gptimage-2",
+    // Character budget (NOT tokens) for the recent-transcript window handed to
+    // the DM each turn. The chat model supports up to ~1M tokens of context,
+    // but quality degrades well before that ceiling, so this stays a
+    // conservative default rather than the true max. Configurable per-deployment.
+    maxContextChars: Math.max(20_000, Number(process.env.AQUA_MAX_CONTEXT_CHARS) || 250_000)
   };
 }
 

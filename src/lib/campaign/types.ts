@@ -430,6 +430,21 @@ export type Campaign = {
   effects?: StageEffect[];
   dmStatus?: string;
   dmPhase?: DmPhase;
+  /**
+   * True while the TV is still typing out/holding this turn's beats. Broadcast
+   * by the host so controllers can stay locked past the moment the server
+   * finishes generating — narration can take much longer to PLAY than to
+   * produce. Stale (old updatedAt) is treated as false so a closed TV can never
+   * permanently lock the table.
+   */
+  presenting?: { active: boolean; updatedAt: number };
+  /**
+   * Running summary of everything BEFORE the recent transcript window, kept
+   * current by the housekeeping pass (see runHousekeeping in aqua/chat.ts) so
+   * the RP model retains long-term continuity without the full transcript
+   * ballooning its context every turn. Empty until enough history piles up.
+   */
+  storySummary?: string;
   messages: ChatMessage[];
   campaignType?: CampaignType;
   /**

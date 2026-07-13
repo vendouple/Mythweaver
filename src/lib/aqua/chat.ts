@@ -1,11 +1,11 @@
 import { buildCampaignContext } from "@/lib/campaign/context";
-import { getCampaign, saveCampaign, downloadAndSaveImage, logCampaignDebug, safePushDisplayEvent, isValidImageUrl, startCampaignDraft, finishCampaignDraft, reconcilePresence, normalizeBeatEffect, pushStageEffect, ensureLocations, getFocusedLocation, persistFocusedLocation } from "@/lib/campaign/store";
+import { getCampaign, saveCampaign, downloadAndSaveImage, logCampaignDebug, safePushDisplayEvent, isValidImageUrl, startCampaignDraft, finishCampaignDraft, reconcilePresence, normalizeBeatEffect, ensureLocations, getFocusedLocation, persistFocusedLocation } from "@/lib/campaign/store";
 import { createId } from "@/lib/utils/ids";
 import { aquaConfig, aquaFetch, fastModelTarget, AquaFetchOptions, AquaMessage, AquaToolCall, AquaToolDefinition } from "./client";
 import { runTool, toolDefinitions, applyNpcGroupFields, applyConditionFields } from "@/lib/tools/registry";
 import { generateImage } from "@/lib/aqua/images";
-import { AmbienceMood, Campaign, DisplayEvent, PlayerStat, StageEffectKind, StoryCharacter } from "@/lib/campaign/types";
-import { classifyMusicTheme, MUSIC_THEMES, MusicTheme } from "@/lib/campaign/musicTheme";
+import { Campaign, DisplayEvent, PlayerStat, StoryCharacter } from "@/lib/campaign/types";
+import { classifyMusicTheme } from "@/lib/campaign/musicTheme";
 import { advanceCombat, buildExplorationResolution, ENEMY_SLOT, syncFocusedMirror } from "@/lib/campaign/turns";
 
 // Tiered server-log verbosity (DEBUG_VERBOSE):
@@ -118,6 +118,7 @@ Continuity & assets:
 - Campaign files, each with a distinct job: quest_log.md = ONLY the current active player-facing objective and immediate tasks; storyline.md = your private structured arc (chapters/ending/current position); notes.md (and memory/*.md) = free-form durable worldbuilding — lore, NPC relationships, secrets, foreshadowing too long for the memory line. Keep hidden plans out of quest_log.md.
 - Seed every foe with HP via npcUpdates the moment it enters the scene, so the TV shows an enemy HP bar and hits have something to subtract.
 - Group handling: a NAMED or role foe (leader, lieutenant, champion — anyone who speaks or matters) is ALWAYS its own npcUpdates entry with its own HP. Only faceless rank-and-file (e.g. "Iron Warrens Thugs") are pooled into ONE entry with isGroup:true, count (how many stand), and maxCount. Decrement count as they drop; don't flood the UI with a card per mook.
+- Reuse the SAME NPC entry (its id, or its exact existing name) across turns — do not re-introduce an already-tracked character under a new descriptive title (e.g. giving "Mara" a fuller name like "Mara — The Drowned Light" later) or you'll spawn a duplicate card. If a character's title genuinely evolves, use renameFrom to relabel the EXISTING entry rather than creating a new one.
 
 Story planning (keep a private outline in storyline.md — never shown to players):
 - On the opening turn, write storyline.md via write_campaign_file: a high-level arc with the number of chapters (scale to the Campaign Length setting — short 2-3, medium 4-6, long 7+; infinite = open-ended arcs), a one-line beat per chapter, the intended ENDING, and a 'Current: Chapter 1' marker.
@@ -134,6 +135,7 @@ World grounding (do NOT fabricate the world):
 - Each player and NPC has their OWN zoneId within a location. Two players in the same location but different zones are at different ranges — Player A next to the sniper (same zone) can melee while Player B across the hall (adjacent or farther) cannot. Update zoneId via move_zone or playerUpdates/npcUpdates whenever someone repositions, and judge range from the ACTOR's zone vs the TARGET's zone, not the location as a whole.
 - Abilities and owned equipment override ordinary range limits when their description clearly supports it (a sniper ability can attack distant zones). Do not hard-block a valid ability. If its range is ambiguous, interpret it consistently from its wording and use a roll/cost rather than silently granting or denying it.
 - The party can SPLIT: each group is in its own location. Track connections, travel time, and communication. Combat and lock-ins remain per-location; intercut with set_focus and do not let a remote group react unless communication and travel time allow it.
+- NPCs/enemies track locationId just like players. A brand-new NPC defaults to the party's current location automatically — you only need locationId when introducing one somewhere else. When an EXISTING NPC's physical position changes (it follows the party into a new room, flees to another location, or you start combat somewhere it was standing elsewhere), set locationId in npcUpdates to keep it in sync — otherwise it silently stops appearing where the fight/scene actually is.
 
 Cinematic direction:
 - If set_theme is offered and no score is chosen yet, call set_theme EXACTLY ONCE on the opening turn.
@@ -159,7 +161,7 @@ Narration style (the TV performs each story beat one at a time):
 
 Turns & combat flow (the table has two modes — honor the one in the context):
 - EXPLORATION (default): all able players lock in simultaneously and you receive their actions together. Resolve them in ONE flowing narration where their choices interact.
-- COMBAT (sequential): call start_combat when a fight begins. Then you resolve ONE actor per turn — only the active player's action (named in the context), never the others. After the last player, you get the enemies' turn: resolve every foe's action (attack roll → damage → apply HP). Call end_combat when the fight is over. Narrate initiative naturally ("Engu, you're up").
+- COMBAT (sequential): call start_combat when a fight begins, passing enemyIds for the hostile NPCs in THIS fight so they're placed at the fight's location (otherwise they may not show up on the TV/roster where the fight is happening). Then you resolve ONE actor per turn — only the active player's action (named in the context), never the others. After the last player, you get the enemies' turn: resolve every foe's action (attack roll → damage → apply HP). Call end_combat when the fight is over. Narrate initiative naturally ("Engu, you're up").
 - Don't switch modes needlessly; stay in exploration for talk/travel/investigation, combat only for actual fights.
 
 Conditions & lifecycle (ENFORCED — not just flavor):
@@ -326,6 +328,7 @@ const narrateTurnTool: AquaToolDefinition = {
               count: { type: "number", description: "Group: how many still standing." },
               maxCount: { type: "number", description: "Group: size at first encounter." },
               color: { type: "string" },
+              locationId: { type: "string", description: "Move this NPC/enemy to a different tracked location (id from the locations list). New NPCs default to the party's current location automatically — only set this to introduce one elsewhere, or to move an existing one when it follows/relocates." },
               zoneId: { type: "string", description: "Move this NPC/enemy to a narrative zone within their current location." },
               inventory: { type: "array", items: { type: "string" } },
               abilities: { type: "array", items: { type: "string" } },
@@ -382,15 +385,9 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
   // Start campaign draft caching for background AI run
   startCampaignDraft(campaignId, campaign);
 
-  // When a small/fast model is configured it becomes the scene director: it
-  // owns ambience + stage effects (and already owns the backdrop), leaving the
-  // RP model free to focus on story/state. Without one, the RP model handles
-  // atmosphere itself. See directScene() + toolsForTurn().
-  const directorActive = !!aquaConfig().fastModel;
-
   try {
     const messages: AquaMessage[] = [
-      { role: "system", content: systemPrompt + "\n\n" + atmosphereDirective(directorActive) + "\n\n" + campaignRulesPrompt(campaign) },
+      { role: "system", content: systemPrompt + "\n\n" + atmosphereDirective() + "\n\n" + campaignRulesPrompt(campaign) },
       { role: "system", content: buildCampaignContext(campaign) },
       { role: "system", content: turnChecklistPrompt },
       { role: "user", name: playerName, content: action }
@@ -417,7 +414,7 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
     for (let step = 0; step < MAX_DM_STEPS; step += 1) {
       await logCampaignDebug(campaignId, `[AI Step ${step + 1}] Requesting completion...`);
       serverLog("DM AI Step", `Step ${step + 1}/${MAX_DM_STEPS}: Requesting completion...`);
-      const response = await complete(messages, "auto", [...toolsForTurn({ musicTheme: themeChosen ? "set" : undefined, directorActive }), narrateTurnTool], interactiveFetch);
+      const response = await complete(messages, "auto", [...toolsForTurn({ musicTheme: themeChosen ? "set" : undefined }), narrateTurnTool], interactiveFetch);
       const message = response.choices?.[0]?.message || response.message;
       if (!message) throw new Error("Aqua chat response did not include a message");
       await logCampaignDebug(campaignId, `[AI Step ${step + 1}] Received response: ${JSON.stringify(message)}`);
@@ -602,6 +599,9 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
     }
 
     const latestCampaign = await getCampaign(campaignId);
+    // True only for this campaign's very first DM response — used to gate the
+    // one-time "AI invents a title for a surprise campaign" behavior below.
+    const isOpeningTurn = !latestCampaign.messages.some((m) => m.role === "assistant");
     latestCampaign.messages.push({
       id: createId("msg"),
       role: "assistant",
@@ -610,8 +610,7 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
     });
 
     // The story beats pushed to the TV this turn, in play order, with a live
-    // reference to each display event — so the scene director can attach a
-    // linked effect to a specific line after the narration is assembled.
+    // reference to each display event.
     const turnBeats: Array<{ speaker?: string; content?: string; event: DisplayEvent }> = [];
 
     if (parsedJson) {
@@ -659,8 +658,6 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
               abilityUsed: abilityUsed,
               effect: item.effect
             });
-            // Track the live event so the scene director can attach effects to
-            // it by index after the turn (see directScene()).
             if (pushed) turnBeats.push({ speaker, content: contentText, event: pushed });
           }
         }
@@ -687,7 +684,13 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
       if (typeof parsedJson.overview === "string") {
         latestCampaign.overview = parsedJson.overview;
       }
-      if (typeof parsedJson.title === "string" && parsedJson.title.trim()) {
+      // The title is set once, on the opening turn of a surprise/randomized
+      // campaign (where the player deliberately left it for the AI to invent).
+      // Every other campaign already has a real, player-chosen title — and
+      // ANY campaign's title used to get silently overwritten every turn
+      // (it flip-flopped mid-combat in playtesting), so later turns never
+      // touch it regardless of what the model sends.
+      if (isOpeningTurn && latestCampaign.isRandomized && typeof parsedJson.title === "string" && parsedJson.title.trim()) {
         latestCampaign.title = parsedJson.title.trim();
       }
 
@@ -768,8 +771,8 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
       if (Array.isArray(parsedJson.npcUpdates)) {
         for (const update of parsedJson.npcUpdates) {
           let char = latestCampaign.storyCharacters.find((c) => c.id === String(update.id || "")) ||
-                     (update.renameFrom && latestCampaign.storyCharacters.find((c) => c.name.toLowerCase() === String(update.renameFrom).toLowerCase())) ||
-                     latestCampaign.storyCharacters.find((c) => c.name.toLowerCase() === String(update.name || "").toLowerCase());
+                     (update.renameFrom && latestCampaign.storyCharacters.find((c) => c.name.trim().toLowerCase() === String(update.renameFrom).trim().toLowerCase())) ||
+                     latestCampaign.storyCharacters.find((c) => c.name.trim().toLowerCase() === String(update.name || "").trim().toLowerCase());
           if (char) {
             if (typeof update.name === "string") char.name = update.name;
             if (typeof update.description === "string") char.description = update.description;
@@ -792,6 +795,7 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
             }
             if (typeof update.status === "string") char.status = update.status;
             if (typeof update.color === "string") char.color = update.color;
+            if (typeof update.locationId === "string" && update.locationId.trim()) char.locationId = update.locationId.trim();
             if (typeof update.zoneId === "string" && update.zoneId.trim()) char.zoneId = update.zoneId.trim();
             if (Array.isArray(update.inventory)) char.inventory = update.inventory.map(String);
             if (Array.isArray(update.abilities)) char.abilities = update.abilities.map(String);
@@ -806,6 +810,10 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
             if (typeof update.portraitUrl === "string" && isValidImageUrl(update.portraitUrl)) {
               localUrl = await downloadAndSaveImage(campaignId, update.portraitUrl, "npcs", newCharId);
             }
+            // A brand-new NPC/enemy defaults to wherever the party currently is
+            // (the focused location) so it shows up in the same right-side rail
+            // and combat as the players it just appeared in front of, instead of
+            // silently landing on the campaign's very first location.
             const npc: StoryCharacter = {
               id: newCharId,
               name: String(update.name || "NPC"),
@@ -813,6 +821,7 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
               portraitUrl: localUrl,
               status: update.status,
               color: update.color,
+              locationId: typeof update.locationId === "string" && update.locationId.trim() ? update.locationId.trim() : getFocusedLocation(latestCampaign).id,
               inventory: Array.isArray(update.inventory) ? update.inventory.map(String) : [],
               abilities: Array.isArray(update.abilities) ? update.abilities.map(String) : [],
               stats: Array.isArray(update.stats) ? mergeStats([], update.stats) : []
@@ -878,20 +887,12 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
         }
       };
 
-      // With a small/fast model configured, the scene director owns ambience +
-      // stage effects (the RP model had those tools pruned). It reads the beats
-      // that just played and sets mood/effects to match — running alongside the
-      // backdrop reconcile (both are fast-model passes touching different state).
-      const directAtmosphere = async () => {
-        if (!directorActive) return;
-        try {
-          await directScene(latestCampaign, turnBeats);
-        } catch (err) {
-          serverError("Director", "Scene-director atmosphere pass failed (non-fatal)", err);
-        }
-      };
-
-      await Promise.all([reconcileBackdrop(), directAtmosphere()]);
+      await reconcileBackdrop();
+      // Housekeeping (small/fast model only, and only past a real threshold):
+      // compact stale transcript/memory/NPC duplicates so the RP model never
+      // context-collapses. Non-fatal on failure; skipped entirely without a
+      // configured fast model.
+      await runHousekeeping(latestCampaign);
     }
 
     // Backfill the music theme once the world has content (covers sealed-
@@ -1035,11 +1036,11 @@ function describeBackdropPrompt(campaign: Campaign): string {
 }
 
 /**
- * The scene-director pass: a standalone forced-tool call (like the theme
- * picker) that decides the TV backdrop for the CURRENT scene — reuse a fitting
- * past background, paint a new one, or keep what's showing. It runs on the
- * small model but the DECISION is constrained to a strict tool schema, and the
- * server applies it — the RP model is never trusted to remember on its own.
+ * The backdrop safety-net pass: a standalone forced-tool call that decides the
+ * TV backdrop for the CURRENT scene — reuse a fitting past background, paint a
+ * new one, or keep what's showing. Runs on the large chat model (the RP model
+ * reliably forgets to repaint on its own, so the server double-checks with a
+ * fresh, narrowly-scoped call rather than trusting live narration for this).
  * When `force` is set (the host tapped Nudge), "keep" is not an option.
  */
 async function chooseBackdrop(campaign: Campaign, force: boolean): Promise<BackdropDecision | null> {
@@ -1061,7 +1062,6 @@ async function chooseBackdrop(campaign: Campaign, force: boolean): Promise<Backd
     }
   };
 
-  const { model, options } = fastModelTarget();
   const system = `You are the TV scene director for a couch RPG. Read the CURRENT scene and the backdrop now showing, then call set_backdrop EXACTLY ONCE.${force ? " The host has asked you to refresh the backdrop, so you MUST change it — reuse a fitting past background or paint a new one." : " Prefer reuse; only paint new when the location is genuinely new; keep only if the current backdrop still depicts this place."}`;
   const user = [
     `Current scene: ${campaign.currentScene}`,
@@ -1074,13 +1074,12 @@ async function chooseBackdrop(campaign: Campaign, force: boolean): Promise<Backd
     const response = (await aquaFetch("/chat/completions", {
       method: "POST",
       body: JSON.stringify({
-        // Constrained forced-tool call → safe for the small/fast model.
-        model,
+        model: aquaConfig().chatModel,
         messages: [{ role: "system", content: system }, { role: "user", content: user }],
         tools: [tool],
         tool_choice: { type: "function", function: { name: "set_backdrop" } }
       })
-    }, options)) as ChatCompletionResponse;
+    })) as ChatCompletionResponse;
     const message = response.choices?.[0]?.message || response.message;
     const call = Array.isArray(message?.tool_calls) ? message?.tool_calls?.[0] : null;
     if (!call?.function?.arguments) return null;
@@ -1149,126 +1148,6 @@ export async function repaintBackdrop(campaignId: string, options: { force?: boo
   return campaign;
 }
 
-const DIRECTOR_MOODS: AmbienceMood[] = ["calm", "tense", "adrenaline", "battle", "boss", "mystery", "dread", "triumph", "wonder", "somber"];
-const DIRECTOR_EFFECT_KINDS: StageEffectKind[] = ["shake", "flash", "embers", "fog", "rain", "snow", "darkness", "heartbeat"];
-
-/**
- * The scene-director atmosphere pass. When a small/fast model is configured it
- * takes over ambience + stage effects from the RP model (whose set_ambience /
- * trigger_effect tools were pruned this turn). It reads the beats that JUST
- * played — so it has the actual dialogue/narration as context — and, in one
- * forced tool call, sets the mood and any effects, LINKING each effect either
- * to a specific line (fires when that beat performs) or to the turn start
- * (fires immediately). Mutates the campaign in place; the caller saves.
- */
-async function directScene(
-  campaign: Campaign,
-  beats: Array<{ speaker?: string; content?: string; event: DisplayEvent }>
-): Promise<void> {
-  const config = aquaConfig();
-  if (!config.fastModel) return; // director only runs on a dedicated small model
-  const scene = (campaign.currentScene || "").trim();
-  if (!beats.length && !scene) return;
-
-  const tool = {
-    type: "function" as const,
-    function: {
-      name: "direct_scene",
-      description: "Set the TV's mood and any cinematic effects to match the narration that just played. Call EXACTLY ONCE.",
-      parameters: {
-        type: "object",
-        properties: {
-          ambience: {
-            type: "object",
-            description: "Set the music/mood ONLY when the emotional register genuinely shifts from what's already playing; omit entirely to leave it unchanged.",
-            required: ["mood"],
-            properties: {
-              mood: { type: "string", enum: DIRECTOR_MOODS },
-              intensity: { type: "number", description: "0.0-1.0 how hard to lean in. Default 0.6." },
-              note: { type: "string", description: "Optional short sensory flavor, e.g. 'rain hammers the tin roof'." }
-            }
-          },
-          effects: {
-            type: "array",
-            description: "Cinematic effects for this turn. Attach an effect to a line by setting `beat` to that line's [number]; omit `beat` to fire it immediately at the start. Use sparingly — only beats that truly earn punctuation. Empty when nothing warrants one.",
-            items: {
-              type: "object",
-              required: ["kind"],
-              properties: {
-                kind: { type: "string", enum: DIRECTOR_EFFECT_KINDS },
-                strength: { type: "number", description: "0.0-1.0 impact strength. Default 0.6." },
-                repeat: { type: "number", description: "How many times to fire (1-8). Default 1." },
-                delayMs: { type: "number", description: "Delay in ms between repeats (0-5000). Default 0." },
-                beat: { type: "number", description: "The [number] of the story line to attach this effect to; omit to fire immediately at the start." }
-              }
-            }
-          }
-        }
-      }
-    }
-  };
-
-  const beatList = beats.map((b, i) => `[${i}] ${b.speaker || "NARRATOR"}: ${(b.content || "").replace(/\s+/g, " ").trim()}`).join("\n");
-  const nowPlaying = campaign.ambience
-    ? `mood=${campaign.ambience.mood}, intensity=${campaign.ambience.intensity}${campaign.ambience.note ? `, note="${campaign.ambience.note}"` : ""}`
-    : "nothing set yet (default calm)";
-  const system = "You are the TV scene director for a couch RPG. Read the narration that just played and call direct_scene EXACTLY ONCE to set the mood and any cinematic effects that match it. Prefer atmosphere over spectacle: change ambience only on a real emotional shift, and add effects only for the few beats that truly earn them.";
-  const user = [
-    `Current scene: ${scene || "unknown"}`,
-    `Currently playing on the TV: ${nowPlaying}`,
-    `Available moods: ${DIRECTOR_MOODS.join(", ")}.`,
-    `Available effects: ${DIRECTOR_EFFECT_KINDS.join(", ")}.`,
-    `Story lines that just played (attach effects to a line by its [number]):\n${beatList || "(no spoken beats this turn)"}`
-  ].join("\n");
-
-  const { model, options } = fastModelTarget();
-  const response = (await aquaFetch("/chat/completions", {
-    method: "POST",
-    body: JSON.stringify({
-      model,
-      messages: [{ role: "system", content: system }, { role: "user", content: user }],
-      tools: [tool],
-      tool_choice: { type: "function", function: { name: "direct_scene" } }
-    })
-  }, options)) as ChatCompletionResponse;
-
-  const message = response.choices?.[0]?.message || response.message;
-  const call = Array.isArray(message?.tool_calls) ? message?.tool_calls?.[0] : null;
-  if (!call?.function?.arguments) return;
-  let args: Record<string, any>;
-  try {
-    args = JSON.parse(call.function.arguments) as Record<string, any>;
-  } catch {
-    return;
-  }
-
-  // Ambience — only a genuine, on-list mood shift.
-  if (args.ambience && typeof args.ambience === "object" && DIRECTOR_MOODS.includes(args.ambience.mood)) {
-    const rawIntensity = Number(args.ambience.intensity ?? 0.6);
-    campaign.ambience = {
-      mood: args.ambience.mood as AmbienceMood,
-      intensity: Number.isFinite(rawIntensity) ? Math.max(0, Math.min(1, rawIntensity)) : 0.6,
-      note: typeof args.ambience.note === "string" && args.ambience.note.trim() ? args.ambience.note.trim() : undefined,
-      updatedAt: new Date().toISOString()
-    };
-  }
-
-  // Effects — link to a beat (fires when it plays) or fire immediately.
-  if (Array.isArray(args.effects)) {
-    for (const raw of args.effects) {
-      const eff = normalizeBeatEffect(raw);
-      if (!eff) continue;
-      const beatIdx = Number(raw?.beat);
-      const target = Number.isInteger(beatIdx) && beatIdx >= 0 ? beats[beatIdx]?.event : undefined;
-      if (target) {
-        target.effect = eff; // linked — the TV fires it when this beat performs
-      } else {
-        pushStageEffect(campaign, eff.kind, eff.strength ?? 0.6, { repeat: eff.repeat, delayMs: eff.delayMs });
-      }
-    }
-  }
-}
-
 /**
  * Map a story beat's speaker to a display-event type: NARRATOR stays pure
  * narration, SYSTEM is table talk, a player's character name means the DM is
@@ -1313,111 +1192,176 @@ async function complete(
 /**
  * The tools the DM may use this turn. We prune tools whose job is already
  * done so the model isn't tempted to re-run them: once the score is chosen,
- * set_theme vanishes (a mid-saga music swap just confuses the table). When a
- * scene director (small/fast model) is active, set_ambience and trigger_effect
- * are pruned too — the director sets mood + effects after the turn instead.
+ * set_theme vanishes (a mid-saga music swap just confuses the table).
  */
-function toolsForTurn(opts: { musicTheme?: string; directorActive?: boolean }): typeof toolDefinitions {
+function toolsForTurn(opts: { musicTheme?: string }): typeof toolDefinitions {
   return toolDefinitions.filter((tool) => {
     if (tool.function.name === "set_theme") return !opts.musicTheme;
-    if (opts.directorActive && (tool.function.name === "set_ambience" || tool.function.name === "trigger_effect")) {
-      return false;
-    }
     return true;
   });
 }
 
 /**
- * The atmosphere half of the system prompt, which flips on whether a scene
- * director is configured. With one, the RP model is told to leave mood/effects
- * alone (and those tools are pruned). Without one, it drives them itself — and
- * learns that effects can either fire at the start (trigger_effect) or land on
- * a specific line (a story beat's `effect` in narrate_turn).
+ * The atmosphere half of the system prompt. The large RP model always drives
+ * live mood + stage effects itself — no small/fast model is trusted with
+ * real-time creative direction (it produced the wrong music/backdrop in
+ * playtesting). The small model, when configured, is housekeeping-only: see
+ * runHousekeeping().
  */
-function atmosphereDirective(directorActive: boolean): string {
-  if (directorActive) {
-    return `Atmosphere (a separate scene director handles this — do NOT):
-- A dedicated scene director reads your finished narration and sets the music mood, stage effects, and backdrop to match it. Do NOT try to set them yourself — set_ambience and trigger_effect are intentionally unavailable this turn.
-- Focus on story, dice, player/NPC state, and controller choices. Write vivid narration; the director will punctuate it.`;
-  }
+function atmosphereDirective(): string {
   return `Atmosphere (you are the stage director this turn):
 - Call set_ambience when the emotional register shifts. Moods: calm, tense, adrenaline (chases, escapes, heists, races against time — excitement without combat), battle (ordinary combat), boss (climactic showdowns against a major villain or endgame threat), mystery, dread, triumph, wonder, somber. Use sparingly — once per real shift, not every turn.
 - Stage effects have two timings: call trigger_effect to fire one IMMEDIATELY (at the start of the turn); OR attach an \`effect\` to a specific story beat in narrate_turn so it lands the instant that line performs on the TV. Prefer beat-linked effects for immersion; use repeat/delayMs for multi-hit impacts.`;
 }
 
 /**
- * Ask the AI to choose the campaign's musical score by forcing the set_theme
- * tool call. Returns the chosen theme, or null if the premise is too thin or
- * the model answers with something off-list. This is a standalone judgement
- * call — it does NOT run the tool (no DM turn, no side effects); the caller
- * decides what to do with the answer.
- */
-async function pickMusicThemeViaTool(campaign: Campaign): Promise<MusicTheme | null> {
-  const setThemeTool = toolDefinitions.find((tool) => tool.function.name === "set_theme");
-  if (!setThemeTool) return null;
-
-  const cast = (campaign.storyCharacters || [])
-    .map((npc) => `${npc.name}: ${npc.description}`)
-    .filter((line) => line.trim() && line.trim() !== ":")
-    .join("\n");
-  const premise = [
-    campaign.title ? `Title: ${campaign.title}` : "",
-    campaign.startingStory ? `Premise: ${campaign.startingStory}` : "",
-    cast ? `Cast:\n${cast}` : ""
-  ].filter(Boolean).join("\n\n");
-  if (!premise.trim()) return null;
-
-  const { model, options } = fastModelTarget();
-  const response = (await aquaFetch("/chat/completions", {
-    method: "POST",
-    body: JSON.stringify({
-      // Constrained forced-tool call → safe for the small/fast model.
-      model,
-      messages: [
-        {
-          role: "system",
-          content: "You are the score supervisor for a couch RPG. Read the campaign premise and call set_theme EXACTLY ONCE with the single best-fitting musical theme for its genre and era. Always pick the closest match, even if the fit is imperfect."
-        },
-        { role: "user", content: premise }
-      ],
-      tools: [setThemeTool],
-      tool_choice: { type: "function", function: { name: "set_theme" } }
-    })
-  }, options)) as ChatCompletionResponse;
-
-  const message = response.choices?.[0]?.message || response.message;
-  const call = Array.isArray(message?.tool_calls) ? message?.tool_calls?.[0] : null;
-  if (!call?.function?.arguments) return null;
-  try {
-    const args = JSON.parse(call.function.arguments) as { theme?: string };
-    return MUSIC_THEMES.includes(args.theme as MusicTheme) ? (args.theme as MusicTheme) : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
  * Choose and persist a campaign's music theme at CREATION time, before the
- * lobby opens, so the lobby's own music already plays on the right shelf. The
- * AI picks via set_theme; on any failure we keep whatever the keyword
- * classifier already seeded. Sealed-envelope campaigns have no premise yet, so
- * they stay unthemed here and get scored on the DM's opening turn instead.
- * Returns the latest campaign (with the theme applied when one was chosen).
+ * lobby opens, so the lobby's own music already plays on the right shelf.
+ * Deterministic keyword classification (no model call — this is a closed
+ * 7-way genre pick, not a creative judgment call worth spending a request on).
+ * Sealed-envelope campaigns have no premise yet, so they stay unthemed here
+ * and get scored on the DM's opening turn instead (classifyMusicTheme backfill).
  */
 export async function chooseCampaignTheme(campaignId: string): Promise<Campaign> {
   const campaign = await getCampaign(campaignId);
   try {
     if (campaign.isRandomized) return campaign;
-    const theme = await pickMusicThemeViaTool(campaign);
+    const theme = classifyMusicTheme(campaign);
     if (theme && theme !== campaign.musicTheme) {
       campaign.musicTheme = theme;
       await saveCampaign(campaign);
-      serverLog("Theme", `AI chose music theme "${theme}" for campaign ${campaignId}`);
+      serverLog("Theme", `Classified music theme "${theme}" for campaign ${campaignId}`);
     }
   } catch (err) {
-    serverError("Theme", "AI theme selection failed; keeping keyword-classified theme", err);
+    serverError("Theme", "Theme classification failed; keeping any existing theme", err);
   }
   return campaign;
+}
+
+// Housekeeping thresholds: a sweep only runs once there's genuinely stale
+// history to compact, so a fresh/short campaign never pays for it.
+const HOUSEKEEPING_KEEP_RECENT = 32; // raw messages always left untouched after a sweep
+const HOUSEKEEPING_MESSAGE_TRIGGER = 48; // sweep once this many messages have piled up
+const HOUSEKEEPING_MEMORY_CHARS_TRIGGER = 6_000;
+const HOUSEKEEPING_NPC_TRIGGER = 8;
+const HOUSEKEEPING_SUMMARY_MAX_CHARS = 8_000;
+
+function needsHousekeeping(campaign: Campaign): boolean {
+  if (campaign.messages.length > HOUSEKEEPING_MESSAGE_TRIGGER) return true;
+  if ((campaign.memory || "").length > HOUSEKEEPING_MEMORY_CHARS_TRIGGER) return true;
+  if (campaign.storyCharacters.length > HOUSEKEEPING_NPC_TRIGGER) return true;
+  return false;
+}
+
+/**
+ * Small models occasionally leak stray foreign-script tokens mid-word (seen in
+ * playtesting: "He返回ed" instead of "He returned"). This is an English-only
+ * app, so any CJK/Hangul/kana run in model-produced text is always corruption,
+ * never legitimate content — strip it and tidy the resulting whitespace.
+ */
+function sanitizeHousekeepingText(text: string): string {
+  return text
+    .replace(/[　-ヿ㐀-䶿一-鿿가-힣豈-﫿＀-￯]+/g, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+}
+
+/**
+ * Housekeeping pass (the small/fast model's ONLY job): once the transcript,
+ * memory, or NPC roster has genuinely piled up, fold the stale portion into a
+ * bounded running summary and trim it back down — so the RP-focused large
+ * model keeps long-term continuity without paying for the full history every
+ * turn, and never suffers context collapse. Runs post-turn, non-blocking, and
+ * is skipped entirely when no fast model is configured or nothing has crossed
+ * a threshold yet. Mutates the campaign in place; the caller saves.
+ */
+async function runHousekeeping(campaign: Campaign): Promise<void> {
+  const config = aquaConfig();
+  if (!config.fastModel) return;
+  if (!needsHousekeeping(campaign)) return;
+
+  const staleCount = Math.max(0, campaign.messages.length - HOUSEKEEPING_KEEP_RECENT);
+  const staleMessages = staleCount > 0 ? campaign.messages.slice(0, staleCount) : [];
+  const staleTranscript = staleMessages
+    .map((m) => `${m.role.toUpperCase()}${m.name ? ` ${m.name}` : ""}: ${m.content}`)
+    .join("\n\n")
+    .slice(0, 40_000);
+
+  const npcRoster = campaign.storyCharacters.map((c) => ({ id: c.id, name: c.name, description: c.description.slice(0, 200) }));
+
+  const tool = {
+    type: "function" as const,
+    function: {
+      name: "apply_housekeeping",
+      description: "Compact the campaign's long-term memory so it stays usable. Call EXACTLY ONCE.",
+      parameters: {
+        type: "object",
+        required: ["storySummary"],
+        properties: {
+          storySummary: { type: "string", description: "The FULL updated running summary (merge the previous summary with the stale transcript below into one coherent account, under ~500 words). This replaces the previous summary entirely." },
+          memory: { type: "string", description: "Optional: a compacted rewrite of long-term memory — merge duplicate/resolved notes, drop anything superseded. Omit if memory is already clean." },
+          duplicateNpcs: {
+            type: "array",
+            description: "Optional: groups of NPC ids that are actually the SAME character tracked twice (e.g. renamed mid-story). Omit if none.",
+            items: {
+              type: "object",
+              required: ["keepId", "removeIds"],
+              properties: {
+                keepId: { type: "string", description: "The id to keep." },
+                removeIds: { type: "array", items: { type: "string" }, description: "Duplicate ids of the SAME character to remove." }
+              }
+            }
+          }
+        }
+      }
+    }
+  };
+
+  const system = "You are the housekeeping assistant for a couch RPG. You never narrate, direct atmosphere, or make creative decisions — you ONLY compact bookkeeping so the game master model doesn't drown in old context. Call apply_housekeeping EXACTLY ONCE.";
+  const user = [
+    `Previous running summary: ${campaign.storySummary || "(none yet)"}`,
+    staleTranscript ? `Stale transcript to fold into the summary (then it will be discarded — capture anything worth remembering):\n${staleTranscript}` : "(no stale transcript this sweep — only memory/NPC cleanup needed)",
+    `Current long-term memory: ${campaign.memory || "(empty)"}`,
+    `Tracked NPCs/enemies: ${JSON.stringify(npcRoster)}`
+  ].join("\n\n");
+
+  const { model, options } = fastModelTarget();
+  try {
+    const response = (await aquaFetch("/chat/completions", {
+      method: "POST",
+      body: JSON.stringify({
+        model,
+        messages: [{ role: "system", content: system }, { role: "user", content: user }],
+        tools: [tool],
+        tool_choice: { type: "function", function: { name: "apply_housekeeping" } }
+      })
+    }, options)) as ChatCompletionResponse;
+    const message = response.choices?.[0]?.message || response.message;
+    const call = Array.isArray(message?.tool_calls) ? message?.tool_calls?.[0] : null;
+    if (!call?.function?.arguments) return;
+    const args = JSON.parse(call.function.arguments) as Record<string, any>;
+
+    if (typeof args.storySummary === "string" && args.storySummary.trim()) {
+      campaign.storySummary = sanitizeHousekeepingText(args.storySummary).slice(0, HOUSEKEEPING_SUMMARY_MAX_CHARS);
+      // Only trim the transcript once its stale portion is safely captured.
+      if (staleCount > 0) campaign.messages = campaign.messages.slice(staleCount);
+    }
+    if (typeof args.memory === "string" && args.memory.trim()) {
+      campaign.memory = sanitizeHousekeepingText(args.memory);
+    }
+    if (Array.isArray(args.duplicateNpcs)) {
+      for (const group of args.duplicateNpcs) {
+        const keepId = String(group?.keepId || "");
+        const removeIds = Array.isArray(group?.removeIds) ? group.removeIds.map(String) : [];
+        if (!keepId || !removeIds.length) continue;
+        if (!campaign.storyCharacters.some((c) => c.id === keepId)) continue;
+        campaign.storyCharacters = campaign.storyCharacters.filter((c) => c.id === keepId || !removeIds.includes(c.id));
+      }
+    }
+    serverLog("Housekeeping", `Sweep applied for campaign ${campaign.id} (trimmed ${staleCount} messages)`);
+  } catch (err) {
+    serverError("Housekeeping", "Housekeeping sweep failed (non-fatal)", err);
+  }
 }
 
 /**

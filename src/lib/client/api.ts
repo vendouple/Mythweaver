@@ -90,7 +90,10 @@ export function useCampaignPoll(campaignId: string | null, host: boolean, player
       await refresh();
       if (cancelled) return;
       const current = campaignRef.current;
-      const busy = !!current?.dmStatus;
+      // Poll quickly while the DM is generating OR the TV is still presenting
+      // this turn's beats, so a controller's lock releases promptly the
+      // instant either one clears instead of lagging the idle poll cadence.
+      const busy = !!current?.dmStatus || !!current?.presenting?.active;
       const idle = current?.status === "active" && !busy;
       timer = setTimeout(tick, busy ? 1600 : idle ? 4200 : 2800);
     };
