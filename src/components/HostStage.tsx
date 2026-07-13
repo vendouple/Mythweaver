@@ -204,7 +204,13 @@ function expandBeat(event: Beat): Beat[] {
   if (!splittable || content.length <= BEAT_SPLIT_MAX) return [event];
   const parts = splitLongContent(content);
   if (parts.length <= 1) return [event];
-  return parts.map((part, index) => ({ ...event, id: `${event.id}#${index}`, content: part }));
+  // A linked effect fires once, on the first sub-beat only.
+  return parts.map((part, index) => ({
+    ...event,
+    id: `${event.id}#${index}`,
+    content: part,
+    effect: index === 0 ? event.effect : undefined
+  }));
 }
 
 /**
@@ -261,6 +267,9 @@ export default function HostStage({
   /* ------------------------------------------------------------------ */
   const seenRef = useRef<Set<string> | null>(null);
   const queueRef = useRef<Beat[]>([]);
+  // Beat ids whose linked effect has already fired — prevents re-firing on
+  // re-render or on the refresh recap replay.
+  const beatFxFiredRef = useRef<Set<string>>(new Set());
   const [currentBeat, setCurrentBeat] = useState<Beat | null>(null);
   const [shownChars, setShownChars] = useState(0);
   const [holdMs, setHoldMs] = useState(0);
@@ -282,6 +291,7 @@ export default function HostStage({
         (event) => event.type === "narration" || event.type === "dialogue"
       );
       if (recap) {
+        beatFxFiredRef.current.add(recap.id); // don't replay its linked effect
         setCurrentBeat(recap);
         setShownChars(plainText(parseInline(recap.content || "")).length);
       }
@@ -405,6 +415,27 @@ export default function HostStage({
   const [darkUntil, setDarkUntil] = useState(0);
   const [pulseUntil, setPulseUntil] = useState(0);
 
+  // Fire a single stage effect (with its repeat/delay envelope). Shared by the
+  // turn-level effects queue (campaign.effects) and beat-linked effects that
+  // fire the instant their story beat performs.
+  const fireEffect = useCallback((kind: StageEffectKind, strength = 0.6, repeat?: number, delayMs?: number) => {
+    const times = Math.max(1, Math.min(8, Number(repeat) || 1));
+    const gap = Math.max(0, Math.min(5000, Number(delayMs) || 0));
+    const fire = () => {
+      switch (kind) {
+        case "shake": setShakeKey((k) => k + 1); playSfx("rumble", strength); break;
+        case "flash": setFlashKey((k) => k + 1); playSfx("flash", strength); break;
+        case "darkness": setDarkUntil(Date.now() + 4500); playSfx("darkness"); break;
+        case "heartbeat": setPulseUntil(Date.now() + 5200); playSfx("heartbeat"); break;
+        default: atmosphereRef.current?.burst(kind, strength);
+      }
+    };
+    for (let i = 0; i < times; i += 1) {
+      if (i === 0 || gap === 0) fire();
+      else setTimeout(fire, gap * i);
+    }
+  }, []);
+
   useEffect(() => {
     const effects = campaign.effects || [];
     if (!fxSeenRef.current) {
@@ -415,23 +446,20 @@ export default function HostStage({
     for (const fx of effects) {
       if (seen.has(fx.id)) continue;
       seen.add(fx.id);
-      const times = Math.max(1, Math.min(8, Number(fx.repeat) || 1));
-      const gap = Math.max(0, Math.min(5000, Number(fx.delayMs) || 0));
-      const fire = () => {
-        switch (fx.kind) {
-          case "shake": setShakeKey((k) => k + 1); playSfx("rumble", fx.strength); break;
-          case "flash": setFlashKey((k) => k + 1); playSfx("flash", fx.strength); break;
-          case "darkness": setDarkUntil(Date.now() + 4500); playSfx("darkness"); break;
-          case "heartbeat": setPulseUntil(Date.now() + 5200); playSfx("heartbeat"); break;
-          default: atmosphereRef.current?.burst(fx.kind, fx.strength);
-        }
-      };
-      for (let i = 0; i < times; i += 1) {
-        if (i === 0 || gap === 0) fire();
-        else setTimeout(fire, gap * i);
-      }
+      fireEffect(fx.kind, fx.strength, fx.repeat, fx.delayMs);
     }
-  }, [campaign.effects]);
+  }, [campaign.effects, fireEffect]);
+
+  // Beat-linked effects: fire the moment a beat carrying an `effect` starts
+  // performing on the TV (so a thunderclap lands on the line, not at turn
+  // start). Guarded by id so a re-render or refresh-recap never replays it.
+  useEffect(() => {
+    const beat = currentBeat;
+    if (!beat?.effect || !beat.id) return;
+    if (beatFxFiredRef.current.has(beat.id)) return;
+    beatFxFiredRef.current.add(beat.id);
+    fireEffect(beat.effect.kind, beat.effect.strength ?? 0.6, beat.effect.repeat, beat.effect.delayMs);
+  }, [currentBeat, fireEffect]);
 
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
