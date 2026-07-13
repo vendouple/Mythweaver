@@ -1,20 +1,33 @@
 import { buildCampaignContext } from "@/lib/campaign/context";
-import { getCampaign, saveCampaign, downloadAndSaveImage, logCampaignDebug, safePushDisplayEvent, isValidImageUrl, startCampaignDraft, finishCampaignDraft, reconcilePresence, normalizeBeatEffect, pushStageEffect } from "@/lib/campaign/store";
+import { getCampaign, saveCampaign, downloadAndSaveImage, logCampaignDebug, safePushDisplayEvent, isValidImageUrl, startCampaignDraft, finishCampaignDraft, reconcilePresence, normalizeBeatEffect, pushStageEffect, ensureLocations, getFocusedLocation, persistFocusedLocation } from "@/lib/campaign/store";
 import { createId } from "@/lib/utils/ids";
 import { aquaConfig, aquaFetch, fastModelTarget, AquaFetchOptions, AquaMessage, AquaToolCall, AquaToolDefinition } from "./client";
 import { runTool, toolDefinitions, applyNpcGroupFields, applyConditionFields } from "@/lib/tools/registry";
 import { generateImage } from "@/lib/aqua/images";
 import { AmbienceMood, Campaign, DisplayEvent, PlayerStat, StageEffectKind, StoryCharacter } from "@/lib/campaign/types";
 import { classifyMusicTheme, MUSIC_THEMES, MusicTheme } from "@/lib/campaign/musicTheme";
-import { advanceCombat, buildExplorationResolution, ENEMY_SLOT } from "@/lib/campaign/turns";
+import { advanceCombat, buildExplorationResolution, ENEMY_SLOT, syncFocusedMirror } from "@/lib/campaign/turns";
 
-// Verbose per-step/per-request server logs flood the console during play
-// (AI steps, tool calls, poll-adjacent chatter). Off by default; set
-// DEBUG_VERBOSE=1 to see them. Errors always print (see serverError).
-const VERBOSE = process.env.DEBUG_VERBOSE === "1" || process.env.DEBUG_VERBOSE === "true";
+// Tiered server-log verbosity (DEBUG_VERBOSE):
+//   0 / unset → errors only (quiet; default so the console isn't flooded)
+//   1         → tool calls, DM steps, and game logic ("just tool calling etc")
+//   2         → everything, including the noisy per-request "API …" logs
+// Errors always print regardless (see serverError).
+const VERBOSE_LEVEL = (() => {
+  const v = String(process.env.DEBUG_VERBOSE || "").toLowerCase();
+  if (v === "2") return 2;
+  if (v === "1" || v === "true") return 1;
+  return 0;
+})();
 
-export function serverLog(category: string, message: string, data?: any) {
-  if (!VERBOSE) return;
+/**
+ * @param level minimum DEBUG_VERBOSE level required to print. Defaults to 2 for
+ *   "API …" categories (request spam) and 1 for everything else, so level 1
+ *   shows tool/DM activity while level 2 adds the API request chatter.
+ */
+export function serverLog(category: string, message: string, data?: any, level?: number) {
+  const needed = level ?? (/^api\b/i.test(category) ? 2 : 1);
+  if (VERBOSE_LEVEL < needed) return;
   const timestamp = new Date().toLocaleTimeString();
   const dataStr = data ? ` | ${typeof data === "object" ? JSON.stringify(data) : data}` : "";
   console.log(`\x1b[35m[DND SERVER]\x1b[0m [${timestamp}] \x1b[36m[${category}]\x1b[0m ${message}${dataStr}`);
@@ -111,6 +124,17 @@ Story planning (keep a private outline in storyline.md — never shown to player
 - Each turn, keep it current: advance the 'Current: Chapter N' marker as the party progresses, and when they deviate (repeated failures, an unexpected route, an off-script choice) TWEAK or rewrite the upcoming chapters to fit — but always keep a defined ending and steer toward it.
 - The story plan is yours alone (hidden win/loss conditions, future twists, the ending) — never leak it into quest_log.md or player-facing text.
 
+World grounding (do NOT fabricate the world):
+- Environment state is durable in environment.json. Each LOCATION has authoritative objects, cover, exits, hazards, narrative zones, and connections. Maintain them with update_location and SEED a place before interaction. If it isn't listed, it isn't there.
+- Object kinds cover common roles (item, container, interactable, obstacle, clue, furniture). For anything else use kind "other" with descriptive traits/state; do not invent a new untracked object just because it lacks a perfect category.
+- Players may only use items in their inventory or objects listed in their CURRENT location. If a player invents an item, weapon, or cover that isn't present ("I pull out a grenade", "I dive behind the crates" when there are no crates), do NOT grant it for free — deny it, or if plausible require a d20 check to improvise/scavenge, and only on success add it (to inventory via playerUpdates, or the room via update_location).
+- Taking cover requires cover that exists in this location's cover[]. If there is none, the spot is exposed — say so (or allow a check to improvise cover).
+- Never conjure loot from nowhere; when something genuinely new appears, record it with update_location or playerUpdates so it stays tracked.
+- Use narrative zones for distance: same zone is close/melee, an adjacent zone is one normal move, and non-adjacent zones require movement or adequate range. Hard-deny physically impossible actions; roll only uncertain plausible attempts.
+- Each player and NPC has their OWN zoneId within a location. Two players in the same location but different zones are at different ranges — Player A next to the sniper (same zone) can melee while Player B across the hall (adjacent or farther) cannot. Update zoneId via move_zone or playerUpdates/npcUpdates whenever someone repositions, and judge range from the ACTOR's zone vs the TARGET's zone, not the location as a whole.
+- Abilities and owned equipment override ordinary range limits when their description clearly supports it (a sniper ability can attack distant zones). Do not hard-block a valid ability. If its range is ambiguous, interpret it consistently from its wording and use a roll/cost rather than silently granting or denying it.
+- The party can SPLIT: each group is in its own location. Track connections, travel time, and communication. Combat and lock-ins remain per-location; intercut with set_focus and do not let a remote group react unless communication and travel time allow it.
+
 Cinematic direction:
 - If set_theme is offered and no score is chosen yet, call set_theme EXACTLY ONCE on the opening turn.
 - Prefer atmosphere over words.
@@ -156,7 +180,7 @@ const turnChecklistPrompt = `Before responding:
 1. Read current task, difficulty, roll mode, the story plan (storyline.md — where are we in the arc?), and whether the campaign is already completed.
 2. Check active players (stats/HP), scene, quest, NPCs, and recent transcript.
 3. Call required tools before ending (dice, images, end_campaign if the saga closes). On the opening turn, write storyline.md; on later turns update it when the party advances a chapter or deviates.
-4. Honor dice outcomes exactly (full spectrum). Update HP/stats after harm or healing.
+4. Honor dice outcomes exactly (full spectrum). Update HP/stats after harm or healing. Keep the current location's objects/cover/exits current with update_location; don't let players use items or cover that aren't there.
 5. END by calling narrate_turn (preferred) with story + updates. If the campaign ended, leave playerActions empty.
 
 The narrate_turn tool takes the same fields as this shape (story, title, currentScene, overview, playerActions, partyActions, playerUpdates, npcUpdates). Only if you cannot call it, emit this JSON instead:
@@ -279,6 +303,7 @@ const narrateTurnTool: AquaToolDefinition = {
               abilities: { type: "array", items: { type: "string" } },
               notes: { type: "string" },
               color: { type: "string" },
+              zoneId: { type: "string", description: "Move this player to a narrative zone within their current location." },
               stats: { type: "array", items: statSchema }
             }
           }
@@ -301,6 +326,7 @@ const narrateTurnTool: AquaToolDefinition = {
               count: { type: "number", description: "Group: how many still standing." },
               maxCount: { type: "number", description: "Group: size at first encounter." },
               color: { type: "string" },
+              zoneId: { type: "string", description: "Move this NPC/enemy to a narrative zone within their current location." },
               inventory: { type: "array", items: { type: "string" } },
               abilities: { type: "array", items: { type: "string" } },
               stats: { type: "array", items: statSchema }
@@ -731,6 +757,7 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
           }
           if (typeof update.portraitPrompt === "string") player.portraitPrompt = update.portraitPrompt;
           if (typeof update.color === "string") player.color = update.color;
+          if (typeof update.zoneId === "string" && update.zoneId.trim()) player.zoneId = update.zoneId.trim();
           applyConditionFields(player, update);
           if (Array.isArray(update.stats)) {
             player.stats = mergeStats(player.stats, update.stats);
@@ -765,6 +792,7 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
             }
             if (typeof update.status === "string") char.status = update.status;
             if (typeof update.color === "string") char.color = update.color;
+            if (typeof update.zoneId === "string" && update.zoneId.trim()) char.zoneId = update.zoneId.trim();
             if (Array.isArray(update.inventory)) char.inventory = update.inventory.map(String);
             if (Array.isArray(update.abilities)) char.abilities = update.abilities.map(String);
             applyNpcGroupFields(char, update);
@@ -877,6 +905,11 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
     latestCampaign.dmStatus = undefined; // Clear DM status
     latestCampaign.dmPhase = undefined;
 
+    // Save this turn's backdrop/ambience into the focused location so cutting
+    // back to it later restores instantly, and keep the focused mirror in sync.
+    persistFocusedLocation(latestCampaign);
+    syncFocusedMirror(latestCampaign);
+
     finishCampaignDraft(campaignId);
     await saveCampaign(latestCampaign);
 
@@ -910,14 +943,19 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
  * turn (honoring unanimous "together" actions), pushing each player's choice as
  * a user message + display beat first so the transcript and TV reflect it.
  */
-export async function resolveExplorationRound(campaignId: string): Promise<Campaign> {
+export async function resolveExplorationRound(campaignId: string, locationId?: string): Promise<Campaign> {
   const campaign = await getCampaign(campaignId);
+  ensureLocations(campaign);
   reconcilePresence(campaign); // absent players don't count toward the round
-  const { action, displays } = buildExplorationResolution(campaign);
+  const loc = campaign.locations!.find((l) => l.id === locationId) || getFocusedLocation(campaign);
+  const { action, displays } = buildExplorationResolution(campaign, loc);
+  // The action resolves here → the TV cuts to this location.
+  campaign.focusedLocationId = loc.id;
   if (!displays.length) {
     // Nothing locked in (all away/incapacitated) — just clear and return.
-    campaign.pendingActions = {};
-    if (campaign.turnState?.mode === "exploration") campaign.turnState.deadlineAt = undefined;
+    loc.pendingActions = {};
+    if (loc.turnState?.mode === "exploration") loc.turnState.deadlineAt = undefined;
+    syncFocusedMirror(campaign);
     await saveCampaign(campaign);
     return campaign;
   }
@@ -925,23 +963,30 @@ export async function resolveExplorationRound(campaignId: string): Promise<Campa
     campaign.messages.push({ id: createId("msg"), role: "user", name: d.name, content: d.action, createdAt: new Date().toISOString() });
     safePushDisplayEvent(campaign, { type: "playerAction", speaker: d.name, playerId: d.playerId, content: d.display });
   }
-  campaign.pendingActions = {};
-  if (campaign.turnState?.mode === "exploration") campaign.turnState.deadlineAt = undefined;
+  loc.pendingActions = {};
+  if (loc.turnState?.mode === "exploration") loc.turnState.deadlineAt = undefined;
+  syncFocusedMirror(campaign);
   await saveCampaign(campaign);
   const result = await runDungeonMaster(campaignId, "The Party", action, { hiddenUserMessage: true });
   return result.campaign;
 }
 
 /**
- * After a combat actor's turn resolves, advance the initiative pointer. Each
- * time it lands on the enemy slot, run ONE hidden DM turn for the enemies, then
- * advance again — looping until it's a player's turn (or combat ended).
+ * After a combat actor's turn resolves, advance that location's initiative
+ * pointer. Each time it lands on the enemy slot, run ONE hidden DM turn for the
+ * enemies there, then advance again — looping until it's a player's turn (or
+ * combat ended). Focus follows the location whose combat is resolving.
  */
-export async function advanceCombatAndRunEnemies(campaignId: string): Promise<Campaign> {
+export async function advanceCombatAndRunEnemies(campaignId: string, locationId?: string): Promise<Campaign> {
   let campaign = await getCampaign(campaignId);
-  if (campaign.turnState?.mode !== "combat") return campaign;
+  ensureLocations(campaign);
+  const locId = locationId || campaign.focusedLocationId!;
+  let loc = campaign.locations!.find((l) => l.id === locId);
+  if (!loc || loc.turnState?.mode !== "combat") return campaign;
   reconcilePresence(campaign); // drop disconnected players from initiative
-  let active = advanceCombat(campaign);
+  let active = advanceCombat(campaign, loc);
+  campaign.focusedLocationId = loc.id;
+  syncFocusedMirror(campaign);
   await saveCampaign(campaign);
 
   let guard = 0;
@@ -953,8 +998,11 @@ export async function advanceCombatAndRunEnemies(campaignId: string): Promise<Ca
       { hiddenUserMessage: true }
     );
     campaign = await getCampaign(campaignId);
-    if (campaign.turnState?.mode !== "combat") break;
-    active = advanceCombat(campaign);
+    loc = campaign.locations!.find((l) => l.id === locId);
+    if (!loc || loc.turnState?.mode !== "combat") break;
+    active = advanceCombat(campaign, loc);
+    campaign.focusedLocationId = loc.id;
+    syncFocusedMirror(campaign);
     await saveCampaign(campaign);
   }
   return campaign;

@@ -73,6 +73,10 @@ export type Player = {
   lastSeenAt?: number;
   /** True once the player explicitly left (or timed out and was woven out). */
   away?: boolean;
+  /** Which Location this player is currently in (party can split). */
+  locationId?: string;
+  /** Narrative zone within the current location. */
+  zoneId?: string;
 };
 
 export type StoryCharacter = {
@@ -103,6 +107,10 @@ export type StoryCharacter = {
    */
   conditions?: string[];
   canAct?: boolean;
+  /** Which Location this NPC/enemy is currently in. */
+  locationId?: string;
+  /** Narrative zone within the current location. */
+  zoneId?: string;
 };
 
 export type SuggestedAction = {
@@ -140,6 +148,71 @@ export type TurnState = {
   round?: number;
   /** ISO deadline for the current turn/round; past it, idle/absent actors are skipped. */
   deadlineAt?: string;
+};
+
+/** A physical object present in a location (loot, cover prop, interactable). */
+export type SceneObject = {
+  name: string;
+  note?: string;
+  /** True when a player can pick this up into their inventory. */
+  takeable?: boolean;
+  /** Broad role; use "other" plus traits/state for unusual things. */
+  kind?: "item" | "container" | "interactable" | "obstacle" | "clue" | "furniture" | "other";
+  /** Narrative zone containing this object. */
+  zoneId?: string;
+  /** Flexible capabilities such as locked, readable, blocks-sight, or flammable. */
+  traits?: string[];
+  /** Small persistent facts such as locked=true, charges=2, or contents="medkit". */
+  state?: Record<string, string | number | boolean>;
+};
+
+export type LocationZone = {
+  id: string;
+  name: string;
+  description?: string;
+  /** Zones reachable in one normal move. */
+  adjacentZoneIds: string[];
+};
+
+export type LocationConnection = {
+  destinationId: string;
+  label?: string;
+  /** Approximate journey cost, e.g. "1 turn", "5 minutes", or "several hours". */
+  travelTime?: string;
+  /** Whether ordinary voices carry between the locations. */
+  communication?: "open" | "shouting" | "blocked";
+};
+
+/**
+ * A tracked place in the world (Tier 1 grounding + Tier 2 split-party). Holds
+ * the authoritative contents of the scene so the DM can't fabricate items/cover
+ * and so multiple environments persist at once. Each location also carries its
+ * own backdrop, ambience, and per-group turn state (the party can split).
+ */
+export type Location = {
+  id: string;
+  name: string;
+  description?: string;
+  /** What is physically here — the ONLY items/props that exist in this scene. */
+  objects: SceneObject[];
+  /** Named cover / terrain features usable in combat. */
+  cover: string[];
+  /** Where the party can go from here. */
+  exits: string[];
+  /** Narrative combat/exploration positions within this place. */
+  zones?: LocationZone[];
+  /** Structured links to other tracked locations. */
+  connections?: LocationConnection[];
+  hazards?: string[];
+  /** Backdrop image id (from campaign.images) that depicts this place. */
+  imageId?: string;
+  /** Scene text the backdrop depicts (per-location analog of backdropScene). */
+  backdropScene?: string;
+  ambience?: Ambience;
+  /** Per-location turn state + exploration lock-ins for the group present here. */
+  turnState?: TurnState;
+  pendingActions?: Record<string, PendingAction>;
+  createdAt: string;
 };
 
 export type MessageSegment = {
@@ -331,10 +404,17 @@ export type Campaign = {
   suggestedActions: SuggestedAction[];
   playerActions: Record<string, SuggestedAction[]>;
   partyActions: SuggestedAction[];
-  /** Two-mode turn system (#1). Undefined = legacy free-for-all (treated as exploration). */
+  /**
+   * Two-mode turn system (#1). Now stored PER-LOCATION (see `locations`); these
+   * top-level fields are kept only for back-compat with old saves and mirror the
+   * focused location's live turn state.
+   */
   turnState?: TurnState;
-  /** Exploration lock-ins awaiting a combined resolution, keyed by playerId. */
   pendingActions?: Record<string, PendingAction>;
+  /** Tracked places in the world. Always ≥1 (a default location is synthesized). */
+  locations?: Location[];
+  /** The location the TV is currently showing (intercut focus for split parties). */
+  focusedLocationId?: string;
   memory: string;
   images: SceneImage[];
   portraits: PortraitImage[];

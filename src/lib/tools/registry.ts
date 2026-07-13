@@ -1,12 +1,13 @@
-﻿import { getCampaign, readCampaignTextFile, saveCampaign, writeCampaignTextFile, downloadAndSaveImage, logCampaignDebug, safePushDisplayEvent, isValidImageUrl, pushStageEffect, endCampaign } from "@/lib/campaign/store";
+﻿import { getCampaign, readCampaignTextFile, saveCampaign, writeCampaignTextFile, downloadAndSaveImage, logCampaignDebug, safePushDisplayEvent, isValidImageUrl, pushStageEffect, endCampaign, ensureLocations, getFocusedLocation, applyFocus } from "@/lib/campaign/store";
 import { createId } from "@/lib/utils/ids";
 import { generateImage } from "@/lib/aqua/images";
 import { getCurrentDate } from "./date";
 import { rollD20Mode, rollDice, judgeD20Outcome, difficultyDcBias } from "./dice";
 import type { AquaToolDefinition } from "@/lib/aqua/client";
 import { AmbienceMood, PlayerStat, StageEffectKind, StoryCharacter } from "@/lib/campaign/types";
+import type { Location as CampaignLocation } from "@/lib/campaign/types";
 import { MUSIC_THEMES, MusicTheme } from "@/lib/campaign/musicTheme";
-import { startCombat, endCombat } from "@/lib/campaign/turns";
+import { startCombat, endCombat, syncFocusedMirror } from "@/lib/campaign/turns";
 
 export const toolDefinitions: AquaToolDefinition[] = [
   {
@@ -152,6 +153,7 @@ export const toolDefinitions: AquaToolDefinition[] = [
                 portraitUrl: { type: "string" },
                 portraitPrompt: { type: "string" },
                 color: { type: "string", description: "Color name or hex code (e.g. 'orange', '#00ffcc') for dialogue and cards." },
+                zoneId: { type: "string", description: "Move this player to a narrative zone within their current location (e.g. 'rooftop', 'street'). Use when they physically relocate within the scene." },
                 stats: {
                   type: "array",
                   description: "Update HP and other tracked stats. ALWAYS apply damage/healing here after combat or harm. maxValue optional (kept if omitted).",
@@ -187,6 +189,7 @@ export const toolDefinitions: AquaToolDefinition[] = [
                 count: { type: "number", description: "For a group: how many are still standing. Decrement as they fall." },
                 maxCount: { type: "number", description: "For a group: the size at first encounter (for the 'N left / M' display)." },
                 color: { type: "string", description: "Color name or hex code (e.g. 'red', '#ff4444') for dialogue and cards." },
+                zoneId: { type: "string", description: "Move this NPC/enemy to a narrative zone within their current location." },
                 inventory: { type: "array", items: { type: "string" } },
                 abilities: { type: "array", items: { type: "string" } },
                 stats: {
@@ -314,6 +317,102 @@ export const toolDefinitions: AquaToolDefinition[] = [
   {
     type: "function",
     function: {
+      name: "update_location",
+      description: "Define or update a LOCATION — the authoritative contents of a place. Seed objects (items/props physically present), cover (terrain usable in combat), exits, and hazards BEFORE the players interact, so nobody can invent items or cover that isn't here. This is the ground truth: if it's not in objects/cover, it isn't in the room. Omit id to edit the current (focused) location; pass a NEW id/name to create another place (e.g. when the party splits up).",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string", description: "Existing location id to edit, or a new id to create. Omit to edit the focused location." },
+          name: { type: "string", description: "Short place name, e.g. 'Relay Station Antechamber'." },
+          description: { type: "string", description: "What the place looks/feels like." },
+          objects: {
+            type: "array",
+            description: "Everything physically here — loot, interactables, props. The ONLY items that exist in this scene.",
+            items: {
+              type: "object",
+              required: ["name"],
+              properties: {
+                name: { type: "string" },
+                note: { type: "string", description: "Optional detail, e.g. 'locked', 'flickering'." },
+                takeable: { type: "boolean", description: "True if a player can pick it up into inventory." },
+                kind: { type: "string", enum: ["item", "container", "interactable", "obstacle", "clue", "furniture", "other"], description: "Use other for anything unusual; traits/state carry its mechanics." },
+                zoneId: { type: "string", description: "Narrative zone containing this object." },
+                traits: { type: "array", items: { type: "string" }, description: "Capabilities/states such as locked, readable, flammable, blocks-sight." },
+                state: { type: "object", description: "Persistent small facts such as locked=true, charges=2, or contents='medkit'." }
+              }
+            }
+          },
+          zones: {
+            type: "array",
+            description: "Named narrative positions. Same zone = close/melee; adjacent zone = one normal move; farther zones require multiple moves or suitable range.",
+            items: { type: "object", required: ["id", "name"], properties: {
+              id: { type: "string" }, name: { type: "string" }, description: { type: "string" },
+              adjacentZoneIds: { type: "array", items: { type: "string" } }
+            } }
+          },
+          connections: {
+            type: "array",
+            description: "Links to other tracked locations, including reinforcement time and whether voices carry.",
+            items: { type: "object", required: ["destinationId"], properties: {
+              destinationId: { type: "string" }, label: { type: "string" }, travelTime: { type: "string" },
+              communication: { type: "string", enum: ["open", "shouting", "blocked"] }
+            } }
+          },
+          cover: { type: "array", items: { type: "string" }, description: "Named cover / terrain features usable in combat, e.g. 'overturned server rack', 'conduit bank'." },
+          exits: { type: "array", items: { type: "string" }, description: "Ways out, e.g. 'blast doors (north)', 'service duct'." },
+          hazards: { type: "array", items: { type: "string" }, description: "Environmental dangers, e.g. 'live wiring', 'static field'." }
+        }
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "move_player",
+      description: "Move one or more players to a location — use when the party splits up or someone travels somewhere else. Players in different locations act in SEPARATE turn groups and the TV intercuts between them. Create the destination first with update_location if it's new.",
+      parameters: {
+        type: "object",
+        required: ["playerIds", "locationId"],
+        properties: {
+          playerIds: { type: "array", items: { type: "string" }, description: "Player names or ids to move." },
+          locationId: { type: "string", description: "Destination location id (or an existing location's name)." },
+          locationName: { type: "string", description: "If creating a brand-new destination, its name." }
+          ,zoneId: { type: "string", description: "Optional zone in the destination where the players arrive." }
+        }
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "move_zone",
+      description: "Move a player or NPC to a different narrative zone WITHIN their current location (no location change). Use when someone closes distance, retreats to cover, climbs to a vantage, or repositions in combat. Same zone = melee range; adjacent zone = one move; farther = multiple moves or range.",
+      parameters: {
+        type: "object",
+        required: ["zoneId"],
+        properties: {
+          playerId: { type: "string", description: "Player name or id to reposition." },
+          npcName: { type: "string", description: "NPC/enemy name to reposition (use this OR playerId, not both)." },
+          zoneId: { type: "string", description: "Destination zone id within the combatant's current location." }
+        }
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "set_focus",
+      description: "Cut the TV to a location — show that group's backdrop, ambience, and combatants. Use when you switch which separated group you're narrating (intercut). The backdrop and mood for that place are restored automatically.",
+      parameters: {
+        type: "object",
+        required: ["locationId"],
+        properties: { locationId: { type: "string", description: "Location id (or name) to focus the TV on." } }
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
       name: "generate_image",
       description: "Generate a cinematic scene background, a player portrait, or an NPC portrait. Scene images become the TV backdrop; portraits attach to the player (playerId) or NPC (npcName) they belong to.",
       parameters: {
@@ -380,6 +479,8 @@ export async function runTool(campaignId: string, name: string, args: Record<str
 
     if (name === "start_combat") {
       const campaign = await getCampaign(campaignId);
+      ensureLocations(campaign);
+      const loc = getFocusedLocation(campaign);
       const rawOrder = Array.isArray(args.order) ? (args.order as unknown[]).map(String) : undefined;
       const ids = rawOrder
         ?.map((tok) => {
@@ -389,16 +490,153 @@ export async function runTool(campaignId: string, name: string, args: Record<str
           return p?.id;
         })
         .filter((x): x is string => !!x);
-      startCombat(campaign, ids && ids.length ? ids : undefined);
+      startCombat(campaign, loc, ids && ids.length ? ids : undefined);
+      syncFocusedMirror(campaign);
       await saveCampaign(campaign);
-      return { ok: true, mode: "combat", order: campaign.turnState?.order, activeId: campaign.turnState?.activeId };
+      return { ok: true, mode: "combat", locationId: loc.id, order: loc.turnState?.order, activeId: loc.turnState?.activeId };
     }
 
     if (name === "end_combat") {
       const campaign = await getCampaign(campaignId);
-      endCombat(campaign);
+      ensureLocations(campaign);
+      const loc = getFocusedLocation(campaign);
+      endCombat(loc);
+      syncFocusedMirror(campaign);
       await saveCampaign(campaign);
-      return { ok: true, mode: "exploration" };
+      return { ok: true, mode: "exploration", locationId: loc.id };
+    }
+
+    if (name === "update_location") {
+      const campaign = await getCampaign(campaignId);
+      ensureLocations(campaign);
+      const id = String(args.id || "").trim();
+      let loc = id ? campaign.locations!.find((l) => l.id === id) : getFocusedLocation(campaign);
+      if (!loc) {
+        loc = {
+          id: id || createId("loc"),
+          name: String(args.name || "A place"),
+          objects: [],
+          cover: [],
+          exits: [],
+          createdAt: new Date().toISOString()
+        };
+        campaign.locations!.push(loc);
+      }
+      if (typeof args.name === "string" && args.name.trim()) loc.name = args.name.trim();
+      if (typeof args.description === "string") loc.description = args.description;
+      if (Array.isArray(args.objects)) {
+        loc.objects = (args.objects as any[])
+          .map((o) => {
+            if (typeof o === "string") return { name: o.trim() };
+            if (!o || typeof o !== "object") return null;
+            const nm = String(o.name || "").trim();
+            if (!nm) return null;
+            return {
+              name: nm,
+              note: typeof o.note === "string" ? o.note : undefined,
+              takeable: typeof o.takeable === "boolean" ? o.takeable : undefined,
+              kind: ["item", "container", "interactable", "obstacle", "clue", "furniture", "other"].includes(o.kind) ? o.kind : undefined,
+              zoneId: typeof o.zoneId === "string" ? o.zoneId : undefined,
+              traits: Array.isArray(o.traits) ? o.traits.map(String).filter(Boolean).slice(0, 12) : undefined,
+              state: o.state && typeof o.state === "object" && !Array.isArray(o.state) ? o.state : undefined
+            };
+          })
+          .filter((o): o is NonNullable<typeof o> => !!o)
+          .slice(0, 30);
+      }
+      if (Array.isArray(args.cover)) loc.cover = (args.cover as unknown[]).map(String).filter(Boolean).slice(0, 20);
+      if (Array.isArray(args.exits)) loc.exits = (args.exits as unknown[]).map(String).filter(Boolean).slice(0, 20);
+      if (Array.isArray(args.hazards)) loc.hazards = (args.hazards as unknown[]).map(String).filter(Boolean).slice(0, 20);
+      if (Array.isArray(args.zones)) loc.zones = (args.zones as any[]).map((z) => ({ id: String(z.id || "").trim(), name: String(z.name || "").trim(), description: typeof z.description === "string" ? z.description : undefined, adjacentZoneIds: Array.isArray(z.adjacentZoneIds) ? z.adjacentZoneIds.map(String).filter(Boolean) : [] })).filter((z) => z.id && z.name).slice(0, 20);
+      if (Array.isArray(args.connections)) loc.connections = (args.connections as any[]).map((c) => ({ destinationId: String(c.destinationId || "").trim(), label: typeof c.label === "string" ? c.label : undefined, travelTime: typeof c.travelTime === "string" ? c.travelTime : undefined, communication: ["open", "shouting", "blocked"].includes(c.communication) ? c.communication : undefined })).filter((c) => c.destinationId).slice(0, 20);
+      await saveCampaign(campaign);
+      return { ok: true, id: loc.id, name: loc.name };
+    }
+
+    if (name === "move_player") {
+      const campaign = await getCampaign(campaignId);
+      ensureLocations(campaign);
+      const ids = Array.isArray(args.playerIds) ? (args.playerIds as unknown[]).map(String) : [];
+      const locKey = String(args.locationId || "").trim();
+      let loc =
+        campaign.locations!.find((l) => l.id === locKey) ||
+        campaign.locations!.find((l) => l.name.toLowerCase() === locKey.toLowerCase());
+      if (!loc) {
+        loc = {
+          id: locKey || createId("loc"),
+          name: String(args.locationName || locKey || "A place"),
+          objects: [],
+          cover: [],
+          exits: [],
+          createdAt: new Date().toISOString()
+        };
+        campaign.locations!.push(loc);
+      }
+      const moved: string[] = [];
+      for (const tok of ids) {
+        const p = campaign.players.find(
+          (pl) => pl.id === tok || (pl.characterName || pl.name).toLowerCase() === tok.toLowerCase()
+        );
+        if (!p) continue;
+        // Drop any stale lock-in from their previous location before moving.
+        for (const other of campaign.locations!) {
+          if (other.id !== loc.id && other.pendingActions) delete other.pendingActions[p.id];
+        }
+        p.locationId = loc.id;
+        p.zoneId = typeof args.zoneId === "string" && args.zoneId.trim() ? args.zoneId.trim() : undefined;
+        moved.push(p.characterName || p.name);
+      }
+      syncFocusedMirror(campaign);
+      await saveCampaign(campaign);
+      return { ok: true, locationId: loc.id, name: loc.name, moved };
+    }
+
+    if (name === "move_zone") {
+      const campaign = await getCampaign(campaignId);
+      ensureLocations(campaign);
+      const zoneId = String(args.zoneId || "").trim();
+      if (!zoneId) return { error: "zoneId is required." };
+      const playerTok = typeof args.playerId === "string" ? String(args.playerId).trim() : "";
+      const npcTok = typeof args.npcName === "string" ? String(args.npcName).trim() : "";
+      if (!playerTok && !npcTok) return { error: "Provide playerId or npcName." };
+
+      let targetLoc: CampaignLocation | undefined;
+      let movedName: string | undefined;
+      if (playerTok) {
+        const p = campaign.players.find((pl) => pl.id === playerTok || (pl.characterName || pl.name).toLowerCase() === playerTok.toLowerCase());
+        if (!p) return { error: `No player '${playerTok}'.` };
+        targetLoc = campaign.locations!.find((l) => l.id === p.locationId);
+        p.zoneId = zoneId;
+        movedName = p.characterName || p.name;
+      } else {
+        const c = campaign.storyCharacters.find((ch) => ch.name.toLowerCase() === npcTok!.toLowerCase());
+        if (!c) return { error: `No NPC '${npcTok}'.` };
+        targetLoc = campaign.locations!.find((l) => l.id === c.locationId);
+        c.zoneId = zoneId;
+        movedName = c.name;
+      }
+      const zoneExists = targetLoc?.zones?.some((z) => z.id === zoneId);
+      if (targetLoc && !zoneExists) {
+        // Not a hard error — the DM may reference a zone it forgot to define.
+        // Auto-create a minimal zone so the position is still tracked.
+        targetLoc.zones = targetLoc.zones || [];
+        targetLoc.zones.push({ id: zoneId, name: zoneId, adjacentZoneIds: [] });
+      }
+      await saveCampaign(campaign);
+      return { ok: true, zoneId, locationId: targetLoc?.id, moved: movedName };
+    }
+
+    if (name === "set_focus") {
+      const campaign = await getCampaign(campaignId);
+      ensureLocations(campaign);
+      const locKey = String(args.locationId || "").trim();
+      const loc =
+        campaign.locations!.find((l) => l.id === locKey) ||
+        campaign.locations!.find((l) => l.name.toLowerCase() === locKey.toLowerCase());
+      if (!loc) return { error: `No location '${locKey}'. Create it with update_location first.` };
+      applyFocus(campaign, loc);
+      await saveCampaign(campaign);
+      return { ok: true, focusedLocationId: loc.id, name: loc.name };
     }
 
     if (name === "set_ambience") {
@@ -519,6 +757,7 @@ export async function runTool(campaignId: string, name: string, args: Record<str
           if (typeof update.portraitUrl === "string" && isValidImageUrl(update.portraitUrl)) player.portraitUrl = update.portraitUrl;
           if (typeof update.portraitPrompt === "string") player.portraitPrompt = update.portraitPrompt;
           if (typeof update.color === "string") player.color = update.color;
+          if (typeof update.zoneId === "string" && update.zoneId.trim()) player.zoneId = update.zoneId.trim();
           applyConditionFields(player, update);
           if (Array.isArray(update.stats)) {
             player.stats = mergeStats(player.stats, update.stats);
@@ -538,6 +777,7 @@ export async function runTool(campaignId: string, name: string, args: Record<str
             if (typeof update.portraitUrl === "string" && isValidImageUrl(update.portraitUrl)) char.portraitUrl = update.portraitUrl;
             if (typeof update.status === "string") char.status = update.status;
             if (typeof update.color === "string") char.color = update.color;
+            if (typeof update.zoneId === "string" && update.zoneId.trim()) char.zoneId = update.zoneId.trim();
             if (Array.isArray(update.inventory)) char.inventory = update.inventory.map(String);
             if (Array.isArray(update.abilities)) char.abilities = update.abilities.map(String);
             applyNpcGroupFields(char, update);

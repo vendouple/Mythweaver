@@ -1,4 +1,5 @@
-import { Campaign } from "./types";
+import { Campaign, Location } from "./types";
+import { getFocusedLocation } from "./store";
 import { trimToBudget } from "@/lib/utils/inputBudget";
 
 const RECENT_TRANSCRIPT_CHARS = 120_000;
@@ -15,6 +16,8 @@ export function buildCampaignContext(campaign: Campaign) {
     canAct: player.canAct,
     conditions: player.conditions,
     away: player.away,
+    locationId: player.locationId,
+    zoneId: player.zoneId,
     portraitUrl: player.portraitUrl,
     isPartyLeader: campaign.partyLeaderId === player.id,
     inventory: player.inventory,
@@ -53,6 +56,8 @@ export function buildCampaignContext(campaign: Campaign) {
     `Player-controlled characters that you must not speak or decide for: ${JSON.stringify(playerState.map((player) => player.characterName || player.name))}`,
     `Players (include stats/HP): ${JSON.stringify(playerState)}`,
     `Current scene: ${campaign.currentScene}`,
+    `Current location (AUTHORITATIVE — the only items/cover/exits that exist here; do NOT invent beyond these): ${describeLocation(getFocusedLocation(campaign))}`,
+    `All locations (the party may be split; each is a separate place): ${describeAllLocations(campaign)}`,
     `Current TV overview: ${campaign.overview}`,
     `Turn mode: ${describeTurnState(campaign)}`,
     `Current per-player controller actions: ${JSON.stringify(campaign.playerActions)}`,
@@ -119,6 +124,31 @@ function describeCurrentAmbience(campaign: Campaign): string {
   const parts = [`mood=${ambience.mood}`, `intensity=${ambience.intensity}`];
   if (ambience.note) parts.push(`note="${ambience.note}"`);
   return `${parts.join(", ")}. This is ALREADY playing — only call set_ambience if the emotional register genuinely changes to a different mood; do not re-send the same mood.`;
+}
+
+/** The focused location's authoritative contents, compact. */
+function describeLocation(loc: Location): string {
+  const objects = loc.objects.length
+    ? loc.objects.map((o) => o.name + (o.kind ? ` (${o.kind})` : "") + (o.zoneId ? ` @${o.zoneId}` : "") + (o.takeable ? " (takeable)" : "") + (o.traits?.length ? ` {${o.traits.join(", ")}}` : "") + (o.note ? ` [${o.note}]` : "")).join(", ")
+    : "none listed — seed them with update_location before players interact";
+  const cover = loc.cover.length ? loc.cover.join(", ") : "none (no cover here — say so if a player tries to take cover)";
+  const exits = loc.exits.length ? loc.exits.join(", ") : "none listed";
+  const hazards = loc.hazards && loc.hazards.length ? ` | Hazards: ${loc.hazards.join(", ")}` : "";
+  const zones = loc.zones?.length ? ` Zones: ${loc.zones.map((z) => `${z.id}=${z.name} -> [${z.adjacentZoneIds.join(", ")}]`).join("; ")}.` : "";
+  const connections = loc.connections?.length ? ` Connections: ${loc.connections.map((c) => `${c.destinationId} (${c.travelTime || "unspecified"}, comms ${c.communication || "unspecified"})`).join("; ")}.` : "";
+  return `"${loc.name}" (id ${loc.id}) — Objects: ${objects}. Cover: ${cover}. Exits: ${exits}.${hazards}${zones}${connections}`;
+}
+
+/** Roster of every location and who is present, so split parties stay tracked. */
+function describeAllLocations(campaign: Campaign): string {
+  const list = (campaign.locations || []).map((loc) => ({
+    id: loc.id,
+    name: loc.name,
+    focused: loc.id === campaign.focusedLocationId,
+    players: campaign.players.filter((p) => p.locationId === loc.id).map((p) => ({ name: p.characterName || p.name, zoneId: p.zoneId })),
+    npcs: campaign.storyCharacters.filter((c) => c.locationId === loc.id).map((c) => ({ name: c.name, zoneId: c.zoneId }))
+  }));
+  return JSON.stringify(list);
 }
 
 /**

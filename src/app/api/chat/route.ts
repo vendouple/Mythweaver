@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { runDungeonMaster, resolveExplorationRound, advanceCombatAndRunEnemies, serverLog, serverError } from "@/lib/aqua/chat";
-import { getCampaign, getCampaignLock, saveCampaign, safePushDisplayEvent, reconcilePresence } from "@/lib/campaign/store";
-import { turnMode, allLockedIn, armExplorationDeadline } from "@/lib/campaign/turns";
+import { getCampaign, getCampaignLock, saveCampaign, safePushDisplayEvent, reconcilePresence, ensureLocations, getPlayerLocation } from "@/lib/campaign/store";
+import { turnMode, allLockedIn, armExplorationDeadline, syncFocusedMirror } from "@/lib/campaign/turns";
 
 export const dynamic = "force-dynamic";
 
@@ -67,34 +67,39 @@ export async function POST(request: Request) {
       }
       if (presence.wentAway.length || presence.returned.length) await saveCampaign(campaign);
 
-      // ── Turn model (#1) ──────────────────────────────────────────────
-      if (turnMode(campaign) === "combat") {
-        // Sequential initiative: only the active player may act.
-        if (campaign.turnState?.activeId !== playerId) {
-          serverLog("Turn Guard", `Rejected ${playerName}'s action — not their turn (active=${campaign.turnState?.activeId}).`);
+      // ── Turn model (#1), scoped to the acting player's LOCATION (#split) ──
+      ensureLocations(campaign);
+      const loc = getPlayerLocation(campaign, playerId);
+      if (turnMode(loc) === "combat") {
+        // Sequential initiative: only this location's active player may act.
+        if (loc.turnState?.activeId !== playerId) {
+          serverLog("Turn Guard", `Rejected ${playerName}'s action — not their turn (active=${loc.turnState?.activeId}).`);
           return NextResponse.json({ campaign, blocked: "not-your-turn" });
         }
         await runDungeonMaster(campaignId, playerName, action, { playerId, displayAction, actionId });
-        // Advance initiative; run the enemy phase whenever the round wraps.
-        const fresh = await advanceCombatAndRunEnemies(campaignId);
+        // Advance initiative in THIS location; run its enemy phase on wrap.
+        const fresh = await advanceCombatAndRunEnemies(campaignId, loc.id);
         return NextResponse.json({ campaign: fresh });
       }
 
-      // Exploration: record this player's lock-in; resolve the whole round only
-      // once every able + present player has locked in (or a leader forces it).
-      campaign.pendingActions = campaign.pendingActions || {};
-      campaign.pendingActions[playerId] = {
+      // Exploration: record this player's lock-in in their location; resolve the
+      // round once every able + present player THERE has locked in.
+      loc.pendingActions = loc.pendingActions || {};
+      loc.pendingActions[playerId] = {
         action,
         display: displayAction,
         actionId,
         partyActionId,
         lockedAt: new Date().toISOString()
       };
-      armExplorationDeadline(campaign);
+      armExplorationDeadline(loc);
+      // Focus the TV on where the action is happening.
+      campaign.focusedLocationId = loc.id;
+      syncFocusedMirror(campaign);
       await saveCampaign(campaign);
 
-      if (allLockedIn(campaign)) {
-        const resolved = await resolveExplorationRound(campaignId);
+      if (allLockedIn(campaign, loc)) {
+        const resolved = await resolveExplorationRound(campaignId, loc.id);
         return NextResponse.json({ campaign: resolved });
       }
       return NextResponse.json({ campaign, locked: true });
