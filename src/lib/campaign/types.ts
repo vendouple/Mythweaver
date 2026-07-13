@@ -193,6 +193,13 @@ export type DisplayEvent = {
   dice?: DiceEvent;
   itemUsed?: string;
   abilityUsed?: string;
+  /**
+   * A cinematic effect LINKED to this beat: it fires the moment this beat is
+   * performed on the TV (not at turn start), so a spell discharge, thunderclap,
+   * or heartbeat lands exactly on the line that earns it. Unlinked effects (fired
+   * immediately) still travel via campaign.effects.
+   */
+  effect?: BeatEffect;
   createdAt: string;
 };
 
@@ -253,6 +260,21 @@ export type StageEffect = {
   /** Delay in ms between repeats (default 0). */
   delayMs?: number;
   createdAt: string;
+};
+
+/**
+ * A stage effect attached to a single story beat (DisplayEvent.effect). Same
+ * knobs as StageEffect but without id/createdAt — it fires when the beat plays,
+ * not the moment it lands in state.
+ */
+export type BeatEffect = {
+  kind: StageEffectKind;
+  /** 0..1 strength. Default 0.6. */
+  strength?: number;
+  /** How many times to fire (1-8). Default 1. */
+  repeat?: number;
+  /** Delay in ms between repeats (0-5000). Default 0. */
+  delayMs?: number;
 };
 
 export type SceneImage = {
@@ -345,6 +367,13 @@ export type Campaign = {
   rollMode?: RollMode;
   /** Filled when the campaign reaches a win/loss/bittersweet close. */
   ending?: CampaignEnding;
+  /**
+   * The DM's private story plan, mirrored from storyline.md in the campaign's
+   * safe storage. High-level chapter arc, the intended ending, where the party
+   * is now, and any deviations. Re-read from disk each turn (like questLog) so
+   * it stays anchored in context without spending a read_campaign_file call.
+   */
+  storyline?: string;
   questLog?: string;
   showQuestOnTV?: boolean;
   showQuestOnController?: boolean;

@@ -58,6 +58,7 @@ export function buildCampaignContext(campaign: Campaign) {
     `Current per-player controller actions: ${JSON.stringify(campaign.playerActions)}`,
     `Current shared party actions: ${JSON.stringify(campaign.partyActions)}`,
     `Long-term memory: ${campaign.memory || "None yet"}`,
+    describeStoryline(campaign),
     `Current TV background (what the party sees right now): ${currentBackground}`,
     `Current ambience/music playing on the TV: ${currentAmbience}`,
     `Current image URL: ${campaign.currentImageUrl || "None"}`,
@@ -91,6 +92,20 @@ function describeCurrentBackground(campaign: Campaign): string {
     return `"${prompt}" — change it (reuse a previous background URL or generate a new one) only if the scene has visibly moved somewhere this no longer depicts.${staleNote}`;
   }
   return "A previously painted scene (prompt not found in the gallery).";
+}
+
+/**
+ * Surface the DM's private story plan (storyline.md) every turn so the arc,
+ * intended ending, and current chapter stay anchored without spending a
+ * read_campaign_file call. When it's missing, prompt the DM to draft it.
+ */
+function describeStoryline(campaign: Campaign): string {
+  const plan = (campaign.storyline || "").trim();
+  if (!plan) {
+    return "Story plan (storyline.md): NONE YET. On this opening turn, draft a high-level arc in storyline.md via write_campaign_file — the number of chapters (scaled to Campaign Length), a one-line beat for each, the intended ENDING, and a 'Current: Chapter 1' marker. It is your private outline (never shown to players); steer every turn toward that ending.";
+  }
+  const trimmed = plan.length > 4000 ? `${plan.slice(0, 4000)}…` : plan;
+  return `Story plan (storyline.md — your private outline; keep it current): update it via write_campaign_file when the party advances a chapter or deviates (repeated failures, an unexpected route). Tweak or rewrite chapters to fit what actually happened, but always keep a defined ending and a 'Current: Chapter N' marker. Steer toward that ending.\n${trimmed}`;
 }
 
 /**

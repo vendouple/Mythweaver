@@ -244,7 +244,7 @@ export const toolDefinitions: AquaToolDefinition[] = [
     type: "function",
     function: {
       name: "trigger_effect",
-      description: "Fire a cinematic effect on the TV for a dramatic beat: an explosion (shake+flash), a spell discharge (flash/embers), creeping dread (darkness/heartbeat), weather (rain/snow/fog). Use for punctuation on big moments. Can repeat for multi-hit impacts.",
+      description: "Fire a cinematic effect on the TV IMMEDIATELY (at the start of the turn), for a dramatic beat: an explosion (shake+flash), a spell discharge (flash/embers), creeping dread (darkness/heartbeat), weather (rain/snow/fog). Use for punctuation on big moments; repeat for multi-hit impacts. To instead make an effect land ON a specific line as it plays, don't use this — attach an `effect` to that story beat in narrate_turn.",
       parameters: {
         type: "object",
         required: ["kind"],
@@ -502,7 +502,7 @@ export async function runTool(campaignId: string, name: string, args: Record<str
         for (const update of args.playerActions as Array<Record<string, unknown>>) {
           const playerId = String(update.playerId || "");
           if (!playerId || !campaign.players.some((player) => player.id === playerId)) continue;
-          campaign.playerActions[playerId] = normalizeActions(update.actions).slice(0, 6);
+          campaign.playerActions[playerId] = normalizeActions(update.actions).slice(0, 4);
         }
       }
       if (Array.isArray(args.playerUpdates)) {

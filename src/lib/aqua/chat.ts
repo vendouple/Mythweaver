@@ -1,10 +1,10 @@
 import { buildCampaignContext } from "@/lib/campaign/context";
-import { getCampaign, saveCampaign, downloadAndSaveImage, logCampaignDebug, safePushDisplayEvent, isValidImageUrl, startCampaignDraft, finishCampaignDraft, reconcilePresence } from "@/lib/campaign/store";
+import { getCampaign, saveCampaign, downloadAndSaveImage, logCampaignDebug, safePushDisplayEvent, isValidImageUrl, startCampaignDraft, finishCampaignDraft, reconcilePresence, normalizeBeatEffect, pushStageEffect } from "@/lib/campaign/store";
 import { createId } from "@/lib/utils/ids";
-import { aquaConfig, aquaFetch, AquaFetchOptions, AquaMessage, AquaToolCall, AquaToolDefinition } from "./client";
+import { aquaConfig, aquaFetch, fastModelTarget, AquaFetchOptions, AquaMessage, AquaToolCall, AquaToolDefinition } from "./client";
 import { runTool, toolDefinitions, applyNpcGroupFields, applyConditionFields } from "@/lib/tools/registry";
 import { generateImage } from "@/lib/aqua/images";
-import { Campaign, PlayerStat, StoryCharacter } from "@/lib/campaign/types";
+import { AmbienceMood, Campaign, DisplayEvent, PlayerStat, StageEffectKind, StoryCharacter } from "@/lib/campaign/types";
 import { classifyMusicTheme, MUSIC_THEMES, MusicTheme } from "@/lib/campaign/musicTheme";
 import { advanceCombat, buildExplorationResolution, ENEMY_SLOT } from "@/lib/campaign/turns";
 
@@ -102,14 +102,17 @@ Continuity & assets:
 - Every player ability should be distinctive and matter mechanically (it defines their easy DCs).
 - New NPC/monster on stage: call generate_image with kind "portrait" and npcName BEFORE introducing them.
 - When the party moves somewhere visually new, update the TV backdrop (reuse currentImageUrl or generate_image kind "scene").
-- Maintain quest_log.md with ONLY the current active objective and immediate tasks.
+- Campaign files, each with a distinct job: quest_log.md = ONLY the current active player-facing objective and immediate tasks; storyline.md = your private structured arc (chapters/ending/current position); notes.md (and memory/*.md) = free-form durable worldbuilding — lore, NPC relationships, secrets, foreshadowing too long for the memory line. Keep hidden plans out of quest_log.md.
 - Seed every foe with HP via npcUpdates the moment it enters the scene, so the TV shows an enemy HP bar and hits have something to subtract.
 - Group handling: a NAMED or role foe (leader, lieutenant, champion — anyone who speaks or matters) is ALWAYS its own npcUpdates entry with its own HP. Only faceless rank-and-file (e.g. "Iron Warrens Thugs") are pooled into ONE entry with isGroup:true, count (how many stand), and maxCount. Decrement count as they drop; don't flood the UI with a card per mook.
 
-Cinematic direction (you are also the stage director):
+Story planning (keep a private outline in storyline.md — never shown to players):
+- On the opening turn, write storyline.md via write_campaign_file: a high-level arc with the number of chapters (scale to the Campaign Length setting — short 2-3, medium 4-6, long 7+; infinite = open-ended arcs), a one-line beat per chapter, the intended ENDING, and a 'Current: Chapter 1' marker.
+- Each turn, keep it current: advance the 'Current: Chapter N' marker as the party progresses, and when they deviate (repeated failures, an unexpected route, an off-script choice) TWEAK or rewrite the upcoming chapters to fit — but always keep a defined ending and steer toward it.
+- The story plan is yours alone (hidden win/loss conditions, future twists, the ending) — never leak it into quest_log.md or player-facing text.
+
+Cinematic direction:
 - If set_theme is offered and no score is chosen yet, call set_theme EXACTLY ONCE on the opening turn.
-- Call set_ambience when the emotional register shifts. Moods: calm, tense, adrenaline (chases, escapes, heists, races against time — excitement without combat), battle (ordinary combat), boss (climactic showdowns against a major villain or endgame threat), mystery, dread, triumph, wonder, somber, outro.
-- Call trigger_effect for big beats; use repeat/delayMs for multi-hit impacts.
 - Prefer atmosphere over words.
 
 Campaign endings (win/loss/draw/cliffhanger — can end EARLY):
@@ -141,7 +144,8 @@ Conditions & lifecycle (ENFORCED — not just flavor):
 - A dead player stays canAct:false with empty playerActions for the rest of the saga; weave them out of the action.
 
 Controller choices:
-- Provide 1–4 playerActions per active player (not always 2–4). Fewer when the situation is constrained; more when open. Empty only when incapacitated (canAct:false) or campaign completed.
+- Provide UP TO 4 playerActions ("next actions") per active player — go with fewer (3, 2, or 1) when the situation is constrained, and none when the player is incapacitated (canAct:false) or the campaign ended.
+- Optionally provide UP TO 4 partyActions — shared "together" actions the whole party can take as one — when a joint move fits. Fewer or none is fine.
 
 CRITICAL — how to end your turn:
 - Run any other tools first (dice, images, ambience). THEN end your turn by calling the narrate_turn tool EXACTLY ONCE with your story beats and final state. This is the required, reliable way to finish.
@@ -149,16 +153,16 @@ CRITICAL — how to end your turn:
 - (Only if you truly cannot call narrate_turn: return ONLY a single valid JSON object matching the shape below, no markdown fences, no prose.)`;
 
 const turnChecklistPrompt = `Before responding:
-1. Read current task, difficulty, roll mode, and whether the campaign is already completed.
+1. Read current task, difficulty, roll mode, the story plan (storyline.md — where are we in the arc?), and whether the campaign is already completed.
 2. Check active players (stats/HP), scene, quest, NPCs, and recent transcript.
-3. Call required tools before ending (dice, images, ambience, effects, end_campaign if the saga closes).
+3. Call required tools before ending (dice, images, end_campaign if the saga closes). On the opening turn, write storyline.md; on later turns update it when the party advances a chapter or deviates.
 4. Honor dice outcomes exactly (full spectrum). Update HP/stats after harm or healing.
 5. END by calling narrate_turn (preferred) with story + updates. If the campaign ended, leave playerActions empty.
 
 The narrate_turn tool takes the same fields as this shape (story, title, currentScene, overview, playerActions, partyActions, playerUpdates, npcUpdates). Only if you cannot call it, emit this JSON instead:
 {"story":[{"speaker":"NARRATOR|SYSTEM|NPC name|player character name","content":"short beat (1-3 sentences, may use *italic*/**bold** inline markdown)","itemUsed":"optional","abilityUsed":"optional"}],"title":"optional","currentScene":"optional","overview":"optional","playerActions":{"<playerId>":[{"title":"Look around","prompt":"I look around."}]},"partyActions":[{"title":"Shared Action","prompt":"We act together."}],"playerUpdates":[{"playerId":"...","characterName":"optional","background":"optional","portraitUrl":"optional","portraitPrompt":"optional","status":"Ready/Active/Stunned/etc.","inventory":["item"],"abilities":["ability"],"notes":"private notes","color":"cyan","stats":[{"name":"HP","value":15,"maxValue":20,"color":"red"}]}],"npcUpdates":[{"id":"existing id","renameFrom":"old name","name":"NPC name","description":"desc","portraitUrl":"url","status":"Ready","color":"orange","inventory":["item"],"abilities":["ability"],"stats":[{"name":"HP","value":15,"maxValue":15,"color":"red"}]}]}
 
-Always provide playerActions (1–4 choices) for every active player unless incapacitated or the campaign has ended.`;
+Provide UP TO 4 playerActions for every active player (fewer is fine; none only when incapacitated or the campaign has ended), and UP TO 4 optional partyActions when a shared move fits.`;
 
 const tabletopRulesPrompt = `CAMPAIGN TYPE: STANDARD TABLETOP RPG (NOT D&D)
 This is a broad tabletop roleplaying campaign. Preserve the genre, era, and tone from the setup.
@@ -229,7 +233,18 @@ const narrateTurnTool: AquaToolDefinition = {
               speaker: { type: "string" },
               content: { type: "string", description: "1-3 sentences; inline *italic*/**bold** allowed." },
               itemUsed: { type: "string" },
-              abilityUsed: { type: "string" }
+              abilityUsed: { type: "string" },
+              effect: {
+                type: "object",
+                description: "Optional cinematic effect LINKED to this beat — it fires the instant this line plays on the TV, not at turn start. Use it to land a thunderclap, spell flash, or heartbeat exactly on the words that earn it. Omit on beats that need no effect.",
+                required: ["kind"],
+                properties: {
+                  kind: { type: "string", enum: ["shake", "flash", "embers", "fog", "rain", "snow", "darkness", "heartbeat"] },
+                  strength: { type: "number", description: "0.0-1.0 impact strength. Default 0.6." },
+                  repeat: { type: "number", description: "How many times to fire (1-8). Default 1." },
+                  delayMs: { type: "number", description: "Delay in ms between repeats (0-5000). Default 0." }
+                }
+              }
             }
           }
         },
@@ -341,9 +356,15 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
   // Start campaign draft caching for background AI run
   startCampaignDraft(campaignId, campaign);
 
+  // When a small/fast model is configured it becomes the scene director: it
+  // owns ambience + stage effects (and already owns the backdrop), leaving the
+  // RP model free to focus on story/state. Without one, the RP model handles
+  // atmosphere itself. See directScene() + toolsForTurn().
+  const directorActive = !!aquaConfig().fastModel;
+
   try {
     const messages: AquaMessage[] = [
-      { role: "system", content: systemPrompt + "\n\n" + campaignRulesPrompt(campaign) },
+      { role: "system", content: systemPrompt + "\n\n" + atmosphereDirective(directorActive) + "\n\n" + campaignRulesPrompt(campaign) },
       { role: "system", content: buildCampaignContext(campaign) },
       { role: "system", content: turnChecklistPrompt },
       { role: "user", name: playerName, content: action }
@@ -370,7 +391,7 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
     for (let step = 0; step < MAX_DM_STEPS; step += 1) {
       await logCampaignDebug(campaignId, `[AI Step ${step + 1}] Requesting completion...`);
       serverLog("DM AI Step", `Step ${step + 1}/${MAX_DM_STEPS}: Requesting completion...`);
-      const response = await complete(messages, "auto", [...toolsForTurn({ musicTheme: themeChosen ? "set" : undefined }), narrateTurnTool], interactiveFetch);
+      const response = await complete(messages, "auto", [...toolsForTurn({ musicTheme: themeChosen ? "set" : undefined, directorActive }), narrateTurnTool], interactiveFetch);
       const message = response.choices?.[0]?.message || response.message;
       if (!message) throw new Error("Aqua chat response did not include a message");
       await logCampaignDebug(campaignId, `[AI Step ${step + 1}] Received response: ${JSON.stringify(message)}`);
@@ -562,6 +583,11 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
       createdAt: new Date().toISOString()
     });
 
+    // The story beats pushed to the TV this turn, in play order, with a live
+    // reference to each display event — so the scene director can attach a
+    // linked effect to a specific line after the narration is assembled.
+    const turnBeats: Array<{ speaker?: string; content?: string; event: DisplayEvent }> = [];
+
     if (parsedJson) {
       if (Array.isArray(parsedJson.story)) {
         const mergedStory: any[] = [];
@@ -571,15 +597,18 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
           const contentText = item.content || "";
           const itemUsed = typeof item.itemUsed === "string" ? item.itemUsed : undefined;
           const abilityUsed = typeof item.abilityUsed === "string" ? item.abilityUsed : undefined;
+          // A cinematic effect the DM linked to this line (fires when it plays).
+          const effect = normalizeBeatEffect(item.effect);
 
           const prev = mergedStory[mergedStory.length - 1];
-          if (prev && 
-              prev.speaker.toLowerCase() === speaker.toLowerCase() && 
-              prev.itemUsed === itemUsed && 
+          if (prev &&
+              prev.speaker.toLowerCase() === speaker.toLowerCase() &&
+              prev.itemUsed === itemUsed &&
               prev.abilityUsed === abilityUsed) {
             prev.content = `${prev.content}\n\n${contentText}`;
+            if (!prev.effect && effect) prev.effect = effect;
           } else {
-            mergedStory.push({ speaker, content: contentText, itemUsed, abilityUsed });
+            mergedStory.push({ speaker, content: contentText, itemUsed, abilityUsed, effect });
           }
         }
 
@@ -597,12 +626,16 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
 
           if ((contentText || "").trim() && recentContents.has(contentText.trim())) continue;
           if (latestCampaign.status !== "lobby") {
-            safePushDisplayEvent(latestCampaign, {
+            const pushed = safePushDisplayEvent(latestCampaign, {
               ...classifyStoryBeat(latestCampaign, speaker),
               content: contentText,
               itemUsed: itemUsed,
-              abilityUsed: abilityUsed
+              abilityUsed: abilityUsed,
+              effect: item.effect
             });
+            // Track the live event so the scene director can attach effects to
+            // it by index after the turn (see directScene()).
+            if (pushed) turnBeats.push({ speaker, content: contentText, event: pushed });
           }
         }
       } else {
@@ -646,7 +679,7 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
                 const player = latestCampaign.players.find((p) => p.id === pId) ||
                                latestCampaign.players.find((p) => (p.characterName || p.name).toLowerCase() === pId.toLowerCase());
                 if (player && Array.isArray(actions)) {
-                  latestCampaign.playerActions[player.id] = normalizeActions(actions).slice(0, 6);
+                  latestCampaign.playerActions[player.id] = normalizeActions(actions).slice(0, 4);
                 }
               }
             }
@@ -655,7 +688,7 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
               const player = latestCampaign.players.find((p) => p.id === pId) ||
                              latestCampaign.players.find((p) => (p.characterName || p.name).toLowerCase() === pId.toLowerCase());
               if (player && Array.isArray(actions)) {
-                latestCampaign.playerActions[player.id] = normalizeActions(actions).slice(0, 6);
+                latestCampaign.playerActions[player.id] = normalizeActions(actions).slice(0, 4);
               }
             }
           }
@@ -793,27 +826,44 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
     // has moved materially and the DM didn't repaint this turn, reuse a fitting
     // past background or paint a fresh one. Non-fatal on failure.
     if (latestCampaign.status === "active") {
-      try {
-        const scene = (latestCampaign.currentScene || "").trim();
-        const modelChangedBackdrop = latestCampaign.currentImageUrl !== preTurnImageUrl;
-        if (scene) {
-          if (modelChangedBackdrop) {
-            latestCampaign.backdropScene = scene; // the DM handled it this turn
-          } else if (
-            !latestCampaign.backdropScene ||
-            sceneSimilarity(scene, latestCampaign.backdropScene) < 0.75 ||
-            // Also reconcile when the situation summary has clearly moved on,
-            // even if the short scene label reads similar — keeps the backdrop
-            // from going stale across a long beat in one location.
-            sceneSimilarity(`${scene} ${latestCampaign.overview || ""}`, latestCampaign.backdropScene) < 0.6
-          ) {
-            const decision = await chooseBackdrop(latestCampaign, false);
-            await applyBackdropDecision(latestCampaign, decision, scene, false);
+      const reconcileBackdrop = async () => {
+        try {
+          const scene = (latestCampaign.currentScene || "").trim();
+          const modelChangedBackdrop = latestCampaign.currentImageUrl !== preTurnImageUrl;
+          if (scene) {
+            if (modelChangedBackdrop) {
+              latestCampaign.backdropScene = scene; // the DM handled it this turn
+            } else if (
+              !latestCampaign.backdropScene ||
+              sceneSimilarity(scene, latestCampaign.backdropScene) < 0.75 ||
+              // Also reconcile when the situation summary has clearly moved on,
+              // even if the short scene label reads similar — keeps the backdrop
+              // from going stale across a long beat in one location.
+              sceneSimilarity(`${scene} ${latestCampaign.overview || ""}`, latestCampaign.backdropScene) < 0.6
+            ) {
+              const decision = await chooseBackdrop(latestCampaign, false);
+              await applyBackdropDecision(latestCampaign, decision, scene, false);
+            }
           }
+        } catch (err) {
+          serverError("Backdrop", "Scene-director reconcile failed (non-fatal)", err);
         }
-      } catch (err) {
-        serverError("Backdrop", "Scene-director reconcile failed (non-fatal)", err);
-      }
+      };
+
+      // With a small/fast model configured, the scene director owns ambience +
+      // stage effects (the RP model had those tools pruned). It reads the beats
+      // that just played and sets mood/effects to match — running alongside the
+      // backdrop reconcile (both are fast-model passes touching different state).
+      const directAtmosphere = async () => {
+        if (!directorActive) return;
+        try {
+          await directScene(latestCampaign, turnBeats);
+        } catch (err) {
+          serverError("Director", "Scene-director atmosphere pass failed (non-fatal)", err);
+        }
+      };
+
+      await Promise.all([reconcileBackdrop(), directAtmosphere()]);
     }
 
     // Backfill the music theme once the world has content (covers sealed-
@@ -963,7 +1013,7 @@ async function chooseBackdrop(campaign: Campaign, force: boolean): Promise<Backd
     }
   };
 
-  const config = aquaConfig();
+  const { model, options } = fastModelTarget();
   const system = `You are the TV scene director for a couch RPG. Read the CURRENT scene and the backdrop now showing, then call set_backdrop EXACTLY ONCE.${force ? " The host has asked you to refresh the backdrop, so you MUST change it — reuse a fitting past background or paint a new one." : " Prefer reuse; only paint new when the location is genuinely new; keep only if the current backdrop still depicts this place."}`;
   const user = [
     `Current scene: ${campaign.currentScene}`,
@@ -977,12 +1027,12 @@ async function chooseBackdrop(campaign: Campaign, force: boolean): Promise<Backd
       method: "POST",
       body: JSON.stringify({
         // Constrained forced-tool call → safe for the small/fast model.
-        model: config.fastModel || config.chatModel,
+        model,
         messages: [{ role: "system", content: system }, { role: "user", content: user }],
         tools: [tool],
         tool_choice: { type: "function", function: { name: "set_backdrop" } }
       })
-    })) as ChatCompletionResponse;
+    }, options)) as ChatCompletionResponse;
     const message = response.choices?.[0]?.message || response.message;
     const call = Array.isArray(message?.tool_calls) ? message?.tool_calls?.[0] : null;
     if (!call?.function?.arguments) return null;
@@ -1051,6 +1101,126 @@ export async function repaintBackdrop(campaignId: string, options: { force?: boo
   return campaign;
 }
 
+const DIRECTOR_MOODS: AmbienceMood[] = ["calm", "tense", "adrenaline", "battle", "boss", "mystery", "dread", "triumph", "wonder", "somber"];
+const DIRECTOR_EFFECT_KINDS: StageEffectKind[] = ["shake", "flash", "embers", "fog", "rain", "snow", "darkness", "heartbeat"];
+
+/**
+ * The scene-director atmosphere pass. When a small/fast model is configured it
+ * takes over ambience + stage effects from the RP model (whose set_ambience /
+ * trigger_effect tools were pruned this turn). It reads the beats that JUST
+ * played — so it has the actual dialogue/narration as context — and, in one
+ * forced tool call, sets the mood and any effects, LINKING each effect either
+ * to a specific line (fires when that beat performs) or to the turn start
+ * (fires immediately). Mutates the campaign in place; the caller saves.
+ */
+async function directScene(
+  campaign: Campaign,
+  beats: Array<{ speaker?: string; content?: string; event: DisplayEvent }>
+): Promise<void> {
+  const config = aquaConfig();
+  if (!config.fastModel) return; // director only runs on a dedicated small model
+  const scene = (campaign.currentScene || "").trim();
+  if (!beats.length && !scene) return;
+
+  const tool = {
+    type: "function" as const,
+    function: {
+      name: "direct_scene",
+      description: "Set the TV's mood and any cinematic effects to match the narration that just played. Call EXACTLY ONCE.",
+      parameters: {
+        type: "object",
+        properties: {
+          ambience: {
+            type: "object",
+            description: "Set the music/mood ONLY when the emotional register genuinely shifts from what's already playing; omit entirely to leave it unchanged.",
+            required: ["mood"],
+            properties: {
+              mood: { type: "string", enum: DIRECTOR_MOODS },
+              intensity: { type: "number", description: "0.0-1.0 how hard to lean in. Default 0.6." },
+              note: { type: "string", description: "Optional short sensory flavor, e.g. 'rain hammers the tin roof'." }
+            }
+          },
+          effects: {
+            type: "array",
+            description: "Cinematic effects for this turn. Attach an effect to a line by setting `beat` to that line's [number]; omit `beat` to fire it immediately at the start. Use sparingly — only beats that truly earn punctuation. Empty when nothing warrants one.",
+            items: {
+              type: "object",
+              required: ["kind"],
+              properties: {
+                kind: { type: "string", enum: DIRECTOR_EFFECT_KINDS },
+                strength: { type: "number", description: "0.0-1.0 impact strength. Default 0.6." },
+                repeat: { type: "number", description: "How many times to fire (1-8). Default 1." },
+                delayMs: { type: "number", description: "Delay in ms between repeats (0-5000). Default 0." },
+                beat: { type: "number", description: "The [number] of the story line to attach this effect to; omit to fire immediately at the start." }
+              }
+            }
+          }
+        }
+      }
+    }
+  };
+
+  const beatList = beats.map((b, i) => `[${i}] ${b.speaker || "NARRATOR"}: ${(b.content || "").replace(/\s+/g, " ").trim()}`).join("\n");
+  const nowPlaying = campaign.ambience
+    ? `mood=${campaign.ambience.mood}, intensity=${campaign.ambience.intensity}${campaign.ambience.note ? `, note="${campaign.ambience.note}"` : ""}`
+    : "nothing set yet (default calm)";
+  const system = "You are the TV scene director for a couch RPG. Read the narration that just played and call direct_scene EXACTLY ONCE to set the mood and any cinematic effects that match it. Prefer atmosphere over spectacle: change ambience only on a real emotional shift, and add effects only for the few beats that truly earn them.";
+  const user = [
+    `Current scene: ${scene || "unknown"}`,
+    `Currently playing on the TV: ${nowPlaying}`,
+    `Available moods: ${DIRECTOR_MOODS.join(", ")}.`,
+    `Available effects: ${DIRECTOR_EFFECT_KINDS.join(", ")}.`,
+    `Story lines that just played (attach effects to a line by its [number]):\n${beatList || "(no spoken beats this turn)"}`
+  ].join("\n");
+
+  const { model, options } = fastModelTarget();
+  const response = (await aquaFetch("/chat/completions", {
+    method: "POST",
+    body: JSON.stringify({
+      model,
+      messages: [{ role: "system", content: system }, { role: "user", content: user }],
+      tools: [tool],
+      tool_choice: { type: "function", function: { name: "direct_scene" } }
+    })
+  }, options)) as ChatCompletionResponse;
+
+  const message = response.choices?.[0]?.message || response.message;
+  const call = Array.isArray(message?.tool_calls) ? message?.tool_calls?.[0] : null;
+  if (!call?.function?.arguments) return;
+  let args: Record<string, any>;
+  try {
+    args = JSON.parse(call.function.arguments) as Record<string, any>;
+  } catch {
+    return;
+  }
+
+  // Ambience — only a genuine, on-list mood shift.
+  if (args.ambience && typeof args.ambience === "object" && DIRECTOR_MOODS.includes(args.ambience.mood)) {
+    const rawIntensity = Number(args.ambience.intensity ?? 0.6);
+    campaign.ambience = {
+      mood: args.ambience.mood as AmbienceMood,
+      intensity: Number.isFinite(rawIntensity) ? Math.max(0, Math.min(1, rawIntensity)) : 0.6,
+      note: typeof args.ambience.note === "string" && args.ambience.note.trim() ? args.ambience.note.trim() : undefined,
+      updatedAt: new Date().toISOString()
+    };
+  }
+
+  // Effects — link to a beat (fires when it plays) or fire immediately.
+  if (Array.isArray(args.effects)) {
+    for (const raw of args.effects) {
+      const eff = normalizeBeatEffect(raw);
+      if (!eff) continue;
+      const beatIdx = Number(raw?.beat);
+      const target = Number.isInteger(beatIdx) && beatIdx >= 0 ? beats[beatIdx]?.event : undefined;
+      if (target) {
+        target.effect = eff; // linked — the TV fires it when this beat performs
+      } else {
+        pushStageEffect(campaign, eff.kind, eff.strength ?? 0.6, { repeat: eff.repeat, delayMs: eff.delayMs });
+      }
+    }
+  }
+}
+
 /**
  * Map a story beat's speaker to a display-event type: NARRATOR stays pure
  * narration, SYSTEM is table talk, a player's character name means the DM is
@@ -1095,13 +1265,36 @@ async function complete(
 /**
  * The tools the DM may use this turn. We prune tools whose job is already
  * done so the model isn't tempted to re-run them: once the score is chosen,
- * set_theme vanishes (a mid-saga music swap just confuses the table).
+ * set_theme vanishes (a mid-saga music swap just confuses the table). When a
+ * scene director (small/fast model) is active, set_ambience and trigger_effect
+ * are pruned too — the director sets mood + effects after the turn instead.
  */
-function toolsForTurn(campaign: { musicTheme?: string }): typeof toolDefinitions {
+function toolsForTurn(opts: { musicTheme?: string; directorActive?: boolean }): typeof toolDefinitions {
   return toolDefinitions.filter((tool) => {
-    if (tool.function.name === "set_theme") return !campaign.musicTheme;
+    if (tool.function.name === "set_theme") return !opts.musicTheme;
+    if (opts.directorActive && (tool.function.name === "set_ambience" || tool.function.name === "trigger_effect")) {
+      return false;
+    }
     return true;
   });
+}
+
+/**
+ * The atmosphere half of the system prompt, which flips on whether a scene
+ * director is configured. With one, the RP model is told to leave mood/effects
+ * alone (and those tools are pruned). Without one, it drives them itself — and
+ * learns that effects can either fire at the start (trigger_effect) or land on
+ * a specific line (a story beat's `effect` in narrate_turn).
+ */
+function atmosphereDirective(directorActive: boolean): string {
+  if (directorActive) {
+    return `Atmosphere (a separate scene director handles this — do NOT):
+- A dedicated scene director reads your finished narration and sets the music mood, stage effects, and backdrop to match it. Do NOT try to set them yourself — set_ambience and trigger_effect are intentionally unavailable this turn.
+- Focus on story, dice, player/NPC state, and controller choices. Write vivid narration; the director will punctuate it.`;
+  }
+  return `Atmosphere (you are the stage director this turn):
+- Call set_ambience when the emotional register shifts. Moods: calm, tense, adrenaline (chases, escapes, heists, races against time — excitement without combat), battle (ordinary combat), boss (climactic showdowns against a major villain or endgame threat), mystery, dread, triumph, wonder, somber. Use sparingly — once per real shift, not every turn.
+- Stage effects have two timings: call trigger_effect to fire one IMMEDIATELY (at the start of the turn); OR attach an \`effect\` to a specific story beat in narrate_turn so it lands the instant that line performs on the TV. Prefer beat-linked effects for immersion; use repeat/delayMs for multi-hit impacts.`;
 }
 
 /**
@@ -1126,12 +1319,12 @@ async function pickMusicThemeViaTool(campaign: Campaign): Promise<MusicTheme | n
   ].filter(Boolean).join("\n\n");
   if (!premise.trim()) return null;
 
-  const config = aquaConfig();
+  const { model, options } = fastModelTarget();
   const response = (await aquaFetch("/chat/completions", {
     method: "POST",
     body: JSON.stringify({
       // Constrained forced-tool call → safe for the small/fast model.
-      model: config.fastModel || config.chatModel,
+      model,
       messages: [
         {
           role: "system",
@@ -1142,7 +1335,7 @@ async function pickMusicThemeViaTool(campaign: Campaign): Promise<MusicTheme | n
       tools: [setThemeTool],
       tool_choice: { type: "function", function: { name: "set_theme" } }
     })
-  })) as ChatCompletionResponse;
+  }, options)) as ChatCompletionResponse;
 
   const message = response.choices?.[0]?.message || response.message;
   const call = Array.isArray(message?.tool_calls) ? message?.tool_calls?.[0] : null;

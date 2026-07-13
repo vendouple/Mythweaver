@@ -269,7 +269,16 @@ export async function createCampaign(
 
   await mkdir(campaignDir(campaign.id), { recursive: true });
   await saveCampaign(campaign);
-  await writeCampaignTextFile(campaign.id, "notes.md", `# ${campaign.title}\n\n${campaign.memory}\n`);
+  // notes.md is the DM's free-form worldbuilding scratchpad — durable lore, NPC
+  // relationships, hidden threads and secrets that don't fit the short in-context
+  // memory line. (storyline.md holds the structured arc; quest_log.md holds the
+  // player-facing objectives.) Seed it with a header explaining its purpose so a
+  // brand-new campaign folder isn't just a bare title.
+  await writeCampaignTextFile(
+    campaign.id,
+    "notes.md",
+    `# ${campaign.title} — DM world notes\n\n> Free-form scratchpad for lore, NPC ties, secrets, and foreshadowing.\n> The arc lives in storyline.md; player objectives live in quest_log.md.\n\n${campaign.memory}\n`
+  );
   return campaign;
 }
 
@@ -284,6 +293,11 @@ export async function getCampaign(id: string): Promise<Campaign> {
     campaign.questLog = await readCampaignTextFile(id, "quest_log.md");
   } catch {
     // Ignore if quest_log.md does not exist yet
+  }
+  try {
+    campaign.storyline = await readCampaignTextFile(id, "storyline.md");
+  } catch {
+    // Ignore if storyline.md does not exist yet (written on the opening turn)
   }
   return campaign;
 }
@@ -343,10 +357,12 @@ export function safePushDisplayEvent(campaign: Campaign, event: Omit<DisplayEven
     dice: event.dice,
     itemUsed: event.itemUsed,
     abilityUsed: event.abilityUsed,
+    effect: event.effect ? normalizeBeatEffect(event.effect) : undefined,
     createdAt: event.createdAt || new Date().toISOString()
   });
 
   campaign.displayEvents = campaign.displayEvents.slice(-80);
+  return campaign.displayEvents[campaign.displayEvents.length - 1];
 }
 
 export async function appendMessage(campaign: Campaign, message: Omit<ChatMessage, "id" | "createdAt">) {
@@ -406,6 +422,7 @@ function normalizeCampaign(raw: Partial<Campaign> & { suggestedActions?: unknown
     difficulty: validDifficulty.includes(raw.difficulty as Difficulty) ? (raw.difficulty as Difficulty) : "medium",
     rollMode: validRollMode.includes(raw.rollMode as RollMode) ? (raw.rollMode as RollMode) : "standard",
     ending: normalizeEnding(raw.ending),
+    storyline: raw.storyline,
     questLog: raw.questLog,
     showQuestOnTV: raw.showQuestOnTV !== undefined ? !!raw.showQuestOnTV : true,
     showQuestOnController: raw.showQuestOnController !== undefined ? !!raw.showQuestOnController : true,
@@ -483,6 +500,26 @@ function normalizeEffects(raw: unknown): StageEffect[] {
       };
     })
     .slice(-12);
+}
+
+/**
+ * Validate a beat-linked effect (DisplayEvent.effect) from untrusted model
+ * output. Returns undefined when the kind is missing/invalid so a bad payload
+ * simply drops the effect rather than firing a random one.
+ */
+export function normalizeBeatEffect(raw: unknown): import("./types").BeatEffect | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const item = raw as Record<string, unknown>;
+  if (!EFFECT_KINDS.includes(item.kind as StageEffectKind)) return undefined;
+  const strengthRaw = Number(item.strength ?? 0.6);
+  const repeatRaw = Number(item.repeat ?? 1);
+  const delayRaw = Number(item.delayMs ?? 0);
+  return {
+    kind: item.kind as StageEffectKind,
+    strength: Number.isFinite(strengthRaw) ? Math.max(0, Math.min(1, strengthRaw)) : 0.6,
+    repeat: Number.isFinite(repeatRaw) ? Math.max(1, Math.min(8, Math.round(repeatRaw))) : undefined,
+    delayMs: Number.isFinite(delayRaw) ? Math.max(0, Math.min(5000, Math.round(delayRaw))) : undefined
+  };
 }
 
 export function pushStageEffect(
@@ -620,6 +657,9 @@ function normalizeDisplayEvents(events: unknown[] | undefined, fallbackScene: st
       playerId: item.playerId,
       content: item.content,
       dice: item.dice,
+      itemUsed: item.itemUsed,
+      abilityUsed: item.abilityUsed,
+      effect: item.effect ? normalizeBeatEffect(item.effect) : undefined,
       createdAt: String(item.createdAt || now)
     };
   }).slice(-80);
