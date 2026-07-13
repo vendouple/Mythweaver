@@ -189,6 +189,7 @@ export const toolDefinitions: AquaToolDefinition[] = [
                 count: { type: "number", description: "For a group: how many are still standing. Decrement as they fall." },
                 maxCount: { type: "number", description: "For a group: the size at first encounter (for the 'N left / M' display)." },
                 color: { type: "string", description: "Color name or hex code (e.g. 'red', '#ff4444') for dialogue and cards." },
+                locationId: { type: "string", description: "Move this NPC/enemy to a different tracked location (id from the locations list). New NPCs default to the party's current location automatically — only set this to introduce one elsewhere, or to move an existing one when it follows/relocates." },
                 zoneId: { type: "string", description: "Move this NPC/enemy to a narrative zone within their current location." },
                 inventory: { type: "array", items: { type: "string" } },
                 abilities: { type: "array", items: { type: "string" } },
@@ -301,6 +302,11 @@ export const toolDefinitions: AquaToolDefinition[] = [
             type: "array",
             items: { type: "string" },
             description: "Optional initiative order as player names or ids. Omit to use the current party order. Enemies act automatically after the last player each round."
+          },
+          enemyIds: {
+            type: "array",
+            items: { type: "string" },
+            description: "Optional names or ids of the hostile NPCs fighting in THIS encounter. They're relocated to this location if they weren't already tracked here, so the TV and party roster show them correctly for the fight."
           }
         }
       }
@@ -491,9 +497,23 @@ export async function runTool(campaignId: string, name: string, args: Record<str
         })
         .filter((x): x is string => !!x);
       startCombat(campaign, loc, ids && ids.length ? ids : undefined);
+      // Pull the declared foes into this fight's location so they show up on
+      // the TV rail and party roster where the fight is actually happening,
+      // instead of wherever they were last tracked.
+      const rawEnemyIds = Array.isArray(args.enemyIds) ? (args.enemyIds as unknown[]).map(String) : undefined;
+      const relocatedEnemies: string[] = [];
+      for (const tok of rawEnemyIds || []) {
+        const npc = campaign.storyCharacters.find(
+          (c) => c.id === tok || c.name.toLowerCase() === tok.toLowerCase()
+        );
+        if (npc && npc.locationId !== loc.id) {
+          npc.locationId = loc.id;
+          relocatedEnemies.push(npc.name);
+        }
+      }
       syncFocusedMirror(campaign);
       await saveCampaign(campaign);
-      return { ok: true, mode: "combat", locationId: loc.id, order: loc.turnState?.order, activeId: loc.turnState?.activeId };
+      return { ok: true, mode: "combat", locationId: loc.id, order: loc.turnState?.order, activeId: loc.turnState?.activeId, relocatedEnemies };
     }
 
     if (name === "end_combat") {
@@ -710,6 +730,8 @@ export async function runTool(campaignId: string, name: string, args: Record<str
 
     if (name === "update_campaign_state") {
       const campaign = await getCampaign(campaignId);
+      ensureLocations(campaign);
+      const focusedLocation = getFocusedLocation(campaign);
       if (typeof args.currentScene === "string") campaign.currentScene = args.currentScene;
       if (typeof args.overview === "string") campaign.overview = stripSuggestedActions(args.overview);
       if (typeof args.memory === "string") campaign.memory = args.memory;
@@ -769,14 +791,15 @@ export async function runTool(campaignId: string, name: string, args: Record<str
           let char =
             campaign.storyCharacters.find((c) => c.id === String(update.id || "")) ||
             (update.renameFrom &&
-              campaign.storyCharacters.find((c) => c.name.toLowerCase() === String(update.renameFrom).toLowerCase())) ||
-            campaign.storyCharacters.find((c) => c.name.toLowerCase() === String(update.name || "").toLowerCase());
+              campaign.storyCharacters.find((c) => c.name.trim().toLowerCase() === String(update.renameFrom).trim().toLowerCase())) ||
+            campaign.storyCharacters.find((c) => c.name.trim().toLowerCase() === String(update.name || "").trim().toLowerCase());
           if (char) {
             if (typeof update.name === "string") char.name = update.name;
             if (typeof update.description === "string") char.description = update.description;
             if (typeof update.portraitUrl === "string" && isValidImageUrl(update.portraitUrl)) char.portraitUrl = update.portraitUrl;
             if (typeof update.status === "string") char.status = update.status;
             if (typeof update.color === "string") char.color = update.color;
+            if (typeof update.locationId === "string" && update.locationId.trim()) char.locationId = update.locationId.trim();
             if (typeof update.zoneId === "string" && update.zoneId.trim()) char.zoneId = update.zoneId.trim();
             if (Array.isArray(update.inventory)) char.inventory = update.inventory.map(String);
             if (Array.isArray(update.abilities)) char.abilities = update.abilities.map(String);
@@ -786,6 +809,10 @@ export async function runTool(campaignId: string, name: string, args: Record<str
               char.stats = mergeStats(char.stats, update.stats);
             }
           } else {
+            // A brand-new NPC/enemy defaults to wherever the party currently is
+            // (the focused location) so it shows up in the same right-side rail
+            // and combat as the players it just appeared in front of, instead of
+            // silently landing on the campaign's very first location.
             const npc: StoryCharacter = {
               id: String(update.id || createId("character")),
               name: String(update.name || "NPC"),
@@ -793,6 +820,7 @@ export async function runTool(campaignId: string, name: string, args: Record<str
               portraitUrl: isValidImageUrl(update.portraitUrl) ? update.portraitUrl : undefined,
               status: update.status,
               color: update.color,
+              locationId: typeof update.locationId === "string" && update.locationId.trim() ? update.locationId.trim() : focusedLocation.id,
               inventory: Array.isArray(update.inventory) ? update.inventory.map(String) : [],
               abilities: Array.isArray(update.abilities) ? update.abilities.map(String) : [],
               stats: Array.isArray(update.stats) ? mergeStats([], update.stats) : []

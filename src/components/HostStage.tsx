@@ -379,6 +379,39 @@ export default function HostStage({
     }
   }, [currentBeat, beatPlain, shownChars, advance]);
 
+  // Broadcast playback progress to the server (#2 player feedback): the only
+  // "DM busy" signal controllers used to see was dmStatus, which clears the
+  // instant the SERVER finishes generating — long before the TV finishes
+  // typing/holding a turn's beats. Controllers now stay locked on this flag
+  // instead. Re-sent on every beat transition (refreshing its timestamp) while
+  // presenting, since a single beat can hold for up to ~32s — the controller's
+  // staleness window has to tolerate at least that per-beat gap. Only dedups
+  // the "now idle" transition so it doesn't spam once nothing is playing.
+  const presentingSentRef = useRef<boolean | null>(null);
+  useEffect(() => {
+    const isPresenting = !!currentBeat || queueRef.current.length > 0;
+    if (!isPresenting && presentingSentRef.current === false) return;
+    presentingSentRef.current = isPresenting;
+    api.party({ campaignId: campaign.id, action: "presenting", active: isPresenting }).catch(() => undefined);
+  }, [campaign.id, currentBeat, pump]);
+
+  // Host fast-forward: flush the ENTIRE queue right now (not just the current
+  // beat) and immediately tell the server playback is done, so a long turn
+  // can be skipped in one motion and controllers unlock without waiting out
+  // every remaining beat.
+  const fastForwardAll = useCallback(() => {
+    if (advanceTimer.current) {
+      clearTimeout(advanceTimer.current);
+      advanceTimer.current = null;
+    }
+    queueRef.current = [];
+    setCurrentBeat(null);
+    setHoldMs(0);
+    setShownChars(0);
+    presentingSentRef.current = false;
+    api.party({ campaignId: campaign.id, action: "presenting", active: false }).catch(() => undefined);
+  }, [campaign.id]);
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
@@ -388,14 +421,15 @@ export default function HostStage({
       }
       if (event.code === "Space") {
         event.preventDefault();
-        skip();
+        if (event.shiftKey) fastForwardAll();
+        else skip();
       }
       if (event.key === "d" || event.key === "D") setDrawerOpen((open) => !open);
       if (event.key === "t" || event.key === "T") setTomeOpen((open) => !open);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [skip]);
+  }, [skip, fastForwardAll]);
 
   /* ------------------------------------------------------------------ */
   /* Ambience + stage effects                                            */
@@ -521,6 +555,18 @@ export default function HostStage({
       // ignore; host can retry
     } finally {
       setPaintBusy(false);
+    }
+  };
+
+  const [resetBusy, setResetBusy] = useState(false);
+  const resetStuckTurn = async () => {
+    setResetBusy(true);
+    try {
+      await api.party({ campaignId: campaign.id, action: "resetTurn" });
+    } catch {
+      // ignore; host can retry
+    } finally {
+      setResetBusy(false);
     }
   };
 
@@ -1100,6 +1146,26 @@ export default function HostStage({
 
           <button className="ghost-button nudge" disabled={nudgeBusy} onClick={nudgeBackdrop}>
             {nudgeBusy ? "Nudging the Weaver…" : "✨ Nudge — repaint to match the scene"}
+          </button>
+
+          {campaign.dmStatus ? (
+            <button
+              className="ghost-button nudge"
+              disabled={resetBusy}
+              onClick={resetStuckTurn}
+              title="Use only if the table is stuck on a turn that never finished (e.g. after a server hiccup)."
+            >
+              {resetBusy ? "Resetting…" : "⚠ Reset stuck turn"}
+            </button>
+          ) : null}
+
+          <button
+            className="ghost-button nudge"
+            disabled={!currentBeat && queueRef.current.length === 0}
+            onClick={fastForwardAll}
+            title="Skip all remaining beats this turn and unlock the party's phones immediately (Shift+Space)"
+          >
+            ⏭ Fast-forward this turn
           </button>
 
           {campaign.images.length ? (

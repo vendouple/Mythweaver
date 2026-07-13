@@ -1,8 +1,8 @@
 import { Campaign, Location } from "./types";
 import { getFocusedLocation } from "./store";
 import { trimToBudget } from "@/lib/utils/inputBudget";
+import { aquaConfig } from "@/lib/aqua/client";
 
-const RECENT_TRANSCRIPT_CHARS = 120_000;
 const RECENT_MESSAGE_COUNT = 24;
 const MAX_MESSAGE_CHARS = 3_000;
 
@@ -31,7 +31,8 @@ export function buildCampaignContext(campaign: Campaign) {
     const label = `${message.role.toUpperCase()}${message.name ? ` ${message.name}` : ""}`;
     return `${label}: ${summarizeMessage(message.content)}`;
   });
-  const recent = trimToBudget(messageParts, RECENT_TRANSCRIPT_CHARS).join("\n\n");
+  const recent = trimToBudget(messageParts, aquaConfig().maxContextChars).join("\n\n");
+  const storySummary = (campaign.storySummary || "").trim();
 
   // What's actually on the TV right now, in plain words — so the DM can judge
   // whether the backdrop or the music needs to change, instead of firing tools
@@ -70,8 +71,11 @@ export function buildCampaignContext(campaign: Campaign) {
     `Previously generated backgrounds (cycle/reuse these instead of generating new ones if appropriate): ${JSON.stringify((campaign.images || []).map(img => ({ id: img.id, url: img.url, prompt: img.prompt })))}`,
     `Previously generated character portraits (cycle/reuse these to change a character's expression/action): ${JSON.stringify((campaign.portraits || []).map(p => ({ id: p.id, url: p.url, prompt: p.prompt, characterName: p.characterName })))}`,
     `Recent TV display events: ${JSON.stringify(campaign.displayEvents.slice(-12))}`,
+    storySummary
+      ? `Story so far (housekeeping summary of everything before the recent transcript below): ${storySummary}`
+      : "",
     `Recent transcript:\n${recent}`
-  ].join("\n\n");
+  ].filter(Boolean).join("\n\n");
 }
 
 /**

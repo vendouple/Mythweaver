@@ -43,6 +43,11 @@ export function isHostHeartbeatActive(campaignId: string): boolean {
 // window; no record at all is treated as present (grace for fresh joins / after
 // a server restart), so we never falsely skip someone who simply hasn't polled.
 const PLAYER_AWAY_MS = Math.max(8000, Number(process.env.PLAYER_AWAY_MS) || 20000);
+// A DM turn that never reaches its finally/catch (server restart, crashed
+// process mid-retry) can leave dmStatus stuck forever, freezing every
+// controller on reload (they hard-lock on dmStatus being set). Past this age,
+// getCampaign clears it so the table can recover without host intervention.
+const DM_STATUS_STALE_MS = Math.max(60_000, Number(process.env.DM_STATUS_STALE_MS) || 5 * 60_000);
 const activePlayers: Map<string, number> = ((globalThis as any).activePlayers ??= new Map<string, number>());
 
 export function recordPlayerHeartbeat(campaignId: string, playerId: string) {
@@ -294,7 +299,12 @@ export async function getCampaign(id: string): Promise<Campaign> {
     return JSON.parse(JSON.stringify(draft)) as Campaign;
   }
   const raw = await readFile(campaignFile(id), "utf8");
-  const parsed = JSON.parse(raw) as Partial<Campaign> & { suggestedActions?: unknown[]; playerActions?: unknown; partyActions?: unknown[]; displayEvents?: unknown[] };
+  let parsed: Partial<Campaign> & { suggestedActions?: unknown[]; playerActions?: unknown; partyActions?: unknown[]; displayEvents?: unknown[] };
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    throw new Error(`Campaign ${id} save is corrupt (invalid JSON in campaign.json): ${err instanceof Error ? err.message : String(err)}`);
+  }
   try {
     const environment = JSON.parse(await readFile(environmentFile(id), "utf8")) as Record<string, any>;
     parsed.locations = environment.locations;
@@ -311,6 +321,13 @@ export async function getCampaign(id: string): Promise<Campaign> {
     // Legacy saves keep environment state in campaign.json and migrate on save.
   }
   const campaign = normalizeCampaign(parsed);
+  if (campaign.dmStatus) {
+    const updatedAt = Date.parse(campaign.updatedAt || "");
+    if (!Number.isFinite(updatedAt) || Date.now() - updatedAt > DM_STATUS_STALE_MS) {
+      campaign.dmStatus = undefined;
+      campaign.dmPhase = undefined;
+    }
+  }
   try {
     campaign.questLog = await readCampaignTextFile(id, "quest_log.md");
   } catch {
@@ -461,6 +478,8 @@ function normalizeCampaign(raw: Partial<Campaign> & { suggestedActions?: unknown
     effects: normalizeEffects(raw.effects),
     dmStatus: raw.dmStatus ? String(raw.dmStatus) : undefined,
     dmPhase: raw.dmPhase && typeof raw.dmPhase === "string" ? raw.dmPhase : undefined,
+    presenting: normalizePresenting((raw as any).presenting),
+    storySummary: typeof raw.storySummary === "string" ? raw.storySummary.slice(0, 20_000) : undefined,
     messages: Array.isArray(raw.messages) ? raw.messages : [],
     campaignType: normalizeCampaignType(raw),
     musicTheme: MUSIC_THEMES.includes(raw.musicTheme as MusicTheme) ? raw.musicTheme : undefined,
@@ -755,6 +774,19 @@ function normalizeTurnState(raw: any): TurnState | undefined {
     round: Number.isFinite(Number(raw.round)) ? Math.max(0, Math.round(Number(raw.round))) : undefined,
     deadlineAt: typeof raw.deadlineAt === "string" ? raw.deadlineAt : undefined
   };
+}
+
+/**
+ * Presence gate is stale-checked at read time rather than here: a raw shape
+ * is trusted structurally, but callers should still ignore an old updatedAt
+ * (see PRESENTING_STALE_MS) so a closed/crashed TV can never permanently lock
+ * the controllers.
+ */
+function normalizePresenting(raw: any): Campaign["presenting"] {
+  if (!raw || typeof raw !== "object") return undefined;
+  const updatedAt = Number(raw.updatedAt);
+  if (!Number.isFinite(updatedAt)) return undefined;
+  return { active: !!raw.active, updatedAt };
 }
 
 export const DEFAULT_LOCATION_ID = "loc_default";

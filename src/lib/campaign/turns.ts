@@ -69,32 +69,53 @@ export function endCombat(loc: Location) {
 }
 
 /**
- * Advance a location's combat pointer after the current actor finished. Prunes
- * absent/moved players, inserts an "enemies" phase after the last player, and
- * bumps the round when wrapping. Returns the new activeId (may be ENEMY_SLOT).
+ * Advance a location's combat pointer after the current actor finished. Drops
+ * only players who physically LEFT the location; a transient disconnect
+ * (away) or a knockdown (canAct:false) keeps its initiative slot — the pointer
+ * just skips past them instead of dissolving the encounter (a couch player's
+ * phone going quiet for one poll cycle must not end the fight). Inserts an
+ * "enemies" phase after the last eligible player, and bumps the round when
+ * wrapping. Returns the new activeId (may be ENEMY_SLOT).
  */
 export function advanceCombat(campaign: Campaign, loc: Location): string | undefined {
   const ts = loc.turnState;
   if (!ts || ts.mode !== "combat") return undefined;
+  // Presence in the location keeps a slot; eligibility only decides whose turn
+  // it actually is right now.
   const order = (ts.order || []).filter((id) =>
-    campaign.players.some((p) => p.id === id && p.locationId === loc.id && isEligible(p))
+    campaign.players.some((p) => p.id === id && p.locationId === loc.id)
   );
   ts.order = order;
   if (!order.length) {
+    // Nobody from this fight is even in the location anymore — the encounter
+    // has nothing left to resolve.
     endCombat(loc);
     return undefined;
   }
+
+  const canGo = (id: string) => {
+    const player = campaign.players.find((p) => p.id === id);
+    return !!player && isEligible(player);
+  };
+
+  let next: string;
   if (ts.activeId === ENEMY_SLOT) {
-    ts.activeId = order[0];
+    next = order[0];
     ts.round = (ts.round || 1) + 1;
   } else {
     const idx = order.indexOf(ts.activeId || "");
-    if (idx === -1 || idx >= order.length - 1) {
-      ts.activeId = ENEMY_SLOT;
-    } else {
-      ts.activeId = order[idx + 1];
-    }
+    next = idx === -1 || idx >= order.length - 1 ? ENEMY_SLOT : order[idx + 1];
   }
+
+  // Skip anyone away/incapacitated right now — they keep their initiative
+  // slot for when they return; they just don't hold up the table today.
+  let guard = 0;
+  while (next !== ENEMY_SLOT && !canGo(next) && guard++ < order.length) {
+    const idx = order.indexOf(next);
+    next = idx >= order.length - 1 ? ENEMY_SLOT : order[idx + 1];
+  }
+
+  ts.activeId = next;
   ts.deadlineAt = deadline();
   return ts.activeId;
 }

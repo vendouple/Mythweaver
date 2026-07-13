@@ -11,6 +11,12 @@ import CosmosCanvas from "@/components/three/CosmosCanvas";
 
 type Tab = "act" | "sheet" | "party" | "quest";
 
+// A beat can hold on the TV for up to ~32s before the next playback-progress
+// broadcast; this must comfortably exceed that per-beat gap so a controller
+// never flickers unlocked mid-hold, while still recovering within a reasonable
+// window if the TV genuinely crashed/closed.
+const PRESENTING_STALE_MS = 60_000;
+
 /**
  * Split a sheet entry like "Pattern Recognition: Can spot anomalies…" or
  * "Professional-grade lockpick set (concealed)" into a bold name and a
@@ -54,6 +60,15 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
   const isLeader = campaign?.partyLeaderId === seat.playerId;
   const color = accentColor(me?.color);
   const weaving = !!campaign?.dmStatus;
+  // The TV broadcasts playback progress separately from dmStatus (#2 player
+  // feedback): dmStatus clears the instant the server finishes generating,
+  // long before the TV finishes typing/holding the turn's beats. Stale (no
+  // update in a while — a closed/crashed TV) is treated as not-presenting so
+  // the table can never be locked forever.
+  const presenting = !!(
+    campaign?.presenting?.active && Date.now() - campaign.presenting.updatedAt < PRESENTING_STALE_MS
+  );
+  const locked = weaving || presenting;
   // Structured lifecycle gate: a stunned/incapacitated/dead player cannot act
   // this turn. Undefined = able (back-compat). Drives a hard controller lock.
   const canAct = me ? me.canAct !== false : true;
@@ -122,7 +137,7 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
   const partyActions = campaign?.partyActions || [];
 
   const act = async (prompt: string, display?: string, partyActionId?: string) => {
-    if (!campaign || !me || sending || weaving || me.canAct === false) return;
+    if (!campaign || !me || sending || locked || me.canAct === false) return;
     if (isCombat && activeId !== me.id) return; // not your turn
     setSending(true);
     setSendError(null);
@@ -312,10 +327,10 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
                 <span className="sigil-ring small" aria-hidden />
                 <span>{downReason} — you sit this one out.</span>
               </div>
-            ) : weaving ? (
+            ) : locked ? (
               <div className="weaving-lock">
                 <span className="sigil-ring small" aria-hidden />
-                <span>{campaign.dmStatus}</span>
+                <span>{weaving ? campaign.dmStatus : "The tale is still playing out on the screen…"}</span>
               </div>
             ) : turnBlocked ? (
               <div className="weaving-lock">
@@ -373,13 +388,13 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
                 className="field textarea slim"
                 rows={2}
                 value={composer}
-                placeholder={!canAct ? "You cannot act this turn…" : weaving ? "The Weaver is weaving…" : turnBlocked ? "Wait for your turn…" : "Speak or act in your own words…"}
-                disabled={!canAct || weaving || sending || turnBlocked}
+                placeholder={!canAct ? "You cannot act this turn…" : weaving ? "The Weaver is weaving…" : presenting ? "Watch the screen…" : turnBlocked ? "Wait for your turn…" : "Speak or act in your own words…"}
+                disabled={!canAct || locked || sending || turnBlocked}
                 onChange={(event) => setComposer(event.target.value)}
               />
               <button
                 className="primary-button"
-                disabled={!canAct || weaving || sending || turnBlocked || !composer.trim()}
+                disabled={!canAct || locked || sending || turnBlocked || !composer.trim()}
                 onClick={() => act(composer.trim())}
               >
                 {sending ? "…" : "Do it"}
@@ -421,7 +436,7 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
               {me.abilities.length ? me.abilities.map((ability, index) => {
                 const { name, detail } = splitEntry(ability);
                 return (
-                  <button key={`${ability}-${index}`} className="kit-card ability" disabled={weaving || sending} onClick={() => { setTab("act"); setComposer(`I use ${name}: `); }}>
+                  <button key={`${ability}-${index}`} className="kit-card ability" disabled={locked || sending} onClick={() => { setTab("act"); setComposer(`I use ${name}: `); }}>
                     <span className="kit-head">
                       <span className="kit-glyph" aria-hidden>✧</span>
                       <span className="kit-name">{name}</span>
@@ -438,7 +453,7 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
               {me.inventory.length ? me.inventory.map((item, index) => {
                 const { name, detail } = splitEntry(item);
                 return (
-                  <button key={`${item}-${index}`} className="kit-card" disabled={weaving || sending} onClick={() => { setTab("act"); setComposer(`I use my ${name}: `); }}>
+                  <button key={`${item}-${index}`} className="kit-card" disabled={locked || sending} onClick={() => { setTab("act"); setComposer(`I use my ${name}: `); }}>
                     <span className="kit-head">
                       <span className="kit-glyph" aria-hidden>✦</span>
                       <span className="kit-name">{name}</span>
