@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { getCampaign, getCampaignLock, saveCampaign, safePushDisplayEvent } from "@/lib/campaign/store";
+import { getCampaign, getCampaignLock, saveCampaign, safePushDisplayEvent, ensureLocations, getFocusedLocation, getPlayerLocation } from "@/lib/campaign/store";
 import { runDungeonMaster, repaintBackdrop, resolveExplorationRound, advanceCombatAndRunEnemies, serverLog, serverError } from "@/lib/aqua/chat";
-import { turnMode, deadlinePassed } from "@/lib/campaign/turns";
+import { turnMode, deadlinePassed, syncFocusedMirror } from "@/lib/campaign/turns";
 
 export const dynamic = "force-dynamic";
 
@@ -47,7 +47,7 @@ export async function POST(request: Request) {
             ? `Campaign type: Dungeons & Dragons (${campaign.rulesMode === "full" ? "full 5e rules" : "rules-light D&D"}).`
             : "Campaign type: standard tabletop RPG, not D&D. Preserve the setup's genre and do not add fantasy/D&D assumptions unless already present.",
           "Do these steps in order:",
-          "1. Call generate_image for the opening background.",
+          "1. Call generate_image for the opening background, and call update_location to seed the opening scene's objects, cover, exits, hazards, and a few useful narrative zones.",
           "2. Call write_campaign_file for quest_log.md with only the first active objective and immediate tasks.",
           "3. If no ending/goal exists, decide hidden high-level win/loss conditions for continuity but do not put them in quest_log.md.",
           "4. Initialize every joined player with inventory, abilities, status/notes, stats, and phone actions.",
@@ -98,31 +98,33 @@ export async function POST(request: Request) {
       }
 
       if (action === "resolveRound") {
-        // Force-resolve the current exploration round with whoever locked in.
-        // Triggered by the party leader ("go now") or the host as a deadline
-        // backstop when a player is slow. `auto` = deadline-driven (only fires
-        // if the deadline actually passed) to avoid racing eager clients.
+        // Force-resolve the FOCUSED location's exploration round with whoever
+        // locked in. Triggered by the party leader ("go now") or the host as a
+        // deadline backstop. `auto` = deadline-driven only, to avoid racing.
         const campaign = await getCampaign(campaignId);
-        if (campaign.status !== "active" || turnMode(campaign) !== "exploration") {
+        ensureLocations(campaign);
+        const loc = getFocusedLocation(campaign);
+        if (campaign.status !== "active" || turnMode(loc) !== "exploration") {
           return NextResponse.json({ campaign });
         }
-        const pendingCount = Object.keys(campaign.pendingActions || {}).length;
+        const pendingCount = Object.keys(loc.pendingActions || {}).length;
         if (!pendingCount) return NextResponse.json({ campaign });
-        if (body.auto && !deadlinePassed(campaign)) return NextResponse.json({ campaign });
-        serverLog("API party", `Resolving exploration round for ${campaignId} (${pendingCount} locked in, auto=${!!body.auto})`);
-        const resolved = await resolveExplorationRound(campaignId);
+        if (body.auto && !deadlinePassed(loc)) return NextResponse.json({ campaign });
+        serverLog("API party", `Resolving exploration round for ${campaignId}/${loc.id} (${pendingCount} locked in, auto=${!!body.auto})`);
+        const resolved = await resolveExplorationRound(campaignId, loc.id);
         return NextResponse.json({ campaign: resolved });
       }
 
       if (action === "skipTurn") {
-        // Advance combat past an idle/absent active player. `auto` requires the
-        // turn deadline to have passed (host backstop); a leader may force it.
+        // Advance the FOCUSED location's combat past an idle/absent active player.
         const campaign = await getCampaign(campaignId);
-        if (campaign.status !== "active" || turnMode(campaign) !== "combat") {
+        ensureLocations(campaign);
+        const loc = getFocusedLocation(campaign);
+        if (campaign.status !== "active" || turnMode(loc) !== "combat") {
           return NextResponse.json({ campaign });
         }
-        if (body.auto && !deadlinePassed(campaign)) return NextResponse.json({ campaign });
-        const activeId = campaign.turnState?.activeId;
+        if (body.auto && !deadlinePassed(loc)) return NextResponse.json({ campaign });
+        const activeId = loc.turnState?.activeId;
         const actor = campaign.players.find((p) => p.id === activeId);
         if (actor) {
           safePushDisplayEvent(campaign, {
@@ -132,13 +134,14 @@ export async function POST(request: Request) {
           });
           await saveCampaign(campaign);
         }
-        serverLog("API party", `Skipping combat turn for ${campaignId} (active=${activeId}, auto=${!!body.auto})`);
-        const fresh = await advanceCombatAndRunEnemies(campaignId);
+        serverLog("API party", `Skipping combat turn for ${campaignId}/${loc.id} (active=${activeId}, auto=${!!body.auto})`);
+        const fresh = await advanceCombatAndRunEnemies(campaignId, loc.id);
         return NextResponse.json({ campaign: fresh });
       }
 
       if (action === "leave") {
         const campaign = await getCampaign(campaignId);
+        ensureLocations(campaign);
         const pid = String(body.playerId || "");
         const player = campaign.players.find((p) => p.id === pid);
         if (!player) return NextResponse.json({ campaign });
@@ -148,12 +151,14 @@ export async function POST(request: Request) {
           speaker: "SYSTEM",
           content: `${player.characterName || player.name} steps away from the table.`
         });
-        // Clear any pending lock-in so they don't hold up an exploration round.
-        if (campaign.pendingActions) delete campaign.pendingActions[pid];
+        const loc = getPlayerLocation(campaign, pid);
+        // Clear any pending lock-in so they don't hold up their location's round.
+        if (loc.pendingActions) delete loc.pendingActions[pid];
+        syncFocusedMirror(campaign);
         await saveCampaign(campaign);
-        // If it was their combat turn, pass initiative on.
-        if (turnMode(campaign) === "combat" && campaign.turnState?.activeId === pid) {
-          const fresh = await advanceCombatAndRunEnemies(campaignId);
+        // If it was their combat turn, pass initiative on in that location.
+        if (turnMode(loc) === "combat" && loc.turnState?.activeId === pid) {
+          const fresh = await advanceCombatAndRunEnemies(campaignId, loc.id);
           return NextResponse.json({ campaign: fresh });
         }
         return NextResponse.json({ campaign });

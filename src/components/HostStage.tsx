@@ -650,14 +650,30 @@ export default function HostStage({
   /* ------------------------------------------------------------------ */
   /* Derived                                                             */
   /* ------------------------------------------------------------------ */
+  // The TV shows one location at a time (intercut). Rails show only who is
+  // present in the focused location so a split party reads clearly.
+  const focusedId = campaign.focusedLocationId;
+
+  const railPlayers = useMemo(
+    () => campaign.players.filter((p) => !focusedId || !p.locationId || p.locationId === focusedId),
+    [campaign.players, focusedId]
+  );
+
   const npcsOnStage = useMemo(
     () =>
       campaign.storyCharacters
         // Show a foe the moment it appears — a portrait OR any tracked stat
         // (HP) is enough; enemies shouldn't be invisible until art is painted.
         .filter((npc) => (npc.portraitUrl || (npc.stats && npc.stats.length > 0)) && npc.status !== "Future NPC")
+        .filter((npc) => !focusedId || !npc.locationId || npc.locationId === focusedId)
         .slice(-4),
-    [campaign.storyCharacters]
+    [campaign.storyCharacters, focusedId]
+  );
+
+  // Heroes currently in OTHER locations (split party) — shown as a small hint.
+  const elsewhereCount = useMemo(
+    () => (focusedId ? campaign.players.filter((p) => p.locationId && p.locationId !== focusedId && !p.away).length : 0),
+    [campaign.players, focusedId]
   );
 
   const questLine = useMemo(() => {
@@ -766,6 +782,12 @@ export default function HostStage({
           <span className="stage-title">{campaign.title}</span>
           {questLine ? <span className="stage-quest">⟡ {questLine}</span> : null}
         </div>
+        {(campaign.locations && campaign.locations.length > 1) ? (
+          <span className="stage-location-chip">
+            ⌖ {campaign.locations.find((l) => l.id === focusedId)?.name || campaign.currentScene}
+            {elsewhereCount > 0 ? ` · ${elsewhereCount} elsewhere` : ""}
+          </span>
+        ) : null}
         {campaign.turnState?.mode === "combat" ? (
           <span className="stage-combat-badge">
             ⚔ Combat{campaign.turnState.round ? ` · Round ${campaign.turnState.round}` : ""}
@@ -775,9 +797,9 @@ export default function HostStage({
         {campaign.ambience?.note ? <span className="stage-ambience-note">{campaign.ambience.note}</span> : null}
       </header>
 
-      {/* Hero rail (players, left) */}
+      {/* Hero rail (players, left) — only those in the focused location */}
       <aside className="stage-rail left">
-        {campaign.players.map((player) => {
+        {railPlayers.map((player) => {
           const color = accentColor(player.color);
           const hp = player.stats.find((stat) => stat.name.toUpperCase() === "HP");
           const speaking = currentBeat?.playerId === player.id;

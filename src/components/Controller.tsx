@@ -60,19 +60,24 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
   const downReason = me && me.canAct === false
     ? (me.status || (me.conditions && me.conditions[0]) || "You can't act right now")
     : null;
-  // Turn model (#1)
-  const turnMode = campaign?.turnState?.mode || "exploration";
+  // Turn model (#1) — read MY location's turn state (the party may be split).
+  const myLoc = campaign?.locations?.find((l) => l.id === me?.locationId);
+  const myTurnState = myLoc?.turnState;
+  const turnMode = myTurnState?.mode || "exploration";
   const isCombat = turnMode === "combat";
-  const activeId = campaign?.turnState?.activeId;
+  const activeId = myTurnState?.activeId;
   const myCombatTurn = isCombat && activeId === seat.playerId;
   const activePlayer = campaign?.players.find((p) => p.id === activeId);
   const activeName = activeId === "enemies"
     ? "the enemies"
     : activePlayer ? (activePlayer.characterName || activePlayer.name) : null;
-  const lockedIn = !!(me && campaign?.pendingActions && campaign.pendingActions[me.id]);
-  const pendingCount = campaign?.pendingActions ? Object.keys(campaign.pendingActions).length : 0;
+  const lockedIn = !!(me && myLoc?.pendingActions && myLoc.pendingActions[me.id]);
+  const pendingCount = myLoc?.pendingActions ? Object.keys(myLoc.pendingActions).length : 0;
   // In combat you must wait for your turn; in exploration everyone may lock in.
   const turnBlocked = isCombat && !myCombatTurn;
+  // Split-party: the TV is currently showing another group's scene.
+  const elsewhere = !!(campaign?.locations && campaign.locations.length > 1 && myLoc && campaign.focusedLocationId !== myLoc.id);
+  const myLocName = myLoc?.name;
 
   // Play a compact dice cinematic when the Weaver rolls for *this* player.
   useEffect(() => {
@@ -287,6 +292,11 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
       <main className="controller-body">
         {tab === "act" ? (
           <section className="act-panel">
+            {myLocName && campaign.locations && campaign.locations.length > 1 ? (
+              <div className={`turn-banner ${elsewhere ? "" : ""}`}>
+                ⌖ You&apos;re at {myLocName}{elsewhere ? " · the screen is with another group" : ""}
+              </div>
+            ) : null}
             {isCombat ? (
               <div className={`turn-banner ${myCombatTurn ? "yours" : ""}`}>
                 {activeId === "enemies"
@@ -294,7 +304,7 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
                   : myCombatTurn
                     ? "⚔ Your turn — make your move."
                     : `Waiting — it's ${activeName || "another hero"}'s turn.`}
-                {campaign.turnState?.round ? <span className="turn-round"> · Round {campaign.turnState.round}</span> : null}
+                {myTurnState?.round ? <span className="turn-round"> · Round {myTurnState.round}</span> : null}
               </div>
             ) : null}
             {!canAct ? (

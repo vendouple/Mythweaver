@@ -11,9 +11,11 @@ import {
   Difficulty,
   DisplayEvent,
   EndingKind,
+  Location,
   PendingAction,
   Player,
   RollMode,
+  SceneObject,
   StageEffect,
   StageEffectKind,
   StoryCharacter,
@@ -127,6 +129,10 @@ function campaignDir(id: string) {
 
 function campaignFile(id: string) {
   return path.join(campaignDir(id), "campaign.json");
+}
+
+function environmentFile(id: string) {
+  return path.join(campaignDir(id), "environment.json");
 }
 
 function safeSegment(value: string) {
@@ -288,7 +294,23 @@ export async function getCampaign(id: string): Promise<Campaign> {
     return JSON.parse(JSON.stringify(draft)) as Campaign;
   }
   const raw = await readFile(campaignFile(id), "utf8");
-  const campaign = normalizeCampaign(JSON.parse(raw) as Partial<Campaign> & { suggestedActions?: unknown[]; playerActions?: unknown; partyActions?: unknown[]; displayEvents?: unknown[] });
+  const parsed = JSON.parse(raw) as Partial<Campaign> & { suggestedActions?: unknown[]; playerActions?: unknown; partyActions?: unknown[]; displayEvents?: unknown[] };
+  try {
+    const environment = JSON.parse(await readFile(environmentFile(id), "utf8")) as Record<string, any>;
+    parsed.locations = environment.locations;
+    parsed.focusedLocationId = environment.focusedLocationId;
+    for (const player of parsed.players || []) {
+      const position = environment.playerPositions?.[player.id];
+      if (position) Object.assign(player, position);
+    }
+    for (const npc of parsed.storyCharacters || []) {
+      const position = environment.npcPositions?.[npc.id];
+      if (position) Object.assign(npc, position);
+    }
+  } catch {
+    // Legacy saves keep environment state in campaign.json and migrate on save.
+  }
+  const campaign = normalizeCampaign(parsed);
   try {
     campaign.questLog = await readCampaignTextFile(id, "quest_log.md");
   } catch {
@@ -314,16 +336,40 @@ export async function saveCampaign(campaign: Campaign) {
       diskCampaign.dmStatus = campaign.dmStatus;
       diskCampaign.dmPhase = campaign.dmPhase;
       diskCampaign.updatedAt = campaign.updatedAt;
-      await writeFile(campaignFile(campaign.id), JSON.stringify(diskCampaign, null, 2), "utf8");
+      await writeCampaignStateFiles(diskCampaign, false);
     } catch (err) {
       await mkdir(campaignDir(campaign.id), { recursive: true });
-      await writeFile(campaignFile(campaign.id), JSON.stringify(campaign, null, 2), "utf8");
+      await writeCampaignStateFiles(campaign, false);
     }
     return;
   }
 
   await mkdir(campaignDir(campaign.id), { recursive: true });
-  await writeFile(campaignFile(campaign.id), JSON.stringify(campaign, null, 2), "utf8");
+  await writeCampaignStateFiles(campaign, true);
+}
+
+async function writeCampaignStateFiles(campaign: Campaign, writeEnvironment: boolean) {
+  const campaignState = JSON.parse(JSON.stringify(campaign)) as Campaign;
+  delete campaignState.locations;
+  delete campaignState.focusedLocationId;
+  for (const player of campaignState.players) {
+    delete player.locationId;
+    delete player.zoneId;
+  }
+  for (const npc of campaignState.storyCharacters) {
+    delete npc.locationId;
+    delete npc.zoneId;
+  }
+  await writeFile(campaignFile(campaign.id), JSON.stringify(campaignState, null, 2), "utf8");
+  if (!writeEnvironment) return;
+  const environment = {
+    version: 1,
+    focusedLocationId: campaign.focusedLocationId,
+    locations: campaign.locations || [],
+    playerPositions: Object.fromEntries(campaign.players.map((p) => [p.id, { locationId: p.locationId, zoneId: p.zoneId }])),
+    npcPositions: Object.fromEntries(campaign.storyCharacters.map((n) => [n.id, { locationId: n.locationId, zoneId: n.zoneId }]))
+  };
+  await writeFile(environmentFile(campaign.id), JSON.stringify(environment, null, 2), "utf8");
 }
 
 export function isValidImageUrl(url: string | undefined | null): boolean {
@@ -385,7 +431,7 @@ function normalizeCampaign(raw: Partial<Campaign> & { suggestedActions?: unknown
   const suggestedActions = normalizeSuggestedActions(raw.suggestedActions, !isCampaignActive && status !== "completed");
   const validDifficulty: Difficulty[] = ["easy", "medium", "hard", "insane"];
   const validRollMode: RollMode[] = ["light", "standard", "heavy", "all"];
-  return {
+  const normalized: Campaign = {
     id: String(raw.id || createId("campaign")),
     title: String(raw.title || "Untitled Adventure"),
     joinCode: String(raw.joinCode || createJoinCode()).toUpperCase(),
@@ -404,6 +450,8 @@ function normalizeCampaign(raw: Partial<Campaign> & { suggestedActions?: unknown
     partyActions: normalizeOptionalSuggestedActions(raw.partyActions),
     turnState: normalizeTurnState((raw as any).turnState),
     pendingActions: normalizePendingActions((raw as any).pendingActions),
+    locations: normalizeLocations((raw as any).locations),
+    focusedLocationId: typeof (raw as any).focusedLocationId === "string" ? (raw as any).focusedLocationId : undefined,
     memory: String(raw.memory || ""),
     images: Array.isArray(raw.images) ? raw.images : [],
     portraits: Array.isArray(raw.portraits) ? raw.portraits : [],
@@ -433,6 +481,8 @@ function normalizeCampaign(raw: Partial<Campaign> & { suggestedActions?: unknown
     createdAt: String(raw.createdAt || now),
     updatedAt: String(raw.updatedAt || now)
   };
+  ensureLocations(normalized);
+  return normalized;
 }
 
 const AMBIENCE_MOODS: AmbienceMood[] = ["calm", "tense", "adrenaline", "battle", "boss", "mystery", "dread", "triumph", "wonder", "somber", "outro"];
@@ -608,7 +658,8 @@ function normalizeStoryCharacter(char: any): StoryCharacter {
     count: Number.isFinite(Number(char.count)) ? Math.max(0, Math.round(Number(char.count))) : undefined,
     maxCount: Number.isFinite(Number(char.maxCount)) ? Math.max(0, Math.round(Number(char.maxCount))) : undefined,
     conditions: Array.isArray(char.conditions) ? char.conditions.map(String) : undefined,
-    canAct: typeof char.canAct === "boolean" ? char.canAct : undefined
+    canAct: typeof char.canAct === "boolean" ? char.canAct : undefined,
+    locationId: char.locationId ? String(char.locationId) : undefined
   };
 }
 
@@ -638,7 +689,8 @@ function normalizePlayer(player: Partial<Player>, now: string): Player {
     conditions: Array.isArray(player.conditions) ? player.conditions.map(String) : undefined,
     canAct: typeof player.canAct === "boolean" ? player.canAct : undefined,
     lastSeenAt: Number.isFinite(Number(player.lastSeenAt)) ? Number(player.lastSeenAt) : undefined,
-    away: typeof player.away === "boolean" ? player.away : undefined
+    away: typeof player.away === "boolean" ? player.away : undefined,
+    locationId: player.locationId ? String(player.locationId) : undefined
   };
 }
 
@@ -703,6 +755,165 @@ function normalizeTurnState(raw: any): TurnState | undefined {
     round: Number.isFinite(Number(raw.round)) ? Math.max(0, Math.round(Number(raw.round))) : undefined,
     deadlineAt: typeof raw.deadlineAt === "string" ? raw.deadlineAt : undefined
   };
+}
+
+export const DEFAULT_LOCATION_ID = "loc_default";
+
+function normalizeSceneObjects(raw: any): SceneObject[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((o): SceneObject | null => {
+      if (typeof o === "string") return { name: o.trim() };
+      if (!o || typeof o !== "object") return null;
+      const name = String(o.name || "").trim();
+      if (!name) return null;
+      return {
+        name,
+        note: typeof o.note === "string" ? o.note : undefined,
+        takeable: typeof o.takeable === "boolean" ? o.takeable : undefined,
+        kind: ["item", "container", "interactable", "obstacle", "clue", "furniture", "other"].includes(o.kind) ? o.kind : undefined,
+        zoneId: typeof o.zoneId === "string" ? o.zoneId : undefined,
+        traits: Array.isArray(o.traits) ? o.traits.map(String).filter(Boolean).slice(0, 12) : undefined,
+        state: o.state && typeof o.state === "object" && !Array.isArray(o.state) ? o.state : undefined
+      };
+    })
+    .filter((o): o is SceneObject => !!o)
+    .slice(0, 30);
+}
+
+function normalizeLocations(raw: any): Location[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: Location[] = [];
+  for (const l of raw) {
+    if (!l || typeof l !== "object") continue;
+    const id = String(l.id || "").trim();
+    if (!id) continue;
+    out.push({
+      id,
+      name: String(l.name || "A place").trim(),
+      description: typeof l.description === "string" ? l.description : undefined,
+      objects: normalizeSceneObjects(l.objects),
+      cover: Array.isArray(l.cover) ? l.cover.map(String).filter(Boolean).slice(0, 20) : [],
+      exits: Array.isArray(l.exits) ? l.exits.map(String).filter(Boolean).slice(0, 20) : [],
+      zones: Array.isArray(l.zones) ? l.zones.map((z: any) => ({
+        id: String(z.id || "").trim(),
+        name: String(z.name || "").trim(),
+        description: typeof z.description === "string" ? z.description : undefined,
+        adjacentZoneIds: Array.isArray(z.adjacentZoneIds) ? z.adjacentZoneIds.map(String).filter(Boolean) : []
+      })).filter((z: any) => z.id && z.name).slice(0, 20) : undefined,
+      connections: Array.isArray(l.connections) ? l.connections.map((c: any) => ({
+        destinationId: String(c.destinationId || "").trim(),
+        label: typeof c.label === "string" ? c.label : undefined,
+        travelTime: typeof c.travelTime === "string" ? c.travelTime : undefined,
+        communication: ["open", "shouting", "blocked"].includes(c.communication) ? c.communication : undefined
+      })).filter((c: any) => c.destinationId).slice(0, 20) : undefined,
+      hazards: Array.isArray(l.hazards) ? l.hazards.map(String).filter(Boolean).slice(0, 20) : undefined,
+      imageId: typeof l.imageId === "string" ? l.imageId : undefined,
+      backdropScene: typeof l.backdropScene === "string" ? l.backdropScene : undefined,
+      ambience: normalizeAmbience(l.ambience),
+      turnState: normalizeTurnState(l.turnState),
+      pendingActions: normalizePendingActions(l.pendingActions),
+      createdAt: String(l.createdAt || new Date().toISOString())
+    });
+  }
+  return out.length ? out : undefined;
+}
+
+/**
+ * Guarantee the campaign has ≥1 location and that every player/NPC and the
+ * focus point to a real one. Idempotent — the default location keeps a stable
+ * id, so calling this on every load doesn't churn ids. Migrates legacy saves
+ * (single implicit scene) into the locations model.
+ */
+export function ensureLocations(campaign: Campaign): Campaign {
+  if (!Array.isArray(campaign.locations)) campaign.locations = [];
+  if (campaign.locations.length === 0) {
+    const imageId = campaign.currentImageUrl
+      ? (campaign.images || []).find((img) => img.url === campaign.currentImageUrl)?.id
+      : undefined;
+    campaign.locations.push({
+      id: DEFAULT_LOCATION_ID,
+      name: campaign.currentScene || "The scene",
+      description: campaign.overview || undefined,
+      objects: [],
+      cover: [],
+      exits: [],
+      imageId,
+      backdropScene: campaign.backdropScene,
+      ambience: campaign.ambience,
+      turnState: campaign.turnState || { mode: "exploration" },
+      pendingActions: campaign.pendingActions,
+      createdAt: campaign.createdAt || new Date().toISOString()
+    });
+  }
+  const ids = new Set(campaign.locations.map((l) => l.id));
+  const fallback = campaign.locations[0].id;
+  if (!campaign.focusedLocationId || !ids.has(campaign.focusedLocationId)) {
+    campaign.focusedLocationId = fallback;
+  }
+  for (const p of campaign.players) {
+    if (!p.locationId || !ids.has(p.locationId)) p.locationId = fallback;
+  }
+  for (const c of campaign.storyCharacters) {
+    if (!c.locationId || !ids.has(c.locationId)) c.locationId = fallback;
+  }
+  return campaign;
+}
+
+/** The location the TV is currently showing. Always returns one (ensures first). */
+export function getFocusedLocation(campaign: Campaign): Location {
+  ensureLocations(campaign);
+  return (
+    campaign.locations!.find((l) => l.id === campaign.focusedLocationId) || campaign.locations![0]
+  );
+}
+
+/**
+ * Cut the TV to a location: point focus at it and restore its backdrop, scene
+ * text, and ambience so the shared screen shows that group's world. Also mirrors
+ * the location's turn state up to the campaign (for the TV/host watchers).
+ */
+export function applyFocus(campaign: Campaign, loc: Location) {
+  ensureLocations(campaign);
+  campaign.focusedLocationId = loc.id;
+  if (loc.name) campaign.currentScene = loc.name;
+  if (typeof loc.description === "string" && loc.description.trim()) campaign.overview = loc.description;
+  if (loc.imageId) {
+    const img = (campaign.images || []).find((i) => i.id === loc.imageId);
+    if (img) campaign.currentImageUrl = img.url;
+  }
+  if (loc.ambience) campaign.ambience = loc.ambience;
+  campaign.backdropScene = loc.backdropScene;
+  // Mirror the focused location's live turn state up to the campaign.
+  campaign.turnState = loc.turnState;
+  campaign.pendingActions = loc.pendingActions;
+}
+
+/**
+ * Save whatever backdrop/ambience the campaign currently shows back INTO the
+ * focused location, so when the DM later cuts away and returns, applyFocus can
+ * restore it instantly (no repaint). Call after a turn's backdrop reconcile.
+ */
+export function persistFocusedLocation(campaign: Campaign) {
+  ensureLocations(campaign);
+  const loc =
+    campaign.locations!.find((l) => l.id === campaign.focusedLocationId) || campaign.locations![0];
+  if (!loc) return;
+  if (campaign.currentImageUrl) {
+    const img = (campaign.images || []).find((i) => i.url === campaign.currentImageUrl);
+    if (img) loc.imageId = img.id;
+  }
+  if (typeof campaign.backdropScene === "string") loc.backdropScene = campaign.backdropScene;
+  if (campaign.ambience) loc.ambience = campaign.ambience;
+}
+
+/** The location a given player is in (falls back to the focused one). */
+export function getPlayerLocation(campaign: Campaign, playerId: string): Location {
+  ensureLocations(campaign);
+  const player = campaign.players.find((p) => p.id === playerId);
+  return (
+    campaign.locations!.find((l) => l.id === player?.locationId) || getFocusedLocation(campaign)
+  );
 }
 
 function normalizePendingActions(raw: any): Record<string, PendingAction> | undefined {
