@@ -100,14 +100,30 @@ export async function POST(request: Request) {
             // Call runProfileGeneration in chat.ts
             await runProfileGeneration(campaign.id, player!.id);
             
-            // Verify if character sheet was successfully updated (status is not "Generating profile..." and it has a portraitUrl)
+            // Verify if character sheet was successfully updated. We accept a
+            // generation as successful when EITHER the status flipped away from
+            // "Generating profile..." OR a portrait was produced AND at least
+            // one sheet detail (notes/inventory/abilities) was filled in. This
+            // avoids false negatives when the model omits the status field but
+            // still produced a complete sheet.
             const verifiedCampaign = await getCampaign(campaign.id);
             const verifiedPlayer = verifiedCampaign.players.find(item => item.id === player!.id);
-            if (verifiedPlayer && verifiedPlayer.status !== "Generating profile..." && verifiedPlayer.portraitUrl) {
-              success = true;
-              await logCampaignDebug(campaign.id, `[Join Attempt ${attempt}/${maxTries}] Succeeded and verified.`);
-              serverLog("API join background", `Attempt ${attempt}/${maxTries} - Profile generation succeeded for player: ${player!.name}`);
-              
+            if (verifiedPlayer) {
+              const statusFlipped = verifiedPlayer.status !== "Generating profile..." && !/^error/i.test(verifiedPlayer.status || "");
+              const hasPortrait = !!verifiedPlayer.portraitUrl;
+              const hasSheetDetails = !!(verifiedPlayer.notes || (Array.isArray(verifiedPlayer.inventory) && verifiedPlayer.inventory.length > 0) || (Array.isArray(verifiedPlayer.abilities) && verifiedPlayer.abilities.length > 0));
+              const verified = statusFlipped || (hasPortrait && hasSheetDetails);
+              if (verified) {
+                // Ensure status is never left on "Generating profile..." when
+                // the sheet is actually complete (model omitted status field).
+                if (!statusFlipped) {
+                  verifiedPlayer.status = "Ready";
+                  await saveCampaign(verifiedCampaign);
+                }
+                success = true;
+                await logCampaignDebug(campaign.id, `[Join Attempt ${attempt}/${maxTries}] Succeeded and verified.`);
+                serverLog("API join background", `Attempt ${attempt}/${maxTries} - Profile generation succeeded for player: ${player!.name}`);
+                
               // If active, integrate them into the scene
               if (verifiedCampaign.status === "active") {
                 await logCampaignDebug(campaign.id, `[Join Active Integration] Splicing new character into the live scene.`);
@@ -132,8 +148,15 @@ export async function POST(request: Request) {
 
               bgRelease();
               break;
+              } else {
+                const missing: string[] = [];
+                if (!hasPortrait) missing.push("portrait");
+                if (!hasSheetDetails) missing.push("sheet details (notes/inventory/abilities)");
+                if (statusFlipped) missing.push("status still 'Generating profile...'");
+                throw new Error(`Profile generation incomplete — missing: ${missing.join(", ") || "unknown"}`);
+              }
             } else {
-              throw new Error("Dungeon Master completed but character sheet details or portrait image were not fully updated");
+              throw new Error("Profile generation completed but the player record could not be found for verification");
             }
           } catch (err) {
             lastError = err;

@@ -30,7 +30,11 @@ const THEME_KEYWORDS: Record<MusicTheme, string[]> = {
   horror: [
     "horror", "haunted", "haunting", "ghost", "undead", "zombie", "demon", "demonic", "eldritch",
     "cursed", "curse", "nightmare", "occult", "monster", "creature", "cult", "possess", "decay",
-    "cosmic dread", "lovecraft", "vampire", "werewolf", "abomination", "flesh", "asylum", "grave"
+    "cosmic dread", "lovecraft", "vampire", "werewolf", "abomination", "flesh", "asylum", "grave",
+    "terror", "gothic", "supernatural", "paranormal", "eerie", "phantom", "apparition", "poltergeist",
+    "sinister", "ominous", "dread", "malevolent", "macabre", "creepy", "unsettling", "vanish",
+    "vanished", "breathing walls", "breathed", "rearranged", "spectral", "wraith", "ghoul",
+    "possessed", "menace", "foreboding", "dreadful"
   ],
   noir: [
     "noir", "detective", "private eye", "gumshoe", "hardboiled", "hard-boiled", "femme fatale",

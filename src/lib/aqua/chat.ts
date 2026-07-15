@@ -5,7 +5,7 @@ import { aquaConfig, aquaFetch, fastModelTarget, AquaFetchOptions, AquaMessage, 
 import { runTool, toolDefinitions, applyNpcGroupFields, applyConditionFields } from "@/lib/tools/registry";
 import { generateImage } from "@/lib/aqua/images";
 import { Campaign, DisplayEvent, PlayerStat, StoryCharacter } from "@/lib/campaign/types";
-import { classifyMusicTheme } from "@/lib/campaign/musicTheme";
+import { MUSIC_THEMES, MusicTheme } from "@/lib/campaign/musicTheme";
 import { advanceCombat, buildExplorationResolution, ENEMY_SLOT, syncFocusedMirror } from "@/lib/campaign/turns";
 
 // Tiered server-log verbosity (DEBUG_VERBOSE):
@@ -138,7 +138,7 @@ World grounding (do NOT fabricate the world):
 - NPCs/enemies track locationId just like players. A brand-new NPC defaults to the party's current location automatically — you only need locationId when introducing one somewhere else. When an EXISTING NPC's physical position changes (it follows the party into a new room, flees to another location, or you start combat somewhere it was standing elsewhere), set locationId in npcUpdates to keep it in sync — otherwise it silently stops appearing where the fight/scene actually is.
 
 Cinematic direction:
-- If set_theme is offered and no score is chosen yet, call set_theme EXACTLY ONCE on the opening turn.
+- If set_theme is offered and no score is chosen yet, call set_theme EXACTLY ONCE on the opening turn. Match the theme to the campaign's GENRE — the threat and tone, NOT the era or surface props. A Victorian haunted house is HORROR (ghosts, dread, supernatural), not fantasy, even though it is set in the past. Noir = detectives/mobsters/1920s-40s murder mysteries. Scifi = spaceships/aliens/cyberpunk. Modern = spies/hackers/contemporary. Western = cowboys/frontier. Postapoc = wasteland/fallout. Fantasy = magic/dragons/wizards/medieval. When in doubt, ask: what shelf of music would a film score for this story sit on?
 - Prefer atmosphere over words.
 
 Campaign endings (win/loss/draw/cliffhanger — can end EARLY):
@@ -895,13 +895,9 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
       await runHousekeeping(latestCampaign);
     }
 
-    // Backfill the music theme once the world has content (covers sealed-
-    // envelope campaigns, whose premise was empty at creation). Set once,
-    // then left alone so the score stays consistent for the whole saga.
-    if (!latestCampaign.musicTheme) {
-      const theme = classifyMusicTheme(latestCampaign);
-      if (theme) latestCampaign.musicTheme = theme;
-    }
+    // The music theme is chosen by the DM AI before the lobby opens (see
+    // chooseCampaignTheme), so there is nothing to backfill here. The score
+    // stays fixed for the whole saga once set.
 
     latestCampaign.dmStatus = undefined; // Clear DM status
     latestCampaign.dmPhase = undefined;
@@ -1217,25 +1213,105 @@ function atmosphereDirective(): string {
 /**
  * Choose and persist a campaign's music theme at CREATION time, before the
  * lobby opens, so the lobby's own music already plays on the right shelf.
- * Deterministic keyword classification (no model call — this is a closed
- * 7-way genre pick, not a creative judgment call worth spending a request on).
- * Sealed-envelope campaigns have no premise yet, so they stay unthemed here
- * and get scored on the DM's opening turn instead (classifyMusicTheme backfill).
+ *
+ * D&D campaigns are always "fantasy" (no model call). Non-D&D campaigns ask
+ * the DM AI to pick the genre from the title/premise/NPC blurbs — this is a
+ * creative judgment call (a Victorian haunted house is horror, not fantasy),
+ * so the model is better at it than keyword matching. This adds a short wait
+ * before the lobby opens, but the score then stays fixed for the whole saga.
+ * Sealed-envelope/randomized campaigns with no premise stay unthemed here and
+ * are scored on the DM's opening turn via the set_theme tool instead.
  */
 export async function chooseCampaignTheme(campaignId: string): Promise<Campaign> {
   const campaign = await getCampaign(campaignId);
   try {
+    // D&D is always fantasy — no model call needed.
+    if (campaign.campaignType === "dnd") {
+      if (campaign.musicTheme !== "fantasy") {
+        campaign.musicTheme = "fantasy";
+        await saveCampaign(campaign);
+      }
+      return campaign;
+    }
+    // Randomized/sealed-envelope campaigns have no premise yet — leave the
+    // theme unset and let the DM's opening turn pick it via set_theme.
     if (campaign.isRandomized) return campaign;
-    const theme = classifyMusicTheme(campaign);
-    if (theme && theme !== campaign.musicTheme) {
+
+    // Already chosen (e.g. host re-saved) — keep it.
+    if (campaign.musicTheme && MUSIC_THEMES.includes(campaign.musicTheme)) return campaign;
+
+    // Ask the DM AI to pick the genre from the campaign's text.
+    const theme = await aiPickTheme(campaign);
+    if (theme) {
       campaign.musicTheme = theme;
       await saveCampaign(campaign);
-      serverLog("Theme", `Classified music theme "${theme}" for campaign ${campaignId}`);
+      serverLog("Theme", `AI chose music theme "${theme}" for campaign ${campaignId}`);
+    } else {
+      serverLog("Theme", `AI did not return a theme for campaign ${campaignId}; lobby will play neutral mood roots`);
     }
   } catch (err) {
-    serverError("Theme", "Theme classification failed; keeping any existing theme", err);
+    serverError("Theme", "AI theme selection failed; keeping any existing theme", err);
   }
   return campaign;
+}
+
+/**
+ * Ask the DM AI to pick a music theme for a campaign from its title, premise,
+ * overview, and NPC blurbs. Returns the chosen theme or null if the model
+ * didn't return a valid one. Uses a single tool-forced call to set_theme so
+ * the model's reasoning is constrained to the 7 valid shelves.
+ */
+async function aiPickTheme(campaign: Campaign): Promise<MusicTheme | null> {
+  const setThemeTool: AquaToolDefinition = {
+    type: "function",
+    function: {
+      name: "set_theme",
+      description: "Pick the campaign's musical score shelf based on its genre — the threat and tone, NOT the era or surface props. A Victorian haunted house is HORROR, not fantasy. Noir = detectives/mobsters/1920s-40s murder mysteries. Scifi = spaceships/aliens/cyberpunk. Modern = spies/hackers/contemporary. Western = cowboys/frontier. Postapoc = wasteland/fallout. Fantasy = magic/dragons/wizards/medieval. When in doubt: what shelf of music would a film score for this story sit on?",
+      parameters: {
+        type: "object",
+        required: ["theme"],
+        properties: {
+          theme: { type: "string", enum: ["fantasy", "scifi", "horror", "noir", "modern", "western", "postapoc"] }
+        }
+      }
+    }
+  };
+
+  const haystack = [
+    `Title: ${campaign.title || ""}`,
+    `Premise: ${campaign.startingStory || campaign.memory || ""}`,
+    `Overview: ${campaign.overview || ""}`,
+    `Current scene: ${campaign.currentScene || ""}`,
+    ...(campaign.storyCharacters || []).map((npc) => `NPC: ${npc.name} — ${npc.description}`)
+  ].join("\n");
+
+  const messages: AquaMessage[] = [
+    {
+      role: "system",
+      content: "You are the music director for a tabletop RPG campaign. Read the campaign's title, premise, and characters, then pick the single musical score shelf that best matches its GENRE — the threat and tone, not the era. Call set_theme exactly once with your choice."
+    },
+    { role: "user", content: haystack }
+  ];
+
+  try {
+    const response = await complete(messages, "auto", [setThemeTool], INTERACTIVE_FETCH);
+    const message = response.choices?.[0]?.message || response.message;
+    if (!message) return null;
+    const toolCalls = normalizeToolCalls(message);
+    for (const call of toolCalls) {
+      if (call.function.name !== "set_theme") continue;
+      try {
+        const args = JSON.parse(call.function.arguments || "{}");
+        const theme = args.theme as MusicTheme;
+        if (MUSIC_THEMES.includes(theme)) return theme;
+      } catch {
+        /* ignore malformed args */
+      }
+    }
+  } catch (err) {
+    serverError("Theme", "aiPickTheme model call failed", err);
+  }
+  return null;
 }
 
 // Housekeeping thresholds: a sweep only runs once there's genuinely stale
@@ -1485,6 +1561,25 @@ function mergeStats(currentStats: PlayerStat[] | undefined, incomingStats: any[]
   return merged;
 }
 
+/**
+ * Inventory/abilities items may arrive from the model as either strings or
+ * objects ({ name, description } / { title, ... }). Coerce objects to a
+ * readable "Name: description" string instead of "[object Object]".
+ */
+function stringifyItem(item: unknown): string {
+  if (typeof item === "string") return item;
+  if (item && typeof item === "object") {
+    const obj = item as Record<string, unknown>;
+    const name = String(obj.name || obj.title || "").trim();
+    const desc = String(obj.description || obj.detail || obj.notes || "").trim();
+    if (name && desc) return `${name}: ${desc}`;
+    if (name) return name;
+    if (desc) return desc;
+    return JSON.stringify(obj);
+  }
+  return String(item ?? "");
+}
+
 export async function runProfileGeneration(campaignId: string, playerId: string) {
   await logCampaignDebug(campaignId, `[runProfileGeneration] Player ID: ${playerId}`);
   serverLog("PROFILE START", `Running profile generation for player: ${playerId} in campaign: ${campaignId}`);
@@ -1602,7 +1697,16 @@ Return ONLY valid JSON matching this schema. Do not include markdown code fences
     parsedJson = await parseFinalJson(campaignId, retryContent);
   }
 
-  if (!parsedJson || !Array.isArray(parsedJson.playerUpdates) || parsedJson.playerUpdates.length === 0) {
+  // The model sometimes returns the player fields at the top level instead of
+  // wrapped in { playerUpdates: [{ ... }] }. Normalize both shapes so a
+  // structurally-correct response is never rejected just for missing the wrapper.
+  let update: Record<string, any> | null = null;
+  if (parsedJson && Array.isArray(parsedJson.playerUpdates) && parsedJson.playerUpdates.length > 0) {
+    update = parsedJson.playerUpdates[0];
+  } else if (parsedJson && typeof parsedJson === "object" && (parsedJson.characterName || parsedJson.background || parsedJson.portraitUrl || parsedJson.inventory || parsedJson.stats)) {
+    update = parsedJson;
+  }
+  if (!update || typeof update !== "object") {
     throw new Error("Failed to generate player profile details");
   }
 
@@ -1611,7 +1715,6 @@ Return ONLY valid JSON matching this schema. Do not include markdown code fences
   const targetPlayer = latestCampaign.players.find(p => p.id === playerId);
   if (!targetPlayer) throw new Error("Target player disappeared from campaign during generation");
 
-  const update = parsedJson.playerUpdates[0];
   if (isSurprise && typeof update.characterName === "string") {
     targetPlayer.characterName = update.characterName;
   } else if (submittedCharacterName) {
@@ -1619,10 +1722,14 @@ Return ONLY valid JSON matching this schema. Do not include markdown code fences
   }
   if (typeof update.background === "string") targetPlayer.background = update.background;
   if (typeof update.personality === "string") targetPlayer.personality = update.personality;
-  if (Array.isArray(update.inventory)) targetPlayer.inventory = update.inventory.map(String);
-  if (Array.isArray(update.abilities)) targetPlayer.abilities = update.abilities.map(String);
+  // Inventory/abilities may arrive as objects ({name, description}) or strings.
+  // Stringify objects to "Name: description" instead of "[object Object]".
+  if (Array.isArray(update.inventory)) targetPlayer.inventory = update.inventory.map(stringifyItem);
+  if (Array.isArray(update.abilities)) targetPlayer.abilities = update.abilities.map(stringifyItem);
   if (typeof update.notes === "string") targetPlayer.notes = update.notes;
-  if (typeof update.status === "string") targetPlayer.status = update.status;
+  // The model frequently omits status; default to "Ready" so the join verifier
+  // and lobby UI don't keep showing "Generating profile..." forever.
+  targetPlayer.status = typeof update.status === "string" && update.status.trim() ? update.status.trim() : "Ready";
   if (typeof update.color === "string") targetPlayer.color = update.color;
   
   if (typeof update.portraitUrl === "string" && isValidImageUrl(update.portraitUrl)) {

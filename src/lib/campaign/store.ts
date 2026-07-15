@@ -23,7 +23,7 @@ import {
   TurnState
 } from "./types";
 import { createId, createJoinCode } from "@/lib/utils/ids";
-import { classifyMusicTheme, MUSIC_THEMES, MusicTheme } from "./musicTheme";
+import { MUSIC_THEMES, MusicTheme } from "./musicTheme";
 
 const dataRoot = path.join(process.cwd(), "data", "campaigns");
 
@@ -273,10 +273,9 @@ export async function createCampaign(
     updatedAt: now
   };
 
-  // Theme the score from whatever premise we have now. For sealed-envelope
-  // campaigns the premise is empty, so this stays undefined and the DM's
-  // opening turn fills it in once the world exists (see runDungeonMaster).
-  campaign.musicTheme = classifyMusicTheme(campaign) || undefined;
+  // D&D is always fantasy. Non-D&D campaigns leave the theme unset here and
+  // let the DM AI pick the score before the lobby opens (see chooseCampaignTheme).
+  campaign.musicTheme = campaignType === "dnd" ? "fantasy" : undefined;
 
   await mkdir(campaignDir(campaign.id), { recursive: true });
   await saveCampaign(campaign);

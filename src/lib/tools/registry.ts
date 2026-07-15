@@ -234,7 +234,7 @@ export const toolDefinitions: AquaToolDefinition[] = [
     type: "function",
     function: {
       name: "set_theme",
-      description: "Choose the campaign's musical score shelf (fantasy/scifi/horror/noir/modern/western/postapoc). Call EXACTLY ONCE on the opening turn when offered; never mid-campaign.",
+      description: "Choose the campaign's musical score shelf (fantasy/scifi/horror/noir/modern/western/postapoc). Call EXACTLY ONCE on the opening turn when offered; never mid-campaign. Match the theme to the campaign's GENRE, not to surface props: horror = haunted houses, ghosts, dread, gothic, supernatural, terror, curses; noir = detectives, 1920s-40s, mobsters, speakeasies, murder mysteries; scifi = spaceships, aliens, cyberpunk, future tech; modern = spies, hackers, contemporary thrillers; western = cowboys, frontier, saloons; postapoc = wasteland, fallout, raiders; fantasy = magic, dragons, wizards, medieval kingdoms. A Victorian haunted house is HORROR, not fantasy, even though it is set in the past. When in doubt, pick the genre that matches the THREAT and TONE, not the era.",
       parameters: {
         type: "object",
         required: ["theme"],
