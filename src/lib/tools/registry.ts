@@ -72,7 +72,7 @@ export const toolDefinitions: AquaToolDefinition[] = [
       parameters: {
         type: "object",
         properties: {
-          currentScene: { type: "string" },
+          currentScene: { type: "string", description: "SHORT label (a few words) for the current physical location, e.g. 'The Ashlands' or 'Haven Arcology Outskirts'. Never backstory, lore, or prose — that belongs in story[] beats and overview." },
           overview: { type: "string", description: "Brief TV overview of the current situation. Do not include controller choices here." },
           memory: { type: "string" },
           currentImageUrl: { type: "string", description: "Set the current TV background scene by specifying its URL. Use this to cycle back to a previously generated background URL from the context instead of calling generate_image." },
@@ -777,7 +777,7 @@ export async function runTool(campaignId: string, name: string, args: Record<str
       const campaign = await getCampaign(campaignId);
       ensureLocations(campaign);
       const focusedLocation = getFocusedLocation(campaign);
-      if (typeof args.currentScene === "string") campaign.currentScene = args.currentScene;
+      if (typeof args.currentScene === "string" && args.currentScene.trim()) campaign.currentScene = sanitizeSceneLabel(args.currentScene);
       if (typeof args.overview === "string") campaign.overview = stripSuggestedActions(args.overview);
       if (typeof args.memory === "string") campaign.memory = args.memory;
       if (typeof args.currentImageUrl === "string" && args.currentImageUrl.trim()) {
@@ -986,6 +986,18 @@ function stripSuggestedActions(text: string) {
     .replace(/\n?\s*Suggested Actions?:[\s\S]*$/i, "")
     .replace(/\n?\s*Controller choices?:[\s\S]*$/i, "")
     .trim();
+}
+
+// currentScene is a short location LABEL, not narrative prose — the schema
+// description is only a nudge, and a model has occasionally ignored it and
+// dumped the whole campaign backstory in there instead. That value gets
+// re-injected into the system prompt every subsequent turn and rendered as a
+// pill-shaped chip on the TV, so an unbounded string both wastes tokens turn
+// after turn and balloons that chip into a giant blob. Clamp defensively
+// regardless of what the model sends.
+function sanitizeSceneLabel(value: string): string {
+  const flat = value.replace(/\s+/g, " ").trim();
+  return flat.length > 90 ? `${flat.slice(0, 89).trimEnd()}…` : flat;
 }
 
 /** Apply group/mob fields (count, maxCount, isGroup) to an NPC from an update. */
