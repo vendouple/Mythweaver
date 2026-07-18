@@ -278,7 +278,7 @@ const narrateTurnTool: AquaToolDefinition = {
           }
         },
         title: { type: "string" },
-        currentScene: { type: "string" },
+        currentScene: { type: "string", description: "SHORT label (a few words) for the current physical location, e.g. 'The Ashlands' or 'Haven Arcology Outskirts'. Never backstory, lore, or prose — that belongs in story[] beats and overview." },
         overview: { type: "string", description: "Brief TV overview of the situation. No controller choices here." },
         playerActions: {
           type: "array",
@@ -724,8 +724,8 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
         }
       }
 
-      if (typeof parsedJson.currentScene === "string") {
-        latestCampaign.currentScene = parsedJson.currentScene;
+      if (typeof parsedJson.currentScene === "string" && parsedJson.currentScene.trim()) {
+        latestCampaign.currentScene = sanitizeSceneLabel(parsedJson.currentScene);
       }
       if (typeof parsedJson.overview === "string") {
         latestCampaign.overview = parsedJson.overview;
@@ -1236,6 +1236,19 @@ function classifyStoryBeat(
 
 function stripSuggestedActions(content: string) {
   return content.replace(/\n?\*\*Suggested Actions:\*\*[\s\S]*$/i, "").trim();
+}
+
+// currentScene is a short location LABEL, not narrative prose — but the
+// schema description is only a nudge, and a model has occasionally ignored
+// it and dumped the whole campaign backstory in there instead. That value
+// gets re-injected into the system prompt every subsequent turn (see
+// `Current scene: ${...}` below) and rendered as a pill-shaped chip on the
+// TV, so an unbounded string both wastes tokens turn after turn and balloons
+// that chip into a giant blob. Clamp defensively regardless of what the
+// model sends.
+function sanitizeSceneLabel(value: string): string {
+  const flat = value.replace(/\s+/g, " ").trim();
+  return flat.length > 90 ? `${flat.slice(0, 89).trimEnd()}…` : flat;
 }
 
 async function complete(
