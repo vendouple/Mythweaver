@@ -78,6 +78,14 @@ export type AquaFetchOptions = {
   retries?: number;
   /** Per-attempt abort timeout in ms (default 60000). */
   timeoutMs?: number;
+  /** Fixed wait between retries in ms. Falls back to RETRY_DELAY_MS (default 1000). */
+  retryDelayMs?: number;
+  /**
+   * When true, delay grows with attempt number (attempt * retryDelayMs).
+   * When false, every retry waits exactly retryDelayMs. Falls back to RETRY_BACKOFF.
+   * Unstable APIs that just need hammering should leave this off.
+   */
+  retryBackoff?: boolean;
   /** Called just before each retry with the UPCOMING attempt number, so the TV can show "retrying (2/3)". */
   onRetry?: (info: AquaRetryInfo) => void;
   /** Override the base URL (e.g. the small or image model on a different provider). Falls back to BASE_URL. */
@@ -86,12 +94,25 @@ export type AquaFetchOptions = {
   apiKey?: string;
 };
 
+/** Parse RETRY_BACKOFF: 0/false/off/no → false; anything else truthy → true. Default false (fixed delay). */
+function envRetryBackoff(): boolean {
+  const v = String(process.env.RETRY_BACKOFF ?? "0").toLowerCase().trim();
+  return v === "1" || v === "true" || v === "yes" || v === "on";
+}
+
+function retryDelayForAttempt(attempt: number, delayMs: number, backoff: boolean): number {
+  const base = Math.max(0, delayMs);
+  return backoff ? attempt * base : base;
+}
+
 export async function aquaFetch(path: string, init: RequestInit, options: AquaFetchOptions | number = {}) {
   const config = aquaConfig();
   // Back-compat: a bare number used to mean `retries`.
   const opts: AquaFetchOptions = typeof options === "number" ? { retries: options } : options;
   const retries = Math.max(1, opts.retries ?? 6);
   const timeoutMs = opts.timeoutMs ?? 60000;
+  const retryDelayMs = opts.retryDelayMs ?? (Number(process.env.RETRY_DELAY_MS) || 1000);
+  const retryBackoff = opts.retryBackoff ?? envRetryBackoff();
   const baseUrl = opts.baseUrl || config.baseUrl;
   const apiKey = opts.apiKey !== undefined ? opts.apiKey : config.apiKey;
   const headers = new Headers(init.headers);
@@ -119,23 +140,23 @@ export async function aquaFetch(path: string, init: RequestInit, options: AquaFe
 
       if (!response.ok) {
         if ((response.status >= 500 || response.status === 429) && attempt < retries) {
-          const delay = attempt * 3000;
-          console.warn(`Aqua API error ${response.status} on attempt ${attempt}/${retries}. Retrying in ${delay / 1000}s...`);
+          const delay = retryDelayForAttempt(attempt, retryDelayMs, retryBackoff);
+          console.warn(`API error ${response.status} on attempt ${attempt}/${retries}. Retrying in ${delay / 1000}s...`);
           opts.onRetry?.({ attempt: attempt + 1, retries, status: response.status });
-          await new Promise((resolve) => setTimeout(resolve, delay));
+          if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
           continue;
         }
-        throw new Error(`Aqua API ${response.status}: ${typeof data === "string" ? data : JSON.stringify(data)}`);
+        throw new Error(`API ${response.status}: ${typeof data === "string" ? data : JSON.stringify(data)}`);
       }
 
       return data;
     } catch (error) {
       clearTimeout(timeoutId);
       if (attempt < retries) {
-        const delay = attempt * 3000;
-        console.warn(`Aqua fetch failed on attempt ${attempt}/${retries}: ${error}. Retrying in ${delay / 1000}s...`);
+        const delay = retryDelayForAttempt(attempt, retryDelayMs, retryBackoff);
+        console.warn(`Fetch failed on attempt ${attempt}/${retries}: ${error}. Retrying in ${delay / 1000}s...`);
         opts.onRetry?.({ attempt: attempt + 1, retries, error });
-        await new Promise((resolve) => setTimeout(resolve, delay));
+        if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
         continue;
       }
       throw error;
