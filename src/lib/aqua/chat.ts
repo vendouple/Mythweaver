@@ -135,7 +135,7 @@ World grounding (do NOT fabricate the world):
 - Use narrative zones for distance: same zone is close/melee, an adjacent zone is one normal move, and non-adjacent zones require movement or adequate range. Hard-deny physically impossible actions; roll only uncertain plausible attempts.
 - Each player and NPC has their OWN zoneId within a location. Two players in the same location but different zones are at different ranges — Player A next to the sniper (same zone) can melee while Player B across the hall (adjacent or farther) cannot. Update zoneId via move_zone or playerUpdates/npcUpdates whenever someone repositions, and judge range from the ACTOR's zone vs the TARGET's zone, not the location as a whole.
 - Abilities and owned equipment override ordinary range limits when their description clearly supports it (a sniper ability can attack distant zones). Do not hard-block a valid ability. If its range is ambiguous, interpret it consistently from its wording and use a roll/cost rather than silently granting or denying it.
-- The party can SPLIT: each group is in its own location. Track connections, travel time, and communication. Combat and lock-ins remain per-location; intercut with set_focus and do not let a remote group react unless communication and travel time allow it.
+- The party can SPLIT: each group is in its own location, and the SERVER schedules them like initiative — exactly one location holds the spotlight, its group acts, you resolve ONLY that scene, then the server cuts to the next location automatically. Never narrate, move, or decide anything for a group waiting off-stage; their scene is frozen until the spotlight returns. Off-stage players may still get playerActions, but grounded in THEIR own location. A remote group cannot react to the spotlight scene unless communication and travel time genuinely allow it.
 - NPCs/enemies track locationId just like players. A brand-new NPC defaults to the party's current location automatically — you only need locationId when introducing one somewhere else. When an EXISTING NPC's physical position changes (it follows the party into a new room, flees to another location, or you start combat somewhere it was standing elsewhere), set locationId in npcUpdates to keep it in sync — otherwise it silently stops appearing where the fight/scene actually is.
 
 Cinematic direction:
@@ -166,6 +166,7 @@ Turns & combat flow (the table has two modes — honor the one in the context):
 - EXPLORATION (default): all able players lock in simultaneously and you receive their actions together. Resolve them in ONE flowing narration where their choices interact.
 - COMBAT (sequential): call start_combat when a fight begins, passing enemyIds for the hostile NPCs in THIS fight so they're placed at the fight's location (otherwise they may not show up on the TV/roster where the fight is happening). Then you resolve ONE actor per turn — only the active player's action (named in the context), never the others. After the last player, you get the enemies' turn: resolve every foe's action (attack roll → damage → apply HP). Call end_combat when the fight is over. Narrate initiative naturally ("Engu, you're up").
 - Don't switch modes needlessly; stay in exploration for talk/travel/investigation, combat only for actual fights.
+- The moment your narration has a fight ACTUALLY breaking out — an ambush springs, someone opens fire, a monster lunges — you MUST call start_combat that same turn (and set_ambience battle or boss). Narrating an attack while leaving the table in exploration is an error.
 
 Conditions & lifecycle (ENFORCED — not just flavor):
 - When a character is stunned, incapacitated, knocked out, or dead, set canAct:false on their playerUpdates/npcUpdates entry (and a matching conditions list, e.g. ["stunned"] or ["dead"], plus a status line). Their controller hard-locks — they truly cannot act that turn.
@@ -986,6 +987,11 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
         }
       };
 
+      // The correction passes below are corrective, not prescriptive: each one
+      // no-ops when the model already did its job this turn (repainted, set the
+      // mood, switched combat, painted its NPCs). A capable model therefore
+      // pays ~nothing, while a tool-forgetful RP model gets caught every time —
+      // the guidance self-calibrates per turn, so there is no config knob.
       await reconcileBackdrop();
       // Stage-direction guarantee (feedback: ambience froze on one mood for an
       // entire climax and start_combat never fired even when the model's own
@@ -1694,6 +1700,7 @@ function toolsForTurn(opts: { musicTheme?: string }): typeof toolDefinitions {
 function atmosphereDirective(): string {
   return `Atmosphere (you are the stage director this turn):
 - Call set_ambience when the emotional register shifts. Moods: calm, tense, adrenaline (chases, escapes, heists, races against time — excitement without combat), battle (ordinary combat), boss (climactic showdowns against a major villain or endgame threat), mystery, dread, triumph, wonder, somber. Use sparingly — once per real shift, not every turn.
+- EVERY turn, compare this scene's register against the "Current ambience/music playing" line in the context: if they no longer match (a fight broke out, dread gave way to triumph, the chase began), call set_ambience THIS TURN — the music only changes when you do. Do not let one mood drone through an entire act.
 - Stage effects have two timings: call trigger_effect to fire one IMMEDIATELY (at the start of the turn); OR attach an \`effect\` to a specific story beat in narrate_turn so it lands the instant that line performs on the TV. Prefer beat-linked effects for immersion; use repeat/delayMs for multi-hit impacts.`;
 }
 
@@ -1861,7 +1868,7 @@ async function runHousekeeping(campaign: Campaign): Promise<void> {
         type: "object",
         required: ["storySummary"],
         properties: {
-          storySummary: { type: "string", description: "The FULL updated running summary (merge the previous summary with the stale transcript below into one coherent account, under ~500 words). This replaces the previous summary entirely." },
+          storySummary: { type: "string", description: "The FULL updated running summary (merge the previous summary with the stale transcript below into one coherent account, under ~500 words). This replaces the previous summary entirely. If the party is (or was) split across locations, keep a separate line per group — where each group is and what they were last doing — so no group's thread is ever lost." },
           memory: { type: "string", description: "Optional: a compacted rewrite of long-term memory — merge duplicate/resolved notes, drop anything superseded. Omit if memory is already clean." },
           duplicateNpcs: {
             type: "array",

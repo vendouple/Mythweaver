@@ -1,5 +1,6 @@
 import { Campaign, Location } from "./types";
 import { getFocusedLocation } from "./store";
+import { getActiveLocation, occupiedLocations } from "./turns";
 import { trimToBudget } from "@/lib/utils/inputBudget";
 import { aquaConfig } from "@/lib/aqua/client";
 
@@ -59,6 +60,7 @@ export function buildCampaignContext(campaign: Campaign) {
     `Current scene: ${campaign.currentScene}`,
     `Current location (AUTHORITATIVE — the only items/cover/exits that exist here; do NOT invent beyond these): ${describeLocation(getFocusedLocation(campaign))}`,
     `All locations (the party may be split; each is a separate place): ${describeAllLocations(campaign)}`,
+    describeSplitDirective(campaign),
     `Current TV overview: ${campaign.overview}`,
     `Turn mode: ${describeTurnState(campaign)}`,
     `Current per-player controller actions: ${JSON.stringify(campaign.playerActions)}`,
@@ -141,6 +143,39 @@ function describeLocation(loc: Location): string {
   const zones = loc.zones?.length ? ` Zones: ${loc.zones.map((z) => `${z.id}=${z.name} -> [${z.adjacentZoneIds.join(", ")}]`).join("; ")}.` : "";
   const connections = loc.connections?.length ? ` Connections: ${loc.connections.map((c) => `${c.destinationId} (${c.travelTime || "unspecified"}, comms ${c.communication || "unspecified"})`).join("; ")}.` : "";
   return `"${loc.name}" (id ${loc.id}) — Objects: ${objects}. Cover: ${cover}. Exits: ${exits}.${hazards}${zones}${connections}`;
+}
+
+/**
+ * When the party is genuinely split, spell out the harness's spotlight
+ * protocol in plain words — which ONE scene this turn resolves, who is frozen
+ * off-stage, and what comes next. The small RP model can't juggle two live
+ * scenes at once (the first split session silently dropped whichever group
+ * wasn't acting), so the harness narrows its job to a single location per turn.
+ */
+function describeSplitDirective(campaign: Campaign): string {
+  const occupied = occupiedLocations(campaign);
+  if (occupied.length <= 1) return "";
+  const active = getActiveLocation(campaign);
+  if (!active) return "";
+  const groupOf = (locId: string) =>
+    campaign.players
+      .filter((p) => p.locationId === locId && !p.away)
+      .map((p) => p.characterName || p.name)
+      .join(", ") || "nobody";
+  const idx = occupied.findIndex((l) => l.id === active.id);
+  const next = occupied[(idx + 1) % occupied.length];
+  const waiting = occupied
+    .filter((l) => l.id !== active.id)
+    .map((l) => `"${l.name}" (${groupOf(l.id)})`)
+    .join("; ");
+  return [
+    `SPLIT PARTY — HARNESS-MANAGED SPOTLIGHT (obey exactly):`,
+    `The party is split across ${occupied.length} locations. The spotlight is on "${active.name}" (${groupOf(active.id)}) — this turn resolves ONLY events there.`,
+    `- Waiting off-stage with their scenes FROZEN: ${waiting}. Do not narrate, move, damage, or decide anything for them this turn; keep their last-known situation exactly as it was.`,
+    `- The server rotates the spotlight automatically after this scene's action resolves${next && next.id !== active.id ? ` — next up is "${next.name}"` : ""}. Do NOT call set_focus to cut away yourself.`,
+    `- You may refresh playerActions for off-stage players, but those choices must fit THEIR OWN location and last-known situation, not this scene.`,
+    `- A waiting group may only react to events here if communication genuinely allows it (shouting range, radios, an open connection).`
+  ].join("\n");
 }
 
 /** Roster of every location and who is present, so split parties stay tracked. */

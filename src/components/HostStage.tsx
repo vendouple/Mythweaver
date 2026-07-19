@@ -727,9 +727,21 @@ export default function HostStage({
   // present in the focused location so a split party reads clearly.
   const focusedId = campaign.focusedLocationId;
 
-  const railPlayers = useMemo(
-    () => campaign.players.filter((p) => !focusedId || !p.locationId || p.locationId === focusedId),
+  // A bogus focus (the DM cut to a location nobody is tracked in) must never
+  // blank the stage — with an empty rail the TV showed bare chrome with no
+  // party and no NPCs. When the focused location holds no players, fall back
+  // to showing everyone (and every on-stage NPC) instead of nothing.
+  const focusHasPlayers = useMemo(
+    () => campaign.players.some((p) => !focusedId || !p.locationId || p.locationId === focusedId),
     [campaign.players, focusedId]
+  );
+
+  const railPlayers = useMemo(
+    () =>
+      focusHasPlayers
+        ? campaign.players.filter((p) => !focusedId || !p.locationId || p.locationId === focusedId)
+        : campaign.players.filter((p) => !p.away),
+    [campaign.players, focusedId, focusHasPlayers]
   );
 
   const npcsOnStage = useMemo(
@@ -738,9 +750,9 @@ export default function HostStage({
         // Show a foe the moment it appears — a portrait OR any tracked stat
         // (HP) is enough; enemies shouldn't be invisible until art is painted.
         .filter((npc) => (npc.portraitUrl || (npc.stats && npc.stats.length > 0)) && npc.status !== "Future NPC")
-        .filter((npc) => !focusedId || !npc.locationId || npc.locationId === focusedId)
+        .filter((npc) => !focusHasPlayers || !focusedId || !npc.locationId || npc.locationId === focusedId)
         .slice(-4),
-    [campaign.storyCharacters, focusedId]
+    [campaign.storyCharacters, focusedId, focusHasPlayers]
   );
 
   // Heroes currently in OTHER locations (split party) — shown as a small hint.

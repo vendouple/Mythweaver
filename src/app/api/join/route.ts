@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getCampaign, getCampaignLock, listCampaigns, saveCampaign, logCampaignDebug } from "@/lib/campaign/store";
+import { getCampaign, getCampaignLock, getFocusedLocation, listCampaigns, saveCampaign, logCampaignDebug } from "@/lib/campaign/store";
 import { createId } from "@/lib/utils/ids";
 import { runDungeonMaster, runProfileGeneration, waitForDmIdle, serverLog, serverError } from "@/lib/aqua/chat";
 
@@ -59,7 +59,11 @@ export async function POST(request: Request) {
         status: "Generating profile...",
         stats: [
           { name: "HP", value: 20, maxValue: 20, color: "red" }
-        ]
+        ],
+        // Spawn where the story currently is — never the campaign's very first
+        // location. A joiner stranded at an abandoned starting location would
+        // register as a phantom "occupied" scene for the split-party scheduler.
+        locationId: getFocusedLocation(campaign).id
       };
       campaign.players.push(player);
     } else {
@@ -153,9 +157,18 @@ export async function POST(request: Request) {
                 // Wait for the table to be genuinely idle — generation
                 // finished, the TV done playing out the previous turn's beats,
                 // no half-locked exploration round — so a new arrival never
-                // interrupts a story beat in flight (feedback #7).
+                // interrupts a story beat in flight (feedback #7). The wait
+                // must happen WITHOUT the campaign lock: the TV's presenting
+                // heartbeat and the round lock-ins all need that lock, so
+                // holding it here would freeze the very state we wait on.
+                bgRelease();
                 await waitForDmIdle(campaign.id);
-                await runDungeonMaster(campaign.id, verifiedPlayer.name, integrateMessage, { hiddenUserMessage: true });
+                const weaveRelease = await getCampaignLock(campaign.id).acquire();
+                try {
+                  await runDungeonMaster(campaign.id, verifiedPlayer.name, integrateMessage, { hiddenUserMessage: true });
+                } finally {
+                  weaveRelease();
+                }
               }
 
               bgRelease();

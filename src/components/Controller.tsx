@@ -127,6 +127,23 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
   const countdown = useTurnCountdown(myTurnState?.deadlineAt);
   // In combat you must wait for your turn; in exploration everyone may lock in.
   const turnBlocked = isCombat && !myCombatTurn;
+  // Split-party spotlight (server-scheduled): locations take turns like
+  // players do. Mirror the server's occupancy rules (present + able players)
+  // to work out which location may act right now — everyone else waits.
+  const occupiedLocIds = (campaign?.locations || [])
+    .filter((l) => campaign!.players.some((p) => p.locationId === l.id && p.canAct !== false && !p.away))
+    .map((l) => l.id);
+  const splitNow = occupiedLocIds.length > 1;
+  const spotlightLocId = !splitNow
+    ? myLoc?.id
+    : occupiedLocIds.includes(campaign?.activeLocationId || "")
+      ? campaign!.activeLocationId
+      : occupiedLocIds.includes(campaign?.focusedLocationId || "")
+        ? campaign!.focusedLocationId
+        : occupiedLocIds[0];
+  // The spotlight is on another group's scene — this controller waits its turn.
+  const notMyScene = splitNow && !!myLoc && spotlightLocId !== myLoc.id;
+  const spotlightLocName = campaign?.locations?.find((l) => l.id === spotlightLocId)?.name;
   // Split-party: the TV is currently showing another group's scene.
   const elsewhere = !!(campaign?.locations && campaign.locations.length > 1 && myLoc && campaign.focusedLocationId !== myLoc.id);
   const myLocName = myLoc?.name;
@@ -176,6 +193,7 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
   const act = async (prompt: string, display?: string, partyActionId?: string) => {
     if (!campaign || !me || sending || locked || me.canAct === false) return;
     if (isCombat && activeId !== me.id) return; // not your turn
+    if (notMyScene) return; // another group's scene holds the spotlight
     setSending(true);
     setSendError(null);
     playSfx("send");
@@ -359,7 +377,7 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
                 {myTurnState?.round ? <span className="turn-round"> · Round {myTurnState.round}</span> : null}
               </div>
             ) : null}
-            {countdown && countdown.seconds > 0 && !locked && canAct &&
+            {countdown && countdown.seconds > 0 && !locked && canAct && !notMyScene &&
              ((isCombat && myCombatTurn) || (!isCombat && !!myTurnState?.deadlineAt)) ? (
               <div className={`timeout-bar ${countdown.frac <= 0.25 ? "urgent" : ""}`}>
                 <span className="timeout-bar-fill" style={{ width: `${countdown.frac * 100}%` }} />
@@ -381,6 +399,11 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
               <div className="weaving-lock">
                 <span className="sigil-ring small" aria-hidden />
                 <span>{weaving ? campaign.dmStatus : "The tale is still playing out on the screen…"}</span>
+              </div>
+            ) : notMyScene ? (
+              <div className="weaving-lock">
+                <span className="sigil-ring small" aria-hidden />
+                <span>The story is with the group at {spotlightLocName || "another place"} — your scene comes next.</span>
               </div>
             ) : turnBlocked ? (
               <div className="weaving-lock">
@@ -438,13 +461,13 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
                 className="field textarea slim"
                 rows={2}
                 value={composer}
-                placeholder={!canAct ? "You cannot act this turn…" : weaving ? "The Weaver is weaving…" : presenting ? "Watch the screen…" : turnBlocked ? "Wait for your turn…" : "Speak or act in your own words…"}
-                disabled={!canAct || locked || sending || turnBlocked}
+                placeholder={!canAct ? "You cannot act this turn…" : weaving ? "The Weaver is weaving…" : presenting ? "Watch the screen…" : notMyScene ? "The other group's scene is playing…" : turnBlocked ? "Wait for your turn…" : "Speak or act in your own words…"}
+                disabled={!canAct || locked || sending || turnBlocked || notMyScene}
                 onChange={(event) => setComposer(event.target.value)}
               />
               <button
                 className="primary-button"
-                disabled={!canAct || locked || sending || turnBlocked || !composer.trim()}
+                disabled={!canAct || locked || sending || turnBlocked || notMyScene || !composer.trim()}
                 onClick={() => act(composer.trim())}
               >
                 {sending ? "…" : "Do it"}
