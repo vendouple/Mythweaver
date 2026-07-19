@@ -85,8 +85,10 @@ export default function HostExperience({ campaignId, onExit }: { campaignId: str
     if (Date.now() <= new Date(ts.deadlineAt).getTime()) return;
     if (backstopRef.current === ts.deadlineAt) return;
     backstopRef.current = ts.deadlineAt;
-    const hasPending = !!campaign.pendingActions && Object.keys(campaign.pendingActions).length > 0;
-    if (ts.mode === "exploration" && hasPending) {
+    if (ts.mode === "exploration") {
+      // With lock-ins pending the server resolves the round with whoever
+      // committed; with none it rotates a split party's spotlight past the
+      // idle group (and no-ops for an unsplit table).
       api.party({ campaignId: campaign.id, action: "resolveRound", auto: true }).catch(() => {});
     } else if (ts.mode === "combat") {
       api.party({ campaignId: campaign.id, action: "skipTurn", auto: true }).catch(() => {});
