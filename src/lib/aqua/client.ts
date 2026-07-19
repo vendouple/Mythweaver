@@ -25,29 +25,34 @@ export type AquaToolDefinition = {
 };
 
 export function aquaConfig() {
-  const baseUrl = process.env.AQUA_BASE_URL || "https://api.aquadevs.com/v1";
-  const apiKey = process.env.AQUA_API_KEY || "";
+  const baseUrl = process.env.BASE_URL || "";
+  const apiKey = process.env.API_KEY || "";
   return {
     apiKey,
     baseUrl,
-    chatModel: process.env.AQUA_CHAT_MODEL || "grok-4.3",
+    chatModel: process.env.CHAT_MODEL || "",
     // Optional small/fast model for constrained HOUSEKEEPING ONLY (context
     // summarization/compaction so the large RP model never context-collapses).
     // It never directs live narration, ambience, effects, or backdrops — those
     // ALWAYS run on chatModel. Empty → housekeeping is skipped; the transcript
     // char budget below is the only safety net.
-    fastModel: process.env.FAST_MODEL || process.env.AQUA_FAST_MODEL || "",
+    fastModel: process.env.FAST_MODEL || "",
     // The small model may live on a DIFFERENT OpenAI-compatible provider. Each
     // field falls back to the main endpoint when left empty, so a same-provider
     // setup needs neither.
-    fastBaseUrl: process.env.FAST_BASE_URL || process.env.AQUA_FAST_BASE_URL || baseUrl,
-    fastApiKey: process.env.FAST_API_KEY || process.env.AQUA_FAST_API_KEY || apiKey,
-    imageModel: process.env.AQUA_IMAGE_MODEL || "gptimage-2",
+    fastBaseUrl: process.env.FAST_BASE_URL || baseUrl,
+    fastApiKey: process.env.FAST_API_KEY || apiKey,
+    imageModel: process.env.IMAGE_MODEL || "",
+    // The image model may live on a DIFFERENT OpenAI-compatible provider. Each
+    // field falls back to the main chat endpoint when left empty, so a
+    // same-provider setup needs neither.
+    imageBaseUrl: process.env.IMAGE_BASE_URL || baseUrl,
+    imageApiKey: process.env.IMAGE_API_KEY || apiKey,
     // Character budget (NOT tokens) for the recent-transcript window handed to
     // the DM each turn. The chat model supports up to ~1M tokens of context,
     // but quality degrades well before that ceiling, so this stays a
     // conservative default rather than the true max. Configurable per-deployment.
-    maxContextChars: Math.max(20_000, Number(process.env.AQUA_MAX_CONTEXT_CHARS) || 250_000)
+    maxContextChars: Math.max(20_000, Number(process.env.MAX_CONTEXT_CHARS) || 250_000)
   };
 }
 
@@ -75,9 +80,9 @@ export type AquaFetchOptions = {
   timeoutMs?: number;
   /** Called just before each retry with the UPCOMING attempt number, so the TV can show "retrying (2/3)". */
   onRetry?: (info: AquaRetryInfo) => void;
-  /** Override the base URL (e.g. the small model on a different provider). Falls back to AQUA_BASE_URL. */
+  /** Override the base URL (e.g. the small or image model on a different provider). Falls back to BASE_URL. */
   baseUrl?: string;
-  /** Override the bearer token for this request. Falls back to AQUA_API_KEY. */
+  /** Override the bearer token for this request. Falls back to API_KEY. */
   apiKey?: string;
 };
 

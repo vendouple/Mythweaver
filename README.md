@@ -4,7 +4,7 @@ Couch co-op tabletop RPG: the **TV is the stage**, phones are **player controlle
 
 ## How to run
 
-1. Copy `.env.example` to `.env` (or fill in your existing `.env`) with Aqua / model keys.
+1. Copy `.env.example` to `.env` (or fill in your existing `.env`) with your model API keys.
 2. `npm install`
 3. `npm run dev`
 4. Open **http://localhost:3000** on the host (TV/PC) and on phones on the same network (use the machine's LAN IP if needed).
