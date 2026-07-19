@@ -1,12 +1,12 @@
 import { buildCampaignContext } from "@/lib/campaign/context";
-import { getCampaign, saveCampaign, downloadAndSaveImage, logCampaignDebug, safePushDisplayEvent, isValidImageUrl, startCampaignDraft, finishCampaignDraft, reconcilePresence, normalizeBeatEffect, ensureLocations, getFocusedLocation, persistFocusedLocation } from "@/lib/campaign/store";
+import { getCampaign, saveCampaign, downloadAndSaveImage, logCampaignDebug, safePushDisplayEvent, isValidImageUrl, startCampaignDraft, finishCampaignDraft, reconcilePresence, normalizeBeatEffect, ensureLocations, getFocusedLocation, persistFocusedLocation, applyFocus } from "@/lib/campaign/store";
 import { createId } from "@/lib/utils/ids";
 import { aquaConfig, aquaFetch, fastModelTarget, AquaFetchOptions, AquaMessage, AquaToolCall, AquaToolDefinition } from "./client";
 import { runTool, toolDefinitions, applyNpcGroupFields, applyConditionFields } from "@/lib/tools/registry";
 import { generateImage } from "@/lib/aqua/images";
-import { Campaign, DisplayEvent, PlayerStat, StoryCharacter } from "@/lib/campaign/types";
+import { AmbienceMood, Campaign, DisplayEvent, PlayerStat, StoryCharacter } from "@/lib/campaign/types";
 import { MUSIC_THEMES, MusicTheme } from "@/lib/campaign/musicTheme";
-import { advanceCombat, buildExplorationResolution, ENEMY_SLOT, syncFocusedMirror } from "@/lib/campaign/turns";
+import { advanceCombat, buildExplorationResolution, ENEMY_SLOT, syncFocusedMirror, isPartySplit, rotateActiveLocation, startCombat, endCombat } from "@/lib/campaign/turns";
 
 // Tiered server-log verbosity (DEBUG_VERBOSE):
 //   0 / unset → errors only (quiet; default so the console isn't flooded)
@@ -309,6 +309,7 @@ const narrateTurnTool: AquaToolDefinition = {
               notes: { type: "string" },
               color: { type: "string" },
               zoneId: { type: "string", description: "Move this player to a narrative zone within their current location." },
+              locationId: { type: "string", description: "Move this player to a different tracked location (id from the locations list). Prefer move_player for group moves; this covers a single hero relocating as part of the turn's outcome." },
               stats: { type: "array", items: statSchema }
             }
           }
@@ -430,6 +431,10 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
     // Once the score is chosen (now or on a past turn), drop set_theme from
     // the offered tools so it can't be picked again mid-turn.
     let themeChosen = !!campaign.musicTheme;
+    // Whether the model itself directed the stage this turn — when it didn't,
+    // the post-turn stage-director pass double-checks mood/combat for it.
+    let modelSetAmbience = false;
+    let modelTouchedCombat = false;
 
     // Interactive fetch: fail fast, and surface each retry to the TV so a slow
     // request reads as "retrying (2/3)" instead of a silent multi-minute hang.
@@ -591,6 +596,8 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
         }
         const result = await runTool(campaignId, call.function.name, toolArgs);
         if (call.function.name === "set_theme" && result && !(result as any).error) themeChosen = true;
+        if (call.function.name === "set_ambience" && result && !(result as any).error) modelSetAmbience = true;
+        if ((call.function.name === "start_combat" || call.function.name === "end_combat" || call.function.name === "end_campaign") && result && !(result as any).error) modelTouchedCombat = true;
         const resultText = JSON.stringify(result);
         await logCampaignDebug(campaignId, `[Tool Result] ${call.function.name} returned: ${resultText}`);
         serverLog("DM Tool Result", `Tool '${call.function.name}' returned: ${resultText.slice(0, 160)}${resultText.length > 160 ? "..." : ""}`);
@@ -620,29 +627,71 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
     }
 
     if (!structuredResult && !parsedJson) {
-      await logCampaignDebug(campaignId, `[AI Retry] Retrying final response because JSON parsing failed.`);
-      serverLog("DM Parser", "Retrying final response because JSON parsing failed.");
-      const retryResponse = await complete([
-        ...messages,
-        { role: "assistant", content },
-        {
-          role: "user",
-          content: "Your previous response was not valid JSON and could not be applied to the campaign. Return the same narrative result again as ONLY strict JSON matching the required schema. Do not call tools. Do not include prose or markdown fences."
+      // NEVER fall back to plain text (feedback #3): an unparseable turn loses
+      // every state update and can splash raw tool syntax onto the TV (seen
+      // when a model emitted its native tool-call XML as content). Retry by
+      // FORCING the narrate_turn tool — small/RP models are far more reliable
+      // at emitting a validated tool call than strict JSON content — and if it
+      // still can't produce one, fail the turn cleanly: the error path
+      // restores the party's previous choices so they simply retry.
+      const maxParseRetries = Math.max(1, Number(process.env.AQUA_PARSE_RETRIES) || 3);
+      for (let attempt = 1; attempt <= maxParseRetries && !parsedJson; attempt += 1) {
+        await logCampaignDebug(campaignId, `[AI Retry] Parse failed — forcing narrate_turn (attempt ${attempt}/${maxParseRetries}).`);
+        serverLog("DM Parser", `Parse failed — retrying with forced narrate_turn (attempt ${attempt}/${maxParseRetries}).`);
+        void writeDmStatus(campaignId, `The Weaver re-threads the tale… (${attempt}/${maxParseRetries})`);
+        try {
+          const retryResponse = (await aquaFetch("/chat/completions", {
+            method: "POST",
+            body: JSON.stringify({
+              model: aquaConfig().chatModel,
+              messages: [
+                ...messages,
+                { role: "assistant", content },
+                {
+                  role: "user",
+                  content: "Your previous response could not be parsed and was discarded. Do NOT write prose, XML, or markdown. Call the narrate_turn tool EXACTLY ONCE right now, carrying this turn's story beats and final state as valid JSON arguments."
+                }
+              ],
+              tools: [narrateTurnTool],
+              tool_choice: { type: "function", function: { name: "narrate_turn" } }
+            })
+          }, INTERACTIVE_FETCH)) as ChatCompletionResponse;
+          const retryMessage = retryResponse.choices?.[0]?.message || retryResponse.message;
+          const retryCall = retryMessage ? normalizeToolCalls(retryMessage).find((c) => c.function.name === "narrate_turn") : undefined;
+          if (retryCall) {
+            parsedJson = typeof retryCall.function.arguments === "string"
+              ? JSON.parse(retryCall.function.arguments || "{}")
+              : (retryCall.function.arguments as Record<string, any>) || {};
+            content = JSON.stringify(parsedJson);
+            await logCampaignDebug(campaignId, `[AI Retry] Forced narrate_turn succeeded on attempt ${attempt}.`);
+            break;
+          }
+          // Some endpoints ignore tool_choice and answer in content — give the
+          // repairing JSON parser one look at whatever came back.
+          const retryContent = retryMessage?.content || "";
+          if (retryContent) {
+            const retryParsedJson = await parseFinalJson(campaignId, retryContent);
+            if (retryParsedJson) {
+              content = retryContent;
+              parsedJson = retryParsedJson;
+              break;
+            }
+          }
+        } catch (err) {
+          await logCampaignDebug(campaignId, `[AI Retry] Forced narrate_turn attempt ${attempt} failed: ${err instanceof Error ? err.message : String(err)}`);
+          serverError("DM Parser", `Forced narrate_turn retry ${attempt}/${maxParseRetries} failed`, err);
         }
-      ], "none", toolDefinitions, INTERACTIVE_FETCH);
-      const retryMessage = retryResponse.choices?.[0]?.message || retryResponse.message;
-      const retryContent = retryMessage?.content || "";
-      await logCampaignDebug(campaignId, `[AI Retry] Final response content: ${retryContent}`);
-      const retryParsedJson = await parseFinalJson(campaignId, retryContent);
-      if (retryParsedJson) {
-        finalMessage = retryMessage || finalMessage;
-        content = retryContent;
-        parsedJson = retryParsedJson;
-      } else {
-        serverError("DM Parser", "Retry response still failed JSON parsing. Falling back to plain text.");
-        await logCampaignDebug(campaignId, `[AI Retry] Retry failed JSON parsing. Falling back to plain text.`);
+      }
+      if (!parsedJson) {
+        await logCampaignDebug(campaignId, `[AI Retry] All ${maxParseRetries} forced retries failed — failing the turn (no plain-text fallback).`);
+        throw new Error("The storyteller's response could not be parsed after retries — the turn was rolled back so it can be retried.");
       }
     }
+
+    // Small models occasionally double-encode narrate_turn fields (story
+    // arriving as a JSON string instead of an array — seen in the first
+    // split-party session). Decode them so a correct turn is never half-applied.
+    if (parsedJson) parsedJson = decodeStringifiedFields(parsedJson);
 
     const latestCampaign = await getCampaign(campaignId);
     // True only for this campaign's very first DM response — used to gate the
@@ -807,6 +856,13 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
           if (typeof update.portraitPrompt === "string") player.portraitPrompt = update.portraitPrompt;
           if (typeof update.color === "string") player.color = update.color;
           if (typeof update.zoneId === "string" && update.zoneId.trim()) player.zoneId = update.zoneId.trim();
+          // The model may relocate a player via playerUpdates (it did so in the
+          // first split session and the move was silently dropped, desyncing
+          // positions). Honor it when the target location actually exists.
+          if (typeof update.locationId === "string" && update.locationId.trim()) {
+            const locId = update.locationId.trim();
+            if ((latestCampaign.locations || []).some((l) => l.id === locId)) player.locationId = locId;
+          }
           applyConditionFields(player, update);
           if (Array.isArray(update.stats)) {
             player.stats = mergeStats(player.stats, update.stats);
@@ -891,16 +947,6 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
           }
         }
       }
-    } else {
-      // Fallback if no JSON found
-      const textContent = stripSuggestedActions(content || "The Dungeon Master pauses, considering what happens next.");
-      if (latestCampaign.status !== "lobby") {
-        safePushDisplayEvent(latestCampaign, {
-          type: "narration",
-          speaker: "NARRATOR",
-          content: textContent
-        });
-      }
     }
 
     // Backdrop guarantee: the small RP model paints the opening scene then
@@ -934,6 +980,20 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
       };
 
       await reconcileBackdrop();
+      // Stage-direction guarantee (feedback: ambience froze on one mood for an
+      // entire climax and start_combat never fired even when the model's own
+      // reasoning said "combat begins"). When the model didn't direct the
+      // stage itself this turn, a narrowly-scoped follow-up call reviews the
+      // fresh beats and corrects mood/combat state. Non-fatal on failure.
+      try {
+        await reconcileStageDirection(latestCampaign, turnBeats, { modelSetAmbience, modelTouchedCombat });
+      } catch (err) {
+        serverError("StageDirector", "Stage-direction reconcile failed (non-fatal)", err);
+      }
+      // Portrait guarantee (feedback: NPCs introduced mid-session via
+      // npcUpdates never got generate_image called for them). Paint any
+      // missing NPC faces server-side, a couple per turn. Non-fatal.
+      await reconcileNpcPortraits(latestCampaign);
       // Housekeeping (small/fast model only, and only past a real threshold):
       // compact stale transcript/memory/NPC duplicates so the RP model never
       // context-collapses. Non-fatal on failure; skipped entirely without a
@@ -1007,6 +1067,38 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
 }
 
 /**
+ * After a location's beat finishes (an exploration round resolved, or a full
+ * combat round played out), hand the spotlight to the next occupied location
+ * and cut the TV there. No-op when the party isn't split or the saga ended.
+ * Callers must hold the campaign lock.
+ */
+export async function rotateSpotlight(campaignId: string, fromLocationId: string): Promise<Campaign> {
+  const campaign = await getCampaign(campaignId);
+  ensureLocations(campaign);
+  if (campaign.status !== "active" || !isPartySplit(campaign)) return campaign;
+  // Rotate FROM the scene that just resolved, regardless of where a mid-turn
+  // set_focus wandered off to.
+  campaign.activeLocationId = fromLocationId;
+  const next = rotateActiveLocation(campaign);
+  if (next && next.id !== fromLocationId) {
+    applyFocus(campaign, next);
+    const names = campaign.players
+      .filter((p) => p.locationId === next.id && !p.away)
+      .map((p) => p.characterName || p.name);
+    safePushDisplayEvent(campaign, {
+      type: "system",
+      speaker: "SYSTEM",
+      content: `The story cuts to ${next.name}${names.length ? ` — ${names.join(", ")}, it's your group's turn` : ""}.`
+    });
+    serverLog("Spotlight", `Rotated active location ${fromLocationId} → ${next.id} (${next.name})`);
+    await logCampaignDebug(campaignId, `[Spotlight] Beat finished at ${fromLocationId}; spotlight moves to ${next.id} (${next.name}).`);
+  }
+  syncFocusedMirror(campaign);
+  await saveCampaign(campaign);
+  return campaign;
+}
+
+/**
  * Resolve a full EXPLORATION round: fold every locked-in action into ONE DM
  * turn (honoring unanimous "together" actions), pushing each player's choice as
  * a user message + display beat first so the transcript and TV reflect it.
@@ -1035,8 +1127,11 @@ export async function resolveExplorationRound(campaignId: string, locationId?: s
   if (loc.turnState?.mode === "exploration") loc.turnState.deadlineAt = undefined;
   syncFocusedMirror(campaign);
   await saveCampaign(campaign);
-  const result = await runDungeonMaster(campaignId, "The Party", action, { hiddenUserMessage: true });
-  return result.campaign;
+  await runDungeonMaster(campaignId, "The Party", action, { hiddenUserMessage: true });
+  // This scene's action played out — a split party's spotlight moves on.
+  // (If the DM just STARTED combat here, the fight's rounds run when the
+  // rotation returns; the ambush itself was this beat.)
+  return await rotateSpotlight(campaignId, loc.id);
 }
 
 /**
@@ -1050,7 +1145,12 @@ export async function advanceCombatAndRunEnemies(campaignId: string, locationId?
   ensureLocations(campaign);
   const locId = locationId || campaign.focusedLocationId!;
   let loc = campaign.locations!.find((l) => l.id === locId);
-  if (!loc || loc.turnState?.mode !== "combat") return campaign;
+  if (!loc) return campaign;
+  if (loc.turnState?.mode !== "combat") {
+    // The fight ended during the actor's own turn (end_combat / end_campaign)
+    // — that closes this location's beat, so a split party's spotlight moves.
+    return await rotateSpotlight(campaignId, locId);
+  }
   reconcilePresence(campaign); // drop disconnected players from initiative
   let active = advanceCombat(campaign, loc);
   campaign.focusedLocationId = loc.id;
@@ -1058,7 +1158,9 @@ export async function advanceCombatAndRunEnemies(campaignId: string, locationId?
   await saveCampaign(campaign);
 
   let guard = 0;
+  let ranEnemyPhase = false;
   while (active === ENEMY_SLOT && guard++ < 4) {
+    ranEnemyPhase = true;
     await runDungeonMaster(
       campaignId,
       "Enemies",
@@ -1073,7 +1175,228 @@ export async function advanceCombatAndRunEnemies(campaignId: string, locationId?
     syncFocusedMirror(campaign);
     await saveCampaign(campaign);
   }
+  const combatOver = !loc || loc.turnState?.mode !== "combat";
+  if (combatOver || ranEnemyPhase) {
+    // The fight ended, or a FULL round just completed (every player acted and
+    // the enemy phase resolved) — either way this location's beat is done, so
+    // a split party's spotlight rotates. Mid-round player→player handoffs stay.
+    return await rotateSpotlight(campaignId, locId);
+  }
   return campaign;
+}
+
+// Matches the controllers' PRESENTING_STALE_MS: past this age a "presenting"
+// flag is a crashed/closed TV, not a live playback, and must not block anyone.
+const PRESENTING_STALE_MS = 60_000;
+
+/** True while the TV reports it's still typing/holding this turn's beats. */
+function isPresenting(campaign: Campaign): boolean {
+  return !!(campaign.presenting?.active && Date.now() - campaign.presenting.updatedAt < PRESENTING_STALE_MS);
+}
+
+/**
+ * Wait until the table is genuinely idle: no DM turn generating, the TV done
+ * playing out the previous turn's beats, and no exploration round half-locked.
+ * Used to defer join/rejoin/departure weaves so a new arrival never interrupts
+ * a story beat in flight (feedback #7). Bounded — after `timeoutMs` it returns
+ * anyway so nobody is stranded waiting forever (e.g. behind a long fight).
+ * Callers must NOT hold the campaign lock while waiting.
+ */
+export async function waitForDmIdle(campaignId: string, timeoutMs = 180_000): Promise<void> {
+  const start = Date.now();
+  for (;;) {
+    try {
+      const campaign = await getCampaign(campaignId);
+      if (campaign.status !== "active") return;
+      const pendingSomewhere = (campaign.locations || []).some(
+        (l) => Object.keys(l.pendingActions || {}).length > 0
+      );
+      if (!campaign.dmStatus && !isPresenting(campaign) && !pendingSomewhere) return;
+    } catch {
+      return; // campaign unreadable — let the caller's own error path surface it
+    }
+    if (Date.now() - start > timeoutMs) return;
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
+}
+
+/**
+ * Small models occasionally double-encode structured fields — story arrives as
+ * a JSON string ("[{...}]") instead of an array, playerActions as a stringified
+ * list (both seen in the first split-party session). Decode any stringified
+ * array/object field back to its real shape so a structurally-correct turn is
+ * applied in full instead of silently dropping its updates.
+ */
+function decodeStringifiedFields(data: Record<string, any>): Record<string, any> {
+  const decode = (value: unknown) => {
+    if (typeof value !== "string") return value;
+    const trimmed = value.trim();
+    if (!trimmed.startsWith("[") && !trimmed.startsWith("{")) return value;
+    try {
+      return JSON.parse(trimmed);
+    } catch {
+      return value;
+    }
+  };
+  for (const key of ["story", "playerActions", "partyActions", "playerUpdates", "npcUpdates"]) {
+    if (key in data) data[key] = decode(data[key]);
+  }
+  return data;
+}
+
+// How many missing NPC portraits to backfill per turn (cost guard).
+const NPC_PORTRAIT_BACKFILL_PER_TURN = 2;
+
+/**
+ * Portrait guarantee (same spirit as the backdrop guarantee): the small RP
+ * model introduces NPCs via npcUpdates and forgets the "generate their
+ * portrait first" rule — the first split-party session added four NPCs and
+ * painted zero of them. After each turn, paint missing faces server-side (at
+ * most a couple per turn) so every character on stage gets a real card.
+ * Mutates the campaign in place; the caller saves. Non-fatal per NPC.
+ */
+async function reconcileNpcPortraits(campaign: Campaign): Promise<void> {
+  const missing = campaign.storyCharacters.filter(
+    (c) => !c.portraitUrl && c.status !== "Future NPC" && !c.claimedByPlayerId
+  );
+  if (!missing.length) return;
+  for (const npc of missing.slice(0, NPC_PORTRAIT_BACKFILL_PER_TURN)) {
+    try {
+      const visual = (npc.description || "").trim();
+      // The image model knows no names or lore — describe, never just name.
+      const prompt = visual.length >= 20
+        ? `Close-up character portrait: ${visual}. Cinematic lighting, detailed face, dramatic atmosphere.`
+        : `Close-up character portrait of a mysterious figure from a ${campaign.musicTheme || "dark adventure"} tale${campaign.currentScene ? `, seen at ${campaign.currentScene}` : ""}. Cinematic lighting, detailed face, dramatic atmosphere.`;
+      const image = await generateImage(prompt);
+      const localUrl = await downloadAndSaveImage(campaign.id, image.url, "npcs", npc.id);
+      npc.portraitUrl = localUrl;
+      if (!campaign.portraits) campaign.portraits = [];
+      campaign.portraits.push({
+        id: createId("portrait"),
+        url: localUrl,
+        prompt: image.prompt,
+        characterName: npc.name,
+        createdAt: new Date().toISOString()
+      });
+      serverLog("Portraits", `Backfilled missing portrait for NPC "${npc.name}"`);
+      await logCampaignDebug(campaign.id, `[Portraits] Backfilled missing portrait for NPC "${npc.name}".`);
+    } catch (err) {
+      serverError("Portraits", `Portrait backfill failed for NPC "${npc.name}" (non-fatal)`, err);
+    }
+  }
+}
+
+// Moods the stage director may move the table to ("outro" is end_campaign's).
+const DIRECTABLE_MOODS: AmbienceMood[] = ["calm", "tense", "adrenaline", "battle", "boss", "mystery", "dread", "triumph", "wonder", "somber"];
+
+/**
+ * Stage-direction guarantee (feedback #8/#9): the small RP model narrates
+ * fights and mood swings but forgets the tools that make the TV follow —
+ * in the first split-party session set_ambience stayed on one mood through the
+ * whole climax and start_combat never fired even when the model's own
+ * reasoning said "combat begins". Whenever the model touched neither mood nor
+ * combat this turn, a narrowly-scoped forced tool call reviews the fresh beats
+ * and corrects both. Mutates the campaign in place; the caller saves.
+ */
+async function reconcileStageDirection(
+  campaign: Campaign,
+  turnBeats: Array<{ speaker?: string; content?: string }>,
+  opts: { modelSetAmbience: boolean; modelTouchedCombat: boolean }
+): Promise<void> {
+  if (campaign.status !== "active") return;
+  if (opts.modelSetAmbience && opts.modelTouchedCombat) return;
+  if (!turnBeats.length) return;
+
+  ensureLocations(campaign);
+  const loc = getFocusedLocation(campaign);
+  const mode = loc.turnState?.mode === "combat" ? "combat" : "exploration";
+  // Anything alive with tracked HP in this scene can be fought — the director
+  // decides hostility from the beats; this is just the sanity gate.
+  const combatants = campaign.storyCharacters.filter((c) => {
+    if (c.locationId !== loc.id || c.canAct === false) return false;
+    const hp = (c.stats || []).find((s) => s.name.toUpperCase() === "HP");
+    return !!hp && hp.value > 0;
+  });
+
+  const tool: AquaToolDefinition = {
+    type: "function",
+    function: {
+      name: "direct_stage",
+      description: "Judge the scene's CURRENT emotional register and combat state from the beats that just played. Call EXACTLY ONCE.",
+      parameters: {
+        type: "object",
+        required: ["mood", "combat"],
+        properties: {
+          mood: {
+            type: "string",
+            enum: ["keep", ...DIRECTABLE_MOODS],
+            description: "'keep' if the mood already playing still fits; otherwise the register the scene has ACTUALLY moved to (a fight = battle, a climactic showdown = boss, a chase = adrenaline, victory = triumph)."
+          },
+          intensity: { type: "number", description: "0.0-1.0 for a changed mood. Default 0.6." },
+          combat: {
+            type: "string",
+            enum: ["keep", "start", "end"],
+            description: "'start' when these beats show a fight ACTUALLY breaking out (an ambush springs, someone opens fire, a monster lunges) and the table is not in combat yet; 'end' when the fight is clearly over (foes dead, fled, or surrendered); otherwise 'keep'."
+          }
+        }
+      }
+    }
+  };
+
+  const beatText = turnBeats.slice(-10).map((b) => `${b.speaker || "NARRATOR"}: ${b.content || ""}`).join("\n");
+  const user = [
+    `Mood currently playing: ${campaign.ambience ? `${campaign.ambience.mood} (intensity ${campaign.ambience.intensity})` : "none yet (calm default)"}`,
+    `Turn mode: ${mode}${mode === "combat" ? ` (round ${loc.turnState?.round || 1})` : ""}`,
+    `Living NPCs with HP in this scene: ${combatants.length ? combatants.map((c) => c.name).join(", ") : "none tracked"}`,
+    `Story beats that just played:\n${beatText}`
+  ].join("\n\n");
+
+  const response = (await aquaFetch("/chat/completions", {
+    method: "POST",
+    body: JSON.stringify({
+      model: aquaConfig().chatModel,
+      messages: [
+        {
+          role: "system",
+          content: "You are the stage director for a couch RPG TV. Decide whether the mood/music register or the combat mode must change to match what just played on screen. Be decisive: a fight breaking out means combat 'start' and a battle or boss mood; a finished fight means 'end'. A scene whose register genuinely shifted deserves a new mood — do not let one mood drone through an entire act. Call direct_stage exactly once."
+        },
+        { role: "user", content: user }
+      ],
+      tools: [tool],
+      tool_choice: { type: "function", function: { name: "direct_stage" } }
+    })
+  }, INTERACTIVE_FETCH)) as ChatCompletionResponse;
+  const message = response.choices?.[0]?.message || response.message;
+  const call = Array.isArray(message?.tool_calls) ? message?.tool_calls?.[0] : null;
+  if (!call?.function?.arguments) return;
+  const args = JSON.parse(call.function.arguments) as Record<string, unknown>;
+
+  const mood = String(args.mood || "keep").toLowerCase();
+  if (!opts.modelSetAmbience && mood !== "keep" && DIRECTABLE_MOODS.includes(mood as AmbienceMood) && mood !== campaign.ambience?.mood) {
+    const rawIntensity = Number(args.intensity ?? 0.6);
+    campaign.ambience = {
+      mood: mood as AmbienceMood,
+      intensity: Number.isFinite(rawIntensity) ? Math.max(0, Math.min(1, rawIntensity)) : 0.6,
+      updatedAt: new Date().toISOString()
+    };
+    serverLog("StageDirector", `Mood corrected to "${mood}" for campaign ${campaign.id}`);
+    await logCampaignDebug(campaign.id, `[StageDirector] Ambience corrected to "${mood}" (the DM model didn't call set_ambience this turn).`);
+  }
+
+  const combat = String(args.combat || "keep").toLowerCase();
+  if (!opts.modelTouchedCombat) {
+    if (combat === "start" && mode === "exploration" && combatants.length) {
+      startCombat(campaign, loc);
+      safePushDisplayEvent(campaign, { type: "system", speaker: "SYSTEM", content: "⚔ Battle is joined — initiative order begins." });
+      serverLog("StageDirector", `Combat auto-started at ${loc.name} for campaign ${campaign.id}`);
+      await logCampaignDebug(campaign.id, `[StageDirector] start_combat enforced at ${loc.id} — the beats describe a fight but the DM model never switched modes.`);
+    } else if (combat === "end" && mode === "combat") {
+      endCombat(loc);
+      serverLog("StageDirector", `Combat auto-ended at ${loc.name} for campaign ${campaign.id}`);
+      await logCampaignDebug(campaign.id, `[StageDirector] end_combat enforced at ${loc.id} — the beats show the fight is over.`);
+    }
+  }
+  syncFocusedMirror(campaign);
 }
 
 type BackdropDecision = { mode: "keep" | "reuse" | "new"; backgroundId?: string; prompt?: string };
@@ -1232,10 +1555,6 @@ function classifyStoryBeat(
   );
   if (player) return { type: "playerAction", speaker, playerId: player.id };
   return { type: "dialogue", speaker };
-}
-
-function stripSuggestedActions(content: string) {
-  return content.replace(/\n?\*\*Suggested Actions:\*\*[\s\S]*$/i, "").trim();
 }
 
 // currentScene is a short location LABEL, not narrative prose — but the

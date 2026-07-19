@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCampaign, getCampaignLock, saveCampaign, safePushDisplayEvent, ensureLocations, getFocusedLocation, getPlayerLocation, reconcilePresence, playerLastSeen } from "@/lib/campaign/store";
-import { runDungeonMaster, repaintBackdrop, resolveExplorationRound, advanceCombatAndRunEnemies, serverLog, serverError } from "@/lib/aqua/chat";
-import { turnMode, deadlinePassed, syncFocusedMirror } from "@/lib/campaign/turns";
+import { runDungeonMaster, repaintBackdrop, resolveExplorationRound, advanceCombatAndRunEnemies, rotateSpotlight, waitForDmIdle, serverLog, serverError } from "@/lib/aqua/chat";
+import { turnMode, deadlinePassed, syncFocusedMirror, getActiveLocation, isPartySplit } from "@/lib/campaign/turns";
 
 export const dynamic = "force-dynamic";
 
@@ -99,17 +99,27 @@ export async function POST(request: Request) {
       }
 
       if (action === "resolveRound") {
-        // Force-resolve the FOCUSED location's exploration round with whoever
+        // Force-resolve the ACTIVE location's exploration round with whoever
         // locked in. Triggered by the party leader ("go now") or the host as a
         // deadline backstop. `auto` = deadline-driven only, to avoid racing.
         const campaign = await getCampaign(campaignId);
         ensureLocations(campaign);
-        const loc = getFocusedLocation(campaign);
+        const loc = getActiveLocation(campaign) || getFocusedLocation(campaign);
         if (campaign.status !== "active" || turnMode(loc) !== "exploration") {
           return NextResponse.json({ campaign });
         }
         const pendingCount = Object.keys(loc.pendingActions || {}).length;
-        if (!pendingCount) return NextResponse.json({ campaign });
+        if (!pendingCount) {
+          // Split party, spotlight group idled past its whole window with no
+          // lock-ins: hand the spotlight to the next location instead of
+          // letting one silent group freeze the entire table.
+          if (body.auto && isPartySplit(campaign) && deadlinePassed(loc)) {
+            serverLog("API party", `Spotlight group at ${loc.name} idled past the deadline — rotating for ${campaignId}`);
+            const rotated = await rotateSpotlight(campaignId, loc.id);
+            return NextResponse.json({ campaign: rotated });
+          }
+          return NextResponse.json({ campaign });
+        }
         if (body.auto && !deadlinePassed(loc)) return NextResponse.json({ campaign });
         serverLog("API party", `Resolving exploration round for ${campaignId}/${loc.id} (${pendingCount} locked in, auto=${!!body.auto})`);
         const resolved = await resolveExplorationRound(campaignId, loc.id);
@@ -117,10 +127,10 @@ export async function POST(request: Request) {
       }
 
       if (action === "skipTurn") {
-        // Advance the FOCUSED location's combat past an idle/absent active player.
+        // Advance the ACTIVE location's combat past an idle/absent active player.
         const campaign = await getCampaign(campaignId);
         ensureLocations(campaign);
-        const loc = getFocusedLocation(campaign);
+        const loc = getActiveLocation(campaign) || getFocusedLocation(campaign);
         if (campaign.status !== "active" || turnMode(loc) !== "combat") {
           return NextResponse.json({ campaign });
         }
@@ -310,6 +320,10 @@ export async function POST(request: Request) {
           const isReturn = !!returning;
           safeRelease();
           (async () => {
+            // Wait for the table to be genuinely idle — generation finished,
+            // the TV done playing out the previous turn's beats, no half-locked
+            // round — so the weave never talks over a story beat in flight.
+            await waitForDmIdle(campaignId);
             const bgRelease = await getCampaignLock(campaignId).acquire();
             try {
               // The world may have moved while we waited on the lock: the

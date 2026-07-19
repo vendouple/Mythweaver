@@ -442,6 +442,15 @@ export type Campaign = {
   locations?: Location[];
   /** The location the TV is currently showing (intercut focus for split parties). */
   focusedLocationId?: string;
+  /**
+   * Split-party scheduler: the ONE location whose group may act right now.
+   * The server rotates it round-robin — a location's group locks in, their
+   * scene resolves (a full combat round counts as one beat), then the spotlight
+   * moves to the next occupied location. Players elsewhere are hard-locked
+   * until their scene comes up. Meaningless (and ignored) when the whole party
+   * is in one place.
+   */
+  activeLocationId?: string;
   memory: string;
   images: SceneImage[];
   portraits: PortraitImage[];

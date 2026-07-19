@@ -134,6 +134,75 @@ export function deadlinePassed(loc: Location): boolean {
   return Date.now() > new Date(at).getTime();
 }
 
+/* ── Split-party location scheduler ──────────────────────────────────────
+ * When the party is split, locations take turns like players do: exactly ONE
+ * location is "active" (its group may act), everyone else waits. A location's
+ * beat ends when its exploration round resolves, or — in combat — when a full
+ * round (all players + the enemy phase) completes. Then the spotlight rotates
+ * to the next occupied location. The small RP model never has to juggle two
+ * scenes at once; the harness serializes them.
+ */
+
+/** Locations that currently hold ≥1 present, able player (campaign order). */
+export function occupiedLocations(campaign: Campaign): Location[] {
+  return (campaign.locations || []).filter(
+    (loc) => eligiblePlayerIdsInLocation(campaign, loc.id).length > 0
+  );
+}
+
+/** True when the party is genuinely split across 2+ occupied locations. */
+export function isPartySplit(campaign: Campaign): boolean {
+  return occupiedLocations(campaign).length > 1;
+}
+
+/**
+ * The location whose group may act right now. Falls back to (and repairs)
+ * activeLocationId when it's unset, invalid, or points somewhere abandoned.
+ */
+export function getActiveLocation(campaign: Campaign): Location | undefined {
+  const occupied = occupiedLocations(campaign);
+  if (!occupied.length) {
+    return (campaign.locations || []).find((l) => l.id === campaign.focusedLocationId) || campaign.locations?.[0];
+  }
+  const current = occupied.find((l) => l.id === campaign.activeLocationId);
+  if (current) return current;
+  // Repair: prefer wherever the TV is, else the first occupied location.
+  const next = occupied.find((l) => l.id === campaign.focusedLocationId) || occupied[0];
+  campaign.activeLocationId = next.id;
+  return next;
+}
+
+/** Whether this player's location holds the spotlight (always true unsplit). */
+export function isPlayersLocationActive(campaign: Campaign, playerId: string): boolean {
+  if (!isPartySplit(campaign)) return true;
+  const player = campaign.players.find((p) => p.id === playerId);
+  const active = getActiveLocation(campaign);
+  return !!player?.locationId && player.locationId === active?.id;
+}
+
+/** Re-arm a location's turn/round timer with a FULL fresh window. */
+export function refreshLocationDeadline(loc: Location) {
+  if (!loc.turnState) loc.turnState = { mode: "exploration" };
+  loc.turnState.deadlineAt = deadline();
+}
+
+/**
+ * Move the spotlight to the next occupied location (round-robin). Returns the
+ * new active location, or the current one when the party isn't split. Also
+ * re-arms the incoming location's deadline so a beat spent waiting off-stage
+ * can never be instantly auto-skipped the moment it comes back on.
+ */
+export function rotateActiveLocation(campaign: Campaign): Location | undefined {
+  const occupied = occupiedLocations(campaign);
+  if (!occupied.length) return getActiveLocation(campaign);
+  const currentId = campaign.activeLocationId || campaign.focusedLocationId;
+  const idx = occupied.findIndex((l) => l.id === currentId);
+  const next = occupied[(idx + 1) % occupied.length];
+  campaign.activeLocationId = next.id;
+  if (occupied.length > 1) refreshLocationDeadline(next);
+  return next;
+}
+
 /** Copy the focused location's live turn state up to the campaign for the TV/host. */
 export function syncFocusedMirror(campaign: Campaign) {
   const loc =

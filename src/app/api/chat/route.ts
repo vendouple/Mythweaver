@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { runDungeonMaster, resolveExplorationRound, advanceCombatAndRunEnemies, serverLog, serverError } from "@/lib/aqua/chat";
 import { getCampaign, getCampaignLock, saveCampaign, safePushDisplayEvent, reconcilePresence, ensureLocations, getPlayerLocation } from "@/lib/campaign/store";
-import { turnMode, allLockedIn, armExplorationDeadline, syncFocusedMirror } from "@/lib/campaign/turns";
+import { turnMode, allLockedIn, armExplorationDeadline, syncFocusedMirror, isPlayersLocationActive, getActiveLocation } from "@/lib/campaign/turns";
 
 export const dynamic = "force-dynamic";
 
@@ -70,6 +70,16 @@ export async function POST(request: Request) {
       // ── Turn model (#1), scoped to the acting player's LOCATION (#split) ──
       ensureLocations(campaign);
       const loc = getPlayerLocation(campaign, playerId);
+
+      // Split-party spotlight: locations take turns. Only the group at the
+      // active location may act; everyone else is locked until the rotation
+      // reaches their scene (their controller shows a waiting banner).
+      if (!isPlayersLocationActive(campaign, playerId)) {
+        const active = getActiveLocation(campaign);
+        serverLog("Turn Guard", `Rejected ${playerName}'s action — the spotlight is at ${active?.name || "another location"}, not ${loc.name}.`);
+        return NextResponse.json({ campaign, blocked: "not-your-location" });
+      }
+
       if (turnMode(loc) === "combat") {
         // Sequential initiative: only this location's active player may act.
         if (loc.turnState?.activeId !== playerId) {
@@ -93,8 +103,12 @@ export async function POST(request: Request) {
         lockedAt: new Date().toISOString()
       };
       armExplorationDeadline(loc);
-      // Focus the TV on where the action is happening.
+      // Focus the TV on where the action is happening. The gate above already
+      // guaranteed this is the spotlight location (or the party isn't split),
+      // so pinning the scheduler here keeps a later split rotating from the
+      // scene the story actually left off at.
       campaign.focusedLocationId = loc.id;
+      campaign.activeLocationId = loc.id;
       syncFocusedMirror(campaign);
       await saveCampaign(campaign);
 

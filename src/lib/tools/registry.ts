@@ -154,6 +154,7 @@ export const toolDefinitions: AquaToolDefinition[] = [
                 portraitPrompt: { type: "string" },
                 color: { type: "string", description: "Color name or hex code (e.g. 'orange', '#00ffcc') for dialogue and cards." },
                 zoneId: { type: "string", description: "Move this player to a narrative zone within their current location (e.g. 'rooftop', 'street'). Use when they physically relocate within the scene." },
+                locationId: { type: "string", description: "Move this player to a different tracked location (id from the locations list). Prefer move_player for group moves." },
                 stats: {
                   type: "array",
                   description: "Update HP and other tracked stats. ALWAYS apply damage/healing here after combat or harm. maxValue optional (kept if omitted).",
@@ -832,6 +833,12 @@ export async function runTool(campaignId: string, name: string, args: Record<str
           if (typeof update.portraitPrompt === "string") player.portraitPrompt = update.portraitPrompt;
           if (typeof update.color === "string") player.color = update.color;
           if (typeof update.zoneId === "string" && update.zoneId.trim()) player.zoneId = update.zoneId.trim();
+          // Honor a location move sent through playerUpdates (previously it was
+          // silently dropped, desyncing player positions from the narrative).
+          if (typeof update.locationId === "string" && String(update.locationId).trim()) {
+            const locId = String(update.locationId).trim();
+            if ((campaign.locations || []).some((l) => l.id === locId)) player.locationId = locId;
+          }
           applyConditionFields(player, update);
           if (Array.isArray(update.stats)) {
             player.stats = mergeStats(player.stats, update.stats);
