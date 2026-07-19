@@ -709,9 +709,16 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
     const turnBeats: Array<{ speaker?: string; content?: string; event: DisplayEvent }> = [];
 
     if (parsedJson) {
-      if (Array.isArray(parsedJson.story)) {
+      // Robustly recover the story[] array even when the model emitted it as a
+      // malformed stringified array (e.g. a premature `]` mid-stream). The
+      // previous `Array.isArray(parsedJson.story)` check silently skipped the
+      // whole story block on a malformed string, pushing ZERO narration beats
+      // to displayEvents — so `storyStarted` never flipped true and the TV
+      // stayed stuck on the Weaving screen at ~95% even though the DM finished.
+      const storyItems = parseStoryArray(parsedJson.story);
+      if (storyItems.length) {
         const mergedStory: any[] = [];
-        for (const item of parsedJson.story) {
+        for (const item of storyItems) {
           if (!item || typeof item !== "object") continue;
           const speaker = item.speaker || "NARRATOR";
           const contentText = item.content || "";
@@ -1242,6 +1249,83 @@ function decodeStringifiedFields(data: Record<string, any>): Record<string, any>
     if (key in data) data[key] = decode(data[key]);
   }
   return data;
+}
+
+/**
+ * Robustly recover a story[] array from a model output that arrived as a
+ * string (small models sometimes double-encode narrate_turn's story field).
+ * `decodeStringifiedFields` only catches the clean case; this handles the
+ * messy ones seen in the wild:
+ *   - a stringified array with a premature `]` mid-stream (the model closed
+ *     the array early then kept appending objects): `[{…},{…}], {…}, {…}]`
+ *   - a stringified array with trailing junk after the closing bracket
+ *   - an already-parsed array (returned as-is)
+ *   - anything else (returns [] so the turn's beats aren't silently dropped)
+ *
+ * Without this, a malformed story string falls through `Array.isArray(...)` as
+ * false, the whole story block is skipped, and ZERO narration/dialogue events
+ * get pushed to displayEvents — so `storyStarted` never flips true and the TV
+ * stays stuck on the Weaving screen at ~95% even though the DM finished.
+ */
+function parseStoryArray(raw: unknown): any[] {
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw !== "string") return [];
+  const trimmed = raw.trim();
+  if (!trimmed) return [];
+
+  // Fast path: clean stringified array.
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (Array.isArray(parsed)) return parsed;
+  } catch {
+    // fall through to recovery
+  }
+
+  // Recovery: scan for top-level JSON objects and collect every one that
+  // looks like a story beat ({speaker, content}). This survives a premature
+  // `]` (the model closed the array early then kept emitting objects) and
+  // trailing junk after the real closing bracket.
+  const beats: any[] = [];
+  let depth = 0;
+  let start = -1;
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < trimmed.length; i += 1) {
+    const ch = trimmed[i];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch === "\\") {
+        escaped = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === "{") {
+      if (depth === 0) start = i;
+      depth += 1;
+    } else if (ch === "}") {
+      depth -= 1;
+      if (depth === 0 && start >= 0) {
+        const candidate = trimmed.slice(start, i + 1);
+        try {
+          const obj = JSON.parse(candidate);
+          if (obj && typeof obj === "object" && ("speaker" in obj || "content" in obj)) {
+            beats.push(obj);
+          }
+        } catch {
+          // skip malformed object
+        }
+        start = -1;
+      }
+    }
+  }
+  return beats;
 }
 
 // How many missing NPC portraits to backfill per turn (cost guard).
