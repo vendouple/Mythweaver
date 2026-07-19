@@ -309,6 +309,7 @@ export async function getCampaign(id: string): Promise<Campaign> {
     const environment = JSON.parse(await readFile(environmentFile(id), "utf8")) as Record<string, any>;
     parsed.locations = environment.locations;
     parsed.focusedLocationId = environment.focusedLocationId;
+    parsed.activeLocationId = environment.activeLocationId;
     for (const player of parsed.players || []) {
       const position = environment.playerPositions?.[player.id];
       if (position) Object.assign(player, position);
@@ -369,6 +370,7 @@ async function writeCampaignStateFiles(campaign: Campaign, writeEnvironment: boo
   const campaignState = JSON.parse(JSON.stringify(campaign)) as Campaign;
   delete campaignState.locations;
   delete campaignState.focusedLocationId;
+  delete campaignState.activeLocationId;
   for (const player of campaignState.players) {
     delete player.locationId;
     delete player.zoneId;
@@ -382,6 +384,7 @@ async function writeCampaignStateFiles(campaign: Campaign, writeEnvironment: boo
   const environment = {
     version: 1,
     focusedLocationId: campaign.focusedLocationId,
+    activeLocationId: campaign.activeLocationId,
     locations: campaign.locations || [],
     playerPositions: Object.fromEntries(campaign.players.map((p) => [p.id, { locationId: p.locationId, zoneId: p.zoneId }])),
     npcPositions: Object.fromEntries(campaign.storyCharacters.map((n) => [n.id, { locationId: n.locationId, zoneId: n.zoneId }]))
@@ -469,6 +472,7 @@ function normalizeCampaign(raw: Partial<Campaign> & { suggestedActions?: unknown
     pendingActions: normalizePendingActions((raw as any).pendingActions),
     locations: normalizeLocations((raw as any).locations),
     focusedLocationId: typeof (raw as any).focusedLocationId === "string" ? (raw as any).focusedLocationId : undefined,
+    activeLocationId: typeof (raw as any).activeLocationId === "string" ? (raw as any).activeLocationId : undefined,
     memory: String(raw.memory || ""),
     images: Array.isArray(raw.images) ? raw.images : [],
     portraits: Array.isArray(raw.portraits) ? raw.portraits : [],
@@ -905,6 +909,11 @@ export function ensureLocations(campaign: Campaign): Campaign {
   const fallback = campaign.locations[0].id;
   if (!campaign.focusedLocationId || !ids.has(campaign.focusedLocationId)) {
     campaign.focusedLocationId = fallback;
+  }
+  // A stale spotlight (deleted/renamed location) heals itself lazily —
+  // getActiveLocation() repairs it against the occupied set.
+  if (campaign.activeLocationId && !ids.has(campaign.activeLocationId)) {
+    campaign.activeLocationId = undefined;
   }
   for (const p of campaign.players) {
     if (!p.locationId || !ids.has(p.locationId)) p.locationId = fallback;
