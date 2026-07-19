@@ -11,6 +11,9 @@ export async function generateImage(prompt: string) {
   const data = (await aquaFetch("/images/generations", {
     method: "POST",
     body: JSON.stringify({ model: config.imageModel, prompt })
+  }, {
+    baseUrl: config.imageBaseUrl,
+    apiKey: config.imageApiKey
   })) as ImageResponse;
 
   const first = data.data?.[0];

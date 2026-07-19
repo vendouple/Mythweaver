@@ -56,13 +56,13 @@ async function writeDmStatus(campaignId: string, status: string) {
 
 // Max tool-calling steps per DM turn. Combat turns chain many rolls + state
 // updates, so 8 was too tight (turns hit the cap mid-fight). Env-overridable.
-const MAX_DM_STEPS = Math.max(4, Number(process.env.AQUA_MAX_TOOL_STEPS) || 16);
+const MAX_DM_STEPS = Math.max(4, Number(process.env.MAX_TOOL_STEPS) || 16);
 
 // Interactive DM turns fail fast: a dead endpoint should surface in seconds,
 // not after 6×60s of silence. Non-interactive generation keeps the defaults.
 const INTERACTIVE_FETCH: Pick<AquaFetchOptions, "retries" | "timeoutMs"> = {
-  retries: Math.max(1, Number(process.env.AQUA_INTERACTIVE_RETRIES) || 3),
-  timeoutMs: Math.max(5000, Number(process.env.AQUA_INTERACTIVE_TIMEOUT_MS) || 45000)
+  retries: Math.max(1, Number(process.env.INTERACTIVE_RETRIES) || 3),
+  timeoutMs: Math.max(5000, Number(process.env.INTERACTIVE_TIMEOUT_MS) || 45000)
 };
 
 const systemPrompt = `You are the Dungeon Master for a couch RPG. TV shows cinematic story; phones are player controllers.
@@ -634,7 +634,7 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
       // at emitting a validated tool call than strict JSON content — and if it
       // still can't produce one, fail the turn cleanly: the error path
       // restores the party's previous choices so they simply retry.
-      const maxParseRetries = Math.max(1, Number(process.env.AQUA_PARSE_RETRIES) || 3);
+      const maxParseRetries = Math.max(1, Number(process.env.PARSE_RETRIES) || 3);
       for (let attempt = 1; attempt <= maxParseRetries && !parsedJson; attempt += 1) {
         await logCampaignDebug(campaignId, `[AI Retry] Parse failed — forcing narrate_turn (attempt ${attempt}/${maxParseRetries}).`);
         serverLog("DM Parser", `Parse failed — retrying with forced narrate_turn (attempt ${attempt}/${maxParseRetries}).`);
