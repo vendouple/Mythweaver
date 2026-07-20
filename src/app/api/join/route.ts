@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCampaign, getCampaignLock, getFocusedLocation, listCampaigns, saveCampaign, logCampaignDebug } from "@/lib/campaign/store";
 import { createId } from "@/lib/utils/ids";
-import { runDungeonMaster, runProfileGeneration, waitForDmIdle, serverLog, serverError } from "@/lib/aqua/chat";
+import { runDungeonMaster, runProfileGeneration, waitForDmIdle, buildAbsenceBriefing, serverLog, serverError } from "@/lib/aqua/chat";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +12,8 @@ export async function POST(request: Request) {
   const characterName = String(body.characterName || "").trim();
   const background = String(body.background || "").trim();
   const personality = String(body.personality || "").trim();
-  
+  const rejoinPlayerId = String(body.rejoinPlayerId || "").trim();
+
   serverLog("API join", `Player '${name}' requesting to join campaign code/id '${code}' | Character: '${characterName}'`);
   
   const campaigns = await listCampaigns();
@@ -43,8 +44,27 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "The campaign is currently starting. Please wait until the opening scenario is ready." }, { status: 400 });
     }
 
-    let player = campaign.players.find((item) => item.name.toLowerCase() === name.toLowerCase());
+    // The lobby reconnect picker sends an explicit playerId (tapped from the
+    // "who's disconnected" list) instead of name-matching. Validate it can
+    // only claim a seat that's genuinely still disconnected — prevents one
+    // device from hijacking a seat another device already reconnected as.
+    if (rejoinPlayerId) {
+      const target = campaign.players.find((item) => item.id === rejoinPlayerId);
+      if (!target) {
+        serverLog("API join", `Rejoin rejected: seat '${rejoinPlayerId}' no longer exists.`);
+        return NextResponse.json({ error: "That seat no longer exists — pick another or start fresh." }, { status: 404 });
+      }
+      if (target.away !== true) {
+        serverLog("API join", `Rejoin rejected: seat '${rejoinPlayerId}' already reconnected elsewhere.`);
+        return NextResponse.json({ error: "That seat already reconnected on another device — pick someone else or start fresh." }, { status: 409 });
+      }
+    }
+
+    let player = rejoinPlayerId
+      ? campaign.players.find((item) => item.id === rejoinPlayerId)
+      : campaign.players.find((item) => item.name.toLowerCase() === name.toLowerCase());
     const isNewPlayer = !player;
+    let previousAwaySince: number | undefined;
     if (!player) {
       player = { 
         id: createId("player"), 
@@ -68,11 +88,22 @@ export async function POST(request: Request) {
       campaign.players.push(player);
     } else {
       if (characterName) player.characterName = characterName;
-      if (background) player.background = background;
-      if (personality) player.personality = personality;
+      // Deliberately NOT writing background/personality here: rejoin never
+      // re-runs runProfileGeneration, so these form fields are always the raw,
+      // unexpanded draft — applying them would regress an already-polished
+      // profile back to unexpanded text (the character sheet reads this same
+      // field). The rejoin weave below is told to reuse the existing profile.
+      if (background || personality) {
+        serverLog("API join", `Rejoin for '${name}' submitted background/personality edits — ignored to protect the expanded profile.`);
+      }
+      // Snapshot before clearing — the rejoin weave below needs this to size
+      // its "how long were they gone" briefing, but it must be cleared here so
+      // a later presence sweep doesn't think they're still absent.
+      previousAwaySince = player.awaySince;
       // An explicit rejoin ends the absence: the rejoin turn below weaves them
       // back in, so the presence sweep must not re-run a return weave later.
       player.away = false;
+      player.awaySince = undefined;
       player.wovenOut = false;
     }
 
@@ -221,11 +252,16 @@ export async function POST(request: Request) {
       return NextResponse.json({ campaignId: campaign.id, player, isPartyLeader: campaign.partyLeaderId === player.id });
     } else {
       if (campaign.status === "active") {
+        // Snapshot with awaySince restored — the live player object already
+        // had it cleared above so a presence sweep won't re-flag them absent.
+        const absenceBriefing = buildAbsenceBriefing(campaign, { ...player, awaySince: previousAwaySince });
+        serverLog("API join", `Rejoin briefing for ${player.name}: ${absenceBriefing.join(" | ")}`);
         const rejoinMessage = [
           `Player ${player.characterName || player.name} has rejoined the game after being disconnected!`,
           campaign.campaignType === "dnd"
             ? `Campaign type: Dungeons & Dragons (${campaign.rulesMode === "full" ? "full 5e rules" : "rules-light D&D"}).`
             : `Campaign type: standard tabletop RPG, not D&D. Preserve the current genre and do not add fantasy/D&D assumptions unless already present.`,
+          ...absenceBriefing,
           `Do these steps in order:`,
           `1. Briefly weave their return into the current scene.`,
           `2. Set their status to Active or Ready.`,

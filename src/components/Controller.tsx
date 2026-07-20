@@ -274,6 +274,7 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
       <div className="controller screen lobby-wait">
         <CosmosCanvas drama={0.5} accent={me.color ? color : undefined} />
         <div className="portal-veil" />
+        {!hostActive ? <div className="net-banner host-down">Waiting for the screen to reconnect…</div> : null}
         <div className="wait-center">
           <div className="wait-portrait" style={{ borderColor: color }}>
             {me.portraitUrl ? (

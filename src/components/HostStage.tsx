@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
+  AmbienceAcoustic,
   AmbienceMood,
+  AmbienceSound,
   Campaign,
   CampaignEnding,
   DiceOutcome,
@@ -10,12 +12,14 @@ import type {
   EndingKind,
   EndingStat,
   Player,
+  SfxCue,
   StageEffectKind,
   StoryCharacter
 } from "@/lib/campaign/types";
 import { api, accentColor } from "@/lib/client/api";
 import { bgmDuck, bgmIsMuted, bgmSetContext, bgmSetTheme, subscribeBgm, type BgmContext } from "@/lib/client/audio";
-import { playSfx, type SfxName } from "@/lib/client/sfx";
+import { ambienceSetScene, ambienceStop } from "@/lib/client/ambience";
+import { playSfx } from "@/lib/client/sfx";
 import { parseInline, plainText, renderInline, renderTokens } from "@/lib/client/markup";
 import { ACCENT_THEMES, applyAccent, currentAccent, initAccent } from "@/lib/client/theme";
 import StageAtmosphere, { AtmosphereHandle } from "@/components/three/StageAtmosphere";
@@ -62,7 +66,19 @@ const DEBUG_OUTCOMES: DiceOutcome[] = [
   "critical-failure"
 ];
 const DEBUG_ENDINGS: EndingKind[] = ["victory", "defeat", "bittersweet", "escape", "draw", "cliffhanger"];
-const DEBUG_SFX: SfxName[] = ["tap", "confirm", "send", "join", "beat", "flash", "rumble", "darkness", "heartbeat"];
+const DEBUG_SFX: SfxCue[] = [
+  "beat", "heartbeat", "rumble", "flash", "darkness", "door-creak", "door-open", "door-close", "knock",
+  "airlock-open", "airlock-close", "code-beep", "code-success", "code-denied", "alarm", "siren", "radio-static",
+  "power-up", "power-down", "explosion", "gunshot", "laser", "impact", "debris", "glass-break", "sword", "arrow",
+  "shield", "footsteps", "horse", "thunder", "fire-burst", "splash", "wind-gust", "magic", "portal", "spell-fail",
+  "creature-roar", "whisper", "trap", "lock-click", "coin", "item-pickup", "heal"
+];
+const DEBUG_AMBIENCE: AmbienceSound[] = [
+  "none", "storm", "rain", "wind", "snow", "ocean", "water", "forest", "swamp", "desert", "insects", "birds",
+  "cave", "dungeon", "tavern", "village", "castle", "city", "traffic", "crowd", "office", "industrial", "machinery",
+  "electrical", "ventilation", "laboratory", "spaceship", "western-town", "wasteland", "battlefield", "fire", "supernatural"
+];
+const DEBUG_ACOUSTICS: AmbienceAcoustic[] = ["outdoors", "indoors", "small-room", "large-hall", "cave", "distant", "muffled", "underwater"];
 const DEBUG_BEATS = ["narration", "dialogue", "playerAction", "system"] as const;
 type DebugScene = "cosmos" | "loom" | "forge-lobby";
 
@@ -186,7 +202,10 @@ function splitLongContent(content: string): string[] {
   let buf = "";
   for (const piece of pieces) {
     const candidate = buf ? `${buf} ${piece}` : piece;
-    if (candidate.length >= BEAT_SPLIT_TARGET && marksBalanced(candidate)) {
+    if (candidate.length > BEAT_SPLIT_MAX && buf && marksBalanced(buf)) {
+      chunks.push(buf);
+      buf = piece;
+    } else if (candidate.length >= BEAT_SPLIT_TARGET && marksBalanced(candidate)) {
       chunks.push(candidate);
       buf = "";
     } else {
@@ -302,8 +321,10 @@ export default function HostStage({
       );
       if (recap) {
         beatFxFiredRef.current.add(recap.id); // don't replay its linked effect
-        setCurrentBeat(recap);
-        setShownChars(plainText(parseInline(recap.content || "")).length);
+        const [firstRecapBeat, ...remainingRecapBeats] = expandBeat(recap);
+        setCurrentBeat(firstRecapBeat);
+        queueRef.current.push(...remainingRecapBeats);
+        setShownChars(plainText(parseInline(firstRecapBeat.content || "")).length);
       }
       return;
     }
@@ -462,15 +483,18 @@ export default function HostStage({
   // Fire a single stage effect (with its repeat/delay envelope). Shared by the
   // turn-level effects queue (campaign.effects) and beat-linked effects that
   // fire the instant their story beat performs.
-  const fireEffect = useCallback((kind: StageEffectKind, strength = 0.6, repeat?: number, delayMs?: number) => {
-    const times = Math.max(1, Math.min(8, Number(repeat) || 1));
-    const gap = Math.max(0, Math.min(5000, Number(delayMs) || 0));
+  const fireEffect = useCallback((kind: StageEffectKind | undefined, strength = 0.6, repeat?: number, delayMs?: number, cues?: SfxCue[]) => {
+    const times = Math.max(1, Math.min(12, Number(repeat) || 1));
+    const gap = Math.max(0, Math.min(10000, Number(delayMs) || 0));
     const fire = () => {
+      for (const cue of cues || []) playSfx(cue, strength);
+      if (!kind) return;
+      const useDefaultSound = !cues?.length;
       switch (kind) {
-        case "shake": setShakeKey((k) => k + 1); playSfx("rumble", strength); break;
-        case "flash": setFlashKey((k) => k + 1); playSfx("flash", strength); break;
-        case "darkness": setDarkUntil(Date.now() + 4500); playSfx("darkness"); break;
-        case "heartbeat": setPulseUntil(Date.now() + 5200); playSfx("heartbeat"); break;
+        case "shake": setShakeKey((k) => k + 1); if (useDefaultSound) playSfx("rumble", strength); break;
+        case "flash": setFlashKey((k) => k + 1); if (useDefaultSound) playSfx("flash", strength); break;
+        case "darkness": setDarkUntil(Date.now() + 4500); if (useDefaultSound) playSfx("darkness"); break;
+        case "heartbeat": setPulseUntil(Date.now() + 5200); if (useDefaultSound) playSfx("heartbeat"); break;
         default: atmosphereRef.current?.burst(kind, strength);
       }
     };
@@ -490,7 +514,7 @@ export default function HostStage({
     for (const fx of effects) {
       if (seen.has(fx.id)) continue;
       seen.add(fx.id);
-      fireEffect(fx.kind, fx.strength, fx.repeat, fx.delayMs);
+      fireEffect(fx.kind, fx.strength, fx.repeat, fx.delayMs, fx.cues);
     }
   }, [campaign.effects, fireEffect]);
 
@@ -623,6 +647,10 @@ export default function HostStage({
       case "heartbeat": setPulseUntil(Date.now() + 5200); playSfx("heartbeat"); break;
       default: atmosphereRef.current?.burst(kind, 0.85);
     }
+  };
+
+  const previewAmbience = (sound: AmbienceSound, acoustics: AmbienceAcoustic[] = []) => {
+    ambienceSetScene(`Gallery preview: ${sound}`, { sounds: [sound], acoustics });
   };
 
   const previewDice = (outcome: DiceOutcome, isNpc = false) => {
@@ -1135,6 +1163,29 @@ export default function HostStage({
           <label className="director-label">SFX cues</label>
           <div className="debug-grid">
             {DEBUG_SFX.map((cue) => <button key={cue} className="chip-toggle tiny" onClick={() => playSfx(cue)}>{cue}</button>)}
+          </div>
+
+          <label className="director-label">Combined effect presets</label>
+          <div className="debug-grid">
+            <button className="chip-toggle tiny" onClick={() => fireEffect("shake", 0.9, 1, 0, ["explosion", "debris"])}>explosion + debris</button>
+            <button className="chip-toggle tiny" onClick={() => fireEffect("flash", 0.8, 3, 180, ["gunshot"])}>rapid gunfire</button>
+            <button className="chip-toggle tiny" onClick={() => fireEffect("darkness", 0.8, 4, 850, ["heartbeat"])}>slow heartbeat</button>
+            <button className="chip-toggle tiny" onClick={() => fireEffect(undefined, 0.75, 3, 600, ["knock"])}>three knocks</button>
+            <button className="chip-toggle tiny" onClick={() => fireEffect("flash", 0.85, 1, 0, ["magic", "portal"])}>magic portal</button>
+            <button className="chip-toggle tiny" onClick={() => fireEffect("shake", 0.8, 1, 0, ["airlock-open", "alarm"])}>airlock alarm</button>
+          </div>
+
+          <label className="director-label">Environmental beds</label>
+          <div className="debug-grid">
+            {DEBUG_AMBIENCE.map((sound) => <button key={sound} className="chip-toggle tiny" onClick={() => previewAmbience(sound)}>{sound}</button>)}
+          </div>
+
+          <label className="director-label">Acoustic previews</label>
+          <div className="debug-grid">
+            {DEBUG_ACOUSTICS.map((acoustic) => <button key={acoustic} className="chip-toggle tiny" onClick={() => previewAmbience("water", [acoustic])}>{acoustic}</button>)}
+            <button className="chip-toggle tiny" onClick={() => previewAmbience("water", ["cave", "distant"])}>distant cave water</button>
+            <button className="chip-toggle tiny" onClick={() => previewAmbience("machinery", ["underwater", "muffled"])}>submerged machinery</button>
+            <button className="chip-toggle tiny" onClick={() => ambienceStop()}>stop world</button>
           </div>
 
           <label className="director-label">Dice outcomes</label>

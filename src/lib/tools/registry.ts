@@ -1,10 +1,10 @@
-﻿import { getCampaign, readCampaignTextFile, saveCampaign, writeCampaignTextFile, downloadAndSaveImage, logCampaignDebug, safePushDisplayEvent, isValidImageUrl, pushStageEffect, endCampaign, ensureLocations, getFocusedLocation, applyFocus } from "@/lib/campaign/store";
+﻿import { getCampaign, readCampaignTextFile, saveCampaign, writeCampaignTextFile, downloadAndSaveImage, logCampaignDebug, safePushDisplayEvent, isValidImageUrl, pushStageSfx, endCampaign, ensureLocations, getFocusedLocation, applyFocus } from "@/lib/campaign/store";
 import { createId } from "@/lib/utils/ids";
 import { generateImage } from "@/lib/aqua/images";
 import { getCurrentDate } from "./date";
 import { rollD20Mode, rollDice, judgeD20Outcome, difficultyDcBias, clampD20Dc } from "./dice";
 import type { AquaToolDefinition } from "@/lib/aqua/client";
-import { AmbienceMood, PlayerStat, StageEffectKind, StoryCharacter } from "@/lib/campaign/types";
+import { AmbienceAcoustic, AmbienceMood, AmbienceSound, PlayerStat, SfxCue, StageEffectKind, StoryCharacter } from "@/lib/campaign/types";
 import type { Location as CampaignLocation } from "@/lib/campaign/types";
 import { MUSIC_THEMES, MusicTheme } from "@/lib/campaign/musicTheme";
 import { startCombat, endCombat, syncFocusedMirror } from "@/lib/campaign/turns";
@@ -219,14 +219,16 @@ export const toolDefinitions: AquaToolDefinition[] = [
     type: "function",
     function: {
       name: "set_ambience",
-      description: "Set the TV's living atmosphere: particle weather, color grade, fog, and music bias. Call this when the emotional register of the scene changes (entering combat, uncovering a mystery, victory, grief, safety). Use sparingly - once per meaningful shift, not every turn.",
+      description: "Set the TV's living atmosphere: mood, music bias, long environmental sound beds, and their acoustic space. Call on a meaningful mood OR location shift. sounds describes WHAT is audible; acoustics describes HOW it is heard (for example water+cave, traffic+indoors+distant, battlefield+muffled).",
       parameters: {
         type: "object",
         required: ["mood"],
         properties: {
           mood: { type: "string", enum: ["calm", "tense", "adrenaline", "battle", "boss", "mystery", "dread", "triumph", "wonder", "somber", "outro"], description: "Emotional register of the current scene. 'battle' = ordinary combat encounters; 'boss' = climactic showdowns against a major villain or endgame threat; 'adrenaline' = high-energy excitement that is NOT combat (chases, escapes, heists, races against time). Use 'outro' only when ending the campaign (end_campaign also sets it)." },
           intensity: { type: "number", description: "0.0 to 1.0 - how hard the TV leans into the mood. Default 0.6." },
-          note: { type: "string", description: "Optional short sensory flavor, e.g. 'rain hammers the tin roof'. May be shown faintly on the TV." }
+          note: { type: "string", description: "Optional short sensory flavor, e.g. 'rain hammers the tin roof'. May be shown faintly on the TV." },
+          sounds: { type: "array", maxItems: 2, items: { type: "string", enum: ["none", "storm", "rain", "wind", "snow", "ocean", "water", "forest", "swamp", "desert", "insects", "birds", "cave", "dungeon", "tavern", "village", "castle", "city", "traffic", "crowd", "office", "industrial", "machinery", "electrical", "ventilation", "laboratory", "spaceship", "western-town", "wasteland", "battlefield", "fire", "supernatural"] }, description: "Up to two long environmental beds that are actually audible. Use [\"none\"] for intentional silence. Omit to let the TV infer them from scene text." },
+          acoustics: { type: "array", maxItems: 2, items: { type: "string", enum: ["outdoors", "indoors", "small-room", "large-hall", "cave", "distant", "muffled", "underwater"] }, description: "Up to two acoustic modifiers. Space modifiers add room character; distance/material modifiers filter the sound." }
         }
       }
     }
@@ -249,15 +251,16 @@ export const toolDefinitions: AquaToolDefinition[] = [
     type: "function",
     function: {
       name: "trigger_effect",
-      description: "Fire a cinematic effect on the TV IMMEDIATELY (at the start of the turn), for a dramatic beat: an explosion (shake+flash), a spell discharge (flash/embers), creeping dread (darkness/heartbeat), weather (rain/snow/fog). Use for punctuation on big moments; repeat for multi-hit impacts. To instead make an effect land ON a specific line as it plays, don't use this — attach an `effect` to that story beat in narrate_turn.",
+      description: "Fire a combined cinematic effect on the TV immediately: one or more simultaneous sound cues, optionally paired with a synchronized visual enhancement. Missing cue files safely play nothing. Layer cues for moments such as explosion+debris or airlock-open+alarm. Use repeat and delayMs for heartbeats, knocks, alarms, footsteps, or gunfire. For a visual that must land on a specific spoken line, attach an effect to that narrate_turn story beat instead.",
       parameters: {
         type: "object",
-        required: ["kind"],
+        required: ["cues"],
         properties: {
-          kind: { type: "string", enum: ["shake", "flash", "embers", "fog", "rain", "snow", "darkness", "heartbeat"] },
+          cues: { type: "array", minItems: 1, maxItems: 4, items: { type: "string", enum: ["beat", "heartbeat", "rumble", "flash", "darkness", "door-creak", "door-open", "door-close", "knock", "airlock-open", "airlock-close", "code-beep", "code-success", "code-denied", "alarm", "siren", "radio-static", "power-up", "power-down", "explosion", "gunshot", "laser", "impact", "debris", "glass-break", "sword", "arrow", "shield", "footsteps", "horse", "thunder", "fire-burst", "splash", "wind-gust", "magic", "portal", "spell-fail", "creature-roar", "whisper", "trap", "lock-click", "coin", "item-pickup", "heal"] }, description: "One to four sounds fired together on each repeat." },
+          visual: { type: "string", enum: ["none", "shake", "flash", "embers", "fog", "rain", "snow", "darkness", "heartbeat"], description: "Optional synchronized screen enhancement. Default none." },
           strength: { type: "number", description: "0.0 to 1.0 impact strength. Default 0.6." },
-          repeat: { type: "number", description: "How many times to fire (1-8). Default 1. Use 2-3 for multi-hit impacts." },
-          delayMs: { type: "number", description: "Delay in ms between repeats (0-5000). Default 0." }
+          repeat: { type: "number", description: "How many times to fire (1-12). Default 1." },
+          delayMs: { type: "number", description: "Delay in ms between repeats (0-10000). Fast heartbeat about 320; slow heartbeat about 850; knocks about 600." }
         }
       }
     }
@@ -701,15 +704,25 @@ export async function runTool(campaignId: string, name: string, args: Record<str
       }
       const mood = rawMood as AmbienceMood;
       const rawIntensity = Number(args.intensity ?? 0.6);
+      const validSounds: AmbienceSound[] = ["none", "storm", "rain", "wind", "snow", "ocean", "water", "forest", "swamp", "desert", "insects", "birds", "cave", "dungeon", "tavern", "village", "castle", "city", "traffic", "crowd", "office", "industrial", "machinery", "electrical", "ventilation", "laboratory", "spaceship", "western-town", "wasteland", "battlefield", "fire", "supernatural"];
+      const validAcoustics: AmbienceAcoustic[] = ["outdoors", "indoors", "small-room", "large-hall", "cave", "distant", "muffled", "underwater"];
+      const sounds = Array.isArray(args.sounds)
+        ? args.sounds.map(String).filter((sound): sound is AmbienceSound => validSounds.includes(sound as AmbienceSound)).slice(0, 2)
+        : undefined;
+      const acoustics = Array.isArray(args.acoustics)
+        ? args.acoustics.map(String).filter((acoustic): acoustic is AmbienceAcoustic => validAcoustics.includes(acoustic as AmbienceAcoustic)).slice(0, 2)
+        : undefined;
       const campaign = await getCampaign(campaignId);
       campaign.ambience = {
         mood,
         intensity: Number.isFinite(rawIntensity) ? Math.max(0, Math.min(1, rawIntensity)) : 0.6,
         note: typeof args.note === "string" && args.note.trim() ? args.note.trim() : undefined,
+        sounds: sounds?.length ? sounds : undefined,
+        acoustics: acoustics?.length ? acoustics : undefined,
         updatedAt: new Date().toISOString()
       };
       await saveCampaign(campaign);
-      return { ok: true, mood, intensity: campaign.ambience.intensity };
+      return { ok: true, mood, intensity: campaign.ambience.intensity, sounds, acoustics };
     }
 
     if (name === "set_theme") {
@@ -722,24 +735,29 @@ export async function runTool(campaignId: string, name: string, args: Record<str
     }
 
     if (name === "trigger_effect") {
-      const kinds: StageEffectKind[] = ["shake", "flash", "embers", "fog", "rain", "snow", "darkness", "heartbeat"];
-      // Same honesty as set_ambience: an unknown kind used to silently fire
-      // "embers" — surface it so the model can correct itself.
-      const rawKind = String(args.kind || "").trim().toLowerCase();
-      if (!kinds.includes(rawKind as StageEffectKind)) {
-        return { error: `Unknown effect kind '${String(args.kind)}'. Pick one of: ${kinds.join(", ")}.` };
+      const validCues: SfxCue[] = ["beat", "heartbeat", "rumble", "flash", "darkness", "door-creak", "door-open", "door-close", "knock", "airlock-open", "airlock-close", "code-beep", "code-success", "code-denied", "alarm", "siren", "radio-static", "power-up", "power-down", "explosion", "gunshot", "laser", "impact", "debris", "glass-break", "sword", "arrow", "shield", "footsteps", "horse", "thunder", "fire-burst", "splash", "wind-gust", "magic", "portal", "spell-fail", "creature-roar", "whisper", "trap", "lock-click", "coin", "item-pickup", "heal"];
+      const visualKinds: StageEffectKind[] = ["shake", "flash", "embers", "fog", "rain", "snow", "darkness", "heartbeat"];
+      const cues = Array.isArray(args.cues)
+        ? args.cues.map(String).filter((cue): cue is SfxCue => validCues.includes(cue as SfxCue)).slice(0, 4)
+        : [];
+      if (!cues.length) return { error: `Choose at least one valid cue: ${validCues.join(", ")}.` };
+      const rawVisual = String(args.visual || "none").trim().toLowerCase();
+      if (rawVisual !== "none" && !visualKinds.includes(rawVisual as StageEffectKind)) {
+        return { error: `Unknown visual '${String(args.visual)}'. Pick one of: none, ${visualKinds.join(", ")}.` };
       }
-      const kind = rawKind as StageEffectKind;
+      const visual = rawVisual === "none" ? undefined : rawVisual as StageEffectKind;
       const rawStrength = Number(args.strength ?? 0.6);
       const rawRepeat = Number(args.repeat ?? 1);
       const rawDelay = Number(args.delayMs ?? 0);
       const campaign = await getCampaign(campaignId);
-      pushStageEffect(campaign, kind, Number.isFinite(rawStrength) ? rawStrength : 0.6, {
+      pushStageSfx(campaign, cues, {
+        visual,
+        strength: Number.isFinite(rawStrength) ? rawStrength : 0.6,
         repeat: Number.isFinite(rawRepeat) ? rawRepeat : 1,
         delayMs: Number.isFinite(rawDelay) ? rawDelay : 0
       });
       await saveCampaign(campaign);
-      return { ok: true, kind, repeat: Math.max(1, Math.round(rawRepeat) || 1) };
+      return { ok: true, cues, visual: visual || "none", repeat: Math.max(1, Math.round(rawRepeat) || 1) };
     }
 
     if (name === "end_campaign") {

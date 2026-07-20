@@ -10,6 +10,13 @@ import {
   subscribeBgm
 } from "@/lib/client/audio";
 import { sfxGetVolume, sfxSetVolume } from "@/lib/client/sfx";
+import {
+  ambienceGetVolume,
+  ambienceResume,
+  ambienceSetMuted,
+  ambienceSetVolume,
+  subscribeAmbience
+} from "@/lib/client/ambience";
 
 /**
  * The bard's little control tag: a speaker chip pinned to the corner of every
@@ -25,6 +32,9 @@ export default function MusicWidget() {
   const [track, setTrack] = useState<string | null>(null);
   const [musicVol, setMusicVol] = useState(() => bgmGetVolume());
   const [sfxVol, setSfxVol] = useState(() => sfxGetVolume());
+  const [ambienceVol, setAmbienceVol] = useState(() => ambienceGetVolume());
+  const [ambienceCategories, setAmbienceCategories] = useState<string[]>([]);
+  const [ambienceAcoustics, setAmbienceAcoustics] = useState<string[]>([]);
 
   useEffect(
     () =>
@@ -38,6 +48,16 @@ export default function MusicWidget() {
     []
   );
 
+  useEffect(
+    () =>
+      subscribeAmbience((state) => {
+        setAmbienceVol(state.volume);
+        setAmbienceCategories(state.categories);
+        setAmbienceAcoustics(state.acoustics);
+      }),
+    []
+  );
+
   // Keep local state in sync if muting was flipped elsewhere on mount.
   useEffect(() => {
     setMuted(bgmIsMuted());
@@ -47,6 +67,7 @@ export default function MusicWidget() {
     const next = !muted;
     setMuted(next);
     bgmSetMuted(next);
+    ambienceSetMuted(next);
   };
 
   const onMusicVol = (value: number) => {
@@ -61,6 +82,16 @@ export default function MusicWidget() {
   const onSfxVol = (value: number) => {
     setSfxVol(value);
     sfxSetVolume(value);
+  };
+
+  const onAmbienceVol = (value: number) => {
+    setAmbienceVol(value);
+    ambienceSetVolume(value);
+    if (muted && value > 0) {
+      setMuted(false);
+      bgmSetMuted(false);
+      ambienceSetMuted(false);
+    }
   };
 
   // A little glyph that reflects the audible state at a glance.
@@ -84,6 +115,7 @@ export default function MusicWidget() {
               onClick={() => {
                 setBlocked(false);
                 bgmResume();
+                ambienceResume();
               }}
             >
               ♪ Tap to enable sound
@@ -122,12 +154,31 @@ export default function MusicWidget() {
             <span className="music-pct">{Math.round(sfxVol * 100)}</span>
           </label>
 
+          <label className="music-slider">
+            <span>World</span>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.01}
+              value={muted ? 0 : ambienceVol}
+              onChange={(e) => onAmbienceVol(parseFloat(e.target.value))}
+            />
+            <span className="music-pct">{Math.round((muted ? 0 : ambienceVol) * 100)}</span>
+          </label>
+
           <div className="music-now">
             <span className="music-now-label">Now playing</span>
             {shelf || track ? (
               <>
                 <span className="music-shelf">{shelf || "—"}</span>
                 <span className="music-track">{track || "(silence)"}</span>
+                {ambienceCategories.length ? (
+                  <span className="music-track">World: {ambienceCategories.join(" + ")}</span>
+                ) : null}
+                {ambienceAcoustics.length ? (
+                  <span className="music-track">Space: {ambienceAcoustics.join(" + ")}</span>
+                ) : null}
               </>
             ) : (
               <span className="music-track">(nothing yet)</span>

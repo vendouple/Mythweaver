@@ -1377,8 +1377,8 @@ button:disabled { cursor: default; opacity: 0.45; }
 
 /* --------------------------------------------------------------------------
    Music widget — a speaker chip pinned bottom-left of every host screen that
-   expands into a panel: mute, music/SFX volume, and a "now playing" readout
-   for checking the score against the campaign theme.
+  expands into a panel: mute, music/SFX/world volume, and a "now playing"
+  readout for checking the score and environmental beds.
    -------------------------------------------------------------------------- */
 .music-widget {
   position: fixed;
@@ -1485,7 +1485,7 @@ button:disabled { cursor: default; opacity: 0.45; }
 
 .music-slider {
   display: grid;
-  grid-template-columns: 2.4rem 1fr 1.8rem;
+  grid-template-columns: 3rem 1fr 1.8rem;
   align-items: center;
   gap: 0.5rem;
   font-size: 0.72rem;

@@ -1,14 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, useCampaignPoll, Campaign } from "@/lib/client/api";
+import { api, useCampaignPoll, getTvToken, Campaign } from "@/lib/client/api";
 import { bgmSetContext, bgmSetTheme, bgmStop } from "@/lib/client/audio";
+import { ambienceSetScene, ambienceStop } from "@/lib/client/ambience";
 import { useWeaveProgress } from "@/lib/client/weaveProgress";
 import HostLobby from "@/components/HostLobby";
 import HostStage from "@/components/HostStage";
 import Weaving from "@/components/Weaving";
 import StoryPause, { StoryPauseKind } from "@/components/StoryPause";
 import MusicWidget from "@/components/MusicWidget";
+import HostTakeoverPrompt from "@/components/HostTakeoverPrompt";
 import CosmosCanvas from "@/components/three/CosmosCanvas";
 
 /** How long the forged world holds on screen once its bar has genuinely
@@ -42,7 +44,38 @@ function derivePause(campaign: Campaign, storyStarted: boolean): PauseInfo | nul
  * screen between the Gathering, the Weaving, and the living Stage.
  */
 export default function HostExperience({ campaignId, onExit }: { campaignId: string; onExit: () => void }) {
-  const { campaign, lost } = useCampaignPoll(campaignId, true);
+  // Per-tab identity for the "single active TV" handshake — only one TV token
+  // is ever live per campaign at a time; opening a second one prompts a
+  // takeover instead of silently doubling audio/pacing.
+  const tvToken = useMemo(() => getTvToken(), []);
+  const { campaign, lost, liveHost } = useCampaignPoll(campaignId, true, undefined, tvToken);
+
+  // "checking" until the first successful poll (matches the loading branch
+  // below); never resolves off `lost`/reconnecting hiccups, so a network blip
+  // can't misfire the conflict/deposed prompt. `everLiveRef` distinguishes a
+  // brand-new tab losing the initial race ("conflict") from a tab that WAS
+  // live and just got superseded ("deposed") — purely a copy/messaging choice,
+  // both behave identically otherwise.
+  const everLiveRef = useRef(false);
+  useEffect(() => {
+    // Gate on `campaign` too: liveHost's initial useState(true) default (an
+    // "unknown yet" placeholder, not a real signal) must never count as
+    // having-been-live before the first actual poll resolves — otherwise a
+    // brand-new tab that loses the race would misreport as "deposed" instead
+    // of "conflict".
+    if (campaign && liveHost) everLiveRef.current = true;
+  }, [campaign, liveHost]);
+  const sessionState: "checking" | "live" | "conflict" | "deposed" = !campaign
+    ? "checking"
+    : liveHost
+      ? "live"
+      : everLiveRef.current
+        ? "deposed"
+        : "conflict";
+
+  const takeover = () => {
+    api.party({ campaignId, action: "claimHost", hostToken: tvToken }).catch(() => {});
+  };
 
   const storyStarted = useMemo(
     () => !!campaign?.displayEvents.some((event) => event.type === "narration" || event.type === "dialogue"),
@@ -62,16 +95,53 @@ export default function HostExperience({ campaignId, onExit }: { campaignId: str
   // fantasy even before the classifier has run.
   const musicTheme = campaign?.musicTheme || (campaign?.campaignType === "dnd" ? "fantasy" : null);
   useEffect(() => {
+    if (sessionState !== "live") return;
     bgmSetTheme(musicTheme);
-  }, [musicTheme]);
+  }, [musicTheme, sessionState]);
   useEffect(() => {
+    if (sessionState !== "live") return;
     if (!status) return;
     if (status === "lobby") bgmSetContext("lobby");
     else if (status === "completed") bgmSetContext(endingKind ? `outro-${endingKind}` : "outro");
     else if (!storyStarted) bgmSetContext("weaving");
     else bgmSetContext(mood || "calm");
-  }, [status, storyStarted, mood, endingKind]);
+  }, [status, storyStarted, mood, endingKind, sessionState]);
   useEffect(() => () => bgmStop(), []);
+  useEffect(() => () => ambienceStop(), []);
+  // Only the live TV owns audio: a conflict/deposed screen must fall silent
+  // immediately rather than waiting for a full unmount (switching JSX branches
+  // within the same mount does NOT stop audio.ts's module-level singleton on
+  // its own — only this explicit call, or the unmount cleanup above, does).
+  useEffect(() => {
+    if (sessionState !== "live") bgmStop();
+  }, [sessionState]);
+
+  // Environmental beds are a separate lane from the score: scene language
+  // chooses reusable loops such as rain, forest, tavern, machinery, cave, or
+  // spaceship. Only active story play owns this lane; lobby/weaving stay quiet.
+  useEffect(() => {
+    if (sessionState !== "live" || !campaign || campaign.status !== "active" || !storyStarted) {
+      ambienceStop();
+      return;
+    }
+    const focusedLocation = campaign.locations?.find((location) => location.id === campaign.focusedLocationId);
+    const recentStory = campaign.displayEvents
+      .filter((event) => event.type === "narration" || event.type === "dialogue")
+      .slice(-2)
+      .map((event) => event.content)
+      .join(" ");
+    ambienceSetScene([
+      campaign.currentScene,
+      campaign.backdropScene,
+      focusedLocation?.name,
+      focusedLocation?.description,
+      campaign.ambience?.note,
+      recentStory
+    ].filter(Boolean).join(" "), {
+      sounds: campaign.ambience?.sounds,
+      acoustics: campaign.ambience?.acoustics
+    });
+  }, [campaign, sessionState, storyStarted]);
 
   // Turn deadline backstop (#1/#2): the TV is always present, so it nudges the
   // server when a round/turn stalls — resolving an exploration round with
@@ -79,6 +149,7 @@ export default function HostExperience({ campaignId, onExit }: { campaignId: str
   // per deadline; the server re-checks `auto` so eager clients don't race.
   const backstopRef = useRef<string | null>(null);
   useEffect(() => {
+    if (sessionState !== "live") return;
     if (!campaign || campaign.status !== "active" || campaign.dmStatus) return;
     const ts = campaign.turnState;
     if (!ts?.deadlineAt) return;
@@ -93,7 +164,7 @@ export default function HostExperience({ campaignId, onExit }: { campaignId: str
     } else if (ts.mode === "combat") {
       api.party({ campaignId: campaign.id, action: "skipTurn", auto: true }).catch(() => {});
     }
-  }, [campaign]);
+  }, [campaign, sessionState]);
 
   // Presence backstop: only the TV polls unconditionally, so it periodically
   // asks the server to reconcile who's still connected — flipping timed-out
@@ -101,12 +172,13 @@ export default function HostExperience({ campaignId, onExit }: { campaignId: str
   // into the story as a background DM turn.
   const sweepRef = useRef(0);
   useEffect(() => {
+    if (sessionState !== "live") return;
     if (!campaign || campaign.status !== "active" || !storyStarted) return;
     const now = Date.now();
     if (now - sweepRef.current < 12000) return;
     sweepRef.current = now;
     api.party({ campaignId: campaign.id, action: "sweepPresence" }).catch(() => {});
-  }, [campaign, storyStarted]);
+  }, [campaign, storyStarted, sessionState]);
 
   // The Weaving's monotonic progress — phases ratchet, status changes nudge,
   // and the bar never regresses no matter how the raw dmPhase jumps around.
@@ -185,6 +257,12 @@ export default function HostExperience({ campaignId, onExit }: { campaignId: str
         </div>
       </div>
     );
+  }
+
+  // Not the live TV: don't mount HostLobby/Weaving/HostStage at all, so none
+  // of their audio/sfx/presenting side effects can run from this screen.
+  if (sessionState === "conflict" || sessionState === "deposed") {
+    return <HostTakeoverPrompt mode={sessionState} onTakeover={takeover} />;
   }
 
   if (campaign.status === "lobby") {

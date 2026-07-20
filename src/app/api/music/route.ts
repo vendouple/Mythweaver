@@ -25,7 +25,8 @@ async function listAudioFiles(dirPath: string): Promise<string[]> {
  * "<context>-<theme>" shelf, preferred when the campaign's theme matches).
  * Loose files directly in BGM/ are exposed under the "any" shelf (a
  * general-purpose pool). SFX overrides live in public/music/SFX/<cue>.mp3
- * (see src/lib/client/sfx.ts for cue names).
+ * (see src/lib/client/sfx.ts for cue names). Long environmental beds live in
+ * public/music/AMBIENCE/<category>/ and are exposed as separate loop layers.
  */
 export async function GET() {
   try {
@@ -67,9 +68,19 @@ export async function GET() {
 
     const sfx = (await listAudioFiles(path.join(musicRoot, "SFX"))).map((file) => `/music/SFX/${file}`);
 
-    return NextResponse.json({ tracks, byContext, sfx });
+    const ambience: Record<string, string[]> = {};
+    const ambienceRoot = path.join(musicRoot, "AMBIENCE");
+    const ambienceEntries = await readdir(ambienceRoot, { withFileTypes: true }).catch(() => []);
+    for (const entry of ambienceEntries) {
+      if (!entry.isDirectory()) continue;
+      const files = await listAudioFiles(path.join(ambienceRoot, entry.name));
+      if (!files.length) continue;
+      ambience[entry.name.toLowerCase()] = files.map((file) => `/music/AMBIENCE/${entry.name}/${file}`);
+    }
+
+    return NextResponse.json({ tracks, byContext, sfx, ambience });
   } catch (error) {
     console.error("Failed to list music files:", error);
-    return NextResponse.json({ tracks: [], byContext: {}, sfx: [] });
+    return NextResponse.json({ tracks: [], byContext: {}, sfx: [], ambience: {} });
   }
 }

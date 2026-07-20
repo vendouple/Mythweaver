@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { getCampaign, getCampaignLock, saveCampaign, safePushDisplayEvent, ensureLocations, getFocusedLocation, getPlayerLocation, reconcilePresence, playerLastSeen } from "@/lib/campaign/store";
-import { runDungeonMaster, repaintBackdrop, resolveExplorationRound, advanceCombatAndRunEnemies, rotateSpotlight, waitForDmIdle, serverLog, serverError } from "@/lib/aqua/chat";
+import { getCampaign, getCampaignLock, saveCampaign, safePushDisplayEvent, ensureLocations, getFocusedLocation, getPlayerLocation, reconcilePresence, playerLastSeen, DEPARTURE_WEAVE_GRACE_MS, claimHostSession } from "@/lib/campaign/store";
+import { runDungeonMaster, repaintBackdrop, resolveExplorationRound, advanceCombatAndRunEnemies, rotateSpotlight, waitForDmIdle, buildAbsenceBriefing, serverLog, serverError } from "@/lib/aqua/chat";
 import { turnMode, deadlinePassed, syncFocusedMirror, getActiveLocation, isPartySplit } from "@/lib/campaign/turns";
 
 export const dynamic = "force-dynamic";
@@ -157,6 +157,10 @@ export async function POST(request: Request) {
         const player = campaign.players.find((p) => p.id === pid);
         if (!player) return NextResponse.json({ campaign });
         player.away = true;
+        // Deliberate intent shouldn't wait out the accidental-disconnect
+        // grace: backdate so the departure weave's grace check is already
+        // satisfied and it narrates on the very next sweep, as before.
+        player.awaySince = Date.now() - DEPARTURE_WEAVE_GRACE_MS;
         safePushDisplayEvent(campaign, {
           type: "system",
           speaker: "SYSTEM",
@@ -287,16 +291,24 @@ export async function POST(request: Request) {
           return seen !== undefined && Date.now() - seen < 15000;
         };
         const returning = canWeave ? campaign.players.find((p) => !p.away && p.wovenOut && beating(p.id)) : undefined;
-        const departed = !returning && canWeave ? campaign.players.find((p) => p.away && !p.wovenOut) : undefined;
+        // Grace period: don't narrate a departure the instant `away` flips —
+        // give a real wifi blip (or a table resuming while phones reconnect)
+        // time to resolve first. Explicit "leave" backdates awaySince so a
+        // deliberate exit still narrates promptly (see the `leave` action).
+        const departed = !returning && canWeave
+          ? campaign.players.find((p) => p.away && !p.wovenOut && p.awaySince && Date.now() - p.awaySince >= DEPARTURE_WEAVE_GRACE_MS)
+          : undefined;
         if (returning) returning.wovenOut = false;
         if (departed) departed.wovenOut = true;
         if (presence.wentAway.length || presence.returned.length || returning || departed) {
           await saveCampaign(campaign);
         }
 
+        const absenceBriefing = returning ? buildAbsenceBriefing(campaign, returning) : [];
         const weaveMessage = returning
           ? [
               `Player ${returning.characterName || returning.name} has rejoined the game after being disconnected!`,
+              ...absenceBriefing,
               "Do these steps in order:",
               "1. Briefly weave their return into the current scene.",
               "2. Set their status to Active or Ready.",
@@ -314,6 +326,10 @@ export async function POST(request: Request) {
                 "4. Reuse the current background image."
               ].join("\n")
             : null;
+
+        if (returning) {
+          serverLog("API party", `Rejoin briefing for ${returning.name}: ${absenceBriefing.join(" | ")}`);
+        }
 
         if (weaveMessage) {
           const hero = (returning || departed)!;
@@ -349,6 +365,18 @@ export async function POST(request: Request) {
           })();
         }
         return NextResponse.json({ campaign });
+      }
+
+      if (action === "claimHost") {
+        // Explicit takeover, only reached after the user confirms the
+        // "Already open on another screen — Take over?" prompt. Unconditionally
+        // installs this token as the live TV session; the previously-live tab
+        // detects the swap on its own next poll and goes silent.
+        const token = String(body.hostToken || "").trim();
+        if (!token) return NextResponse.json({ error: "hostToken is required" }, { status: 400 });
+        claimHostSession(campaignId, token);
+        serverLog("API party", `TV claimed host session for campaign: ${campaignId}`);
+        return NextResponse.json({ ok: true });
       }
 
       if (action === "presenting") {

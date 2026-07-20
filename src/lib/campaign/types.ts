@@ -73,6 +73,10 @@ export type Player = {
   lastSeenAt?: number;
   /** True once the player explicitly left (or timed out and was woven out). */
   away?: boolean;
+  /** Epoch ms when `away` last flipped true. Cleared on return. Powers the
+   *  departure-weave grace window and the "how long were they gone" signal
+   *  for the reintegration prompt. */
+  awaySince?: number;
   /**
    * True once a departure DM turn has written this hero out of the scene
    * (disconnect timeout). Cleared when they rejoin, so the return weave runs
@@ -309,12 +313,36 @@ export type AmbienceMood =
   | "somber"
   | "outro";
 
+export type AmbienceSound =
+  | "none"
+  | "storm" | "rain" | "wind" | "snow" | "ocean" | "water"
+  | "forest" | "swamp" | "desert" | "insects" | "birds"
+  | "cave" | "dungeon" | "tavern" | "village" | "castle"
+  | "city" | "traffic" | "crowd" | "office" | "industrial"
+  | "machinery" | "electrical" | "ventilation" | "laboratory"
+  | "spaceship" | "western-town" | "wasteland" | "battlefield"
+  | "fire" | "supernatural";
+
+export type AmbienceAcoustic =
+  | "outdoors"
+  | "indoors"
+  | "small-room"
+  | "large-hall"
+  | "cave"
+  | "distant"
+  | "muffled"
+  | "underwater";
+
 export type Ambience = {
   mood: AmbienceMood;
   /** 0..1 — how strongly the TV leans into the mood (particles, grade, pulse). */
   intensity: number;
   /** Optional flavor note, e.g. "rain hammers the tin roof". */
   note?: string;
+  /** Optional long environmental beds selected by the DM. Empty/omitted = infer from scene text. */
+  sounds?: AmbienceSound[];
+  /** Acoustic treatment applied to the environmental beds. */
+  acoustics?: AmbienceAcoustic[];
   updatedAt: string;
 };
 
@@ -328,10 +356,24 @@ export type StageEffectKind =
   | "darkness"
   | "heartbeat";
 
+export type SfxCue =
+  | "beat" | "heartbeat" | "rumble" | "flash" | "darkness"
+  | "door-creak" | "door-open" | "door-close" | "knock"
+  | "airlock-open" | "airlock-close" | "code-beep" | "code-success" | "code-denied"
+  | "alarm" | "siren" | "radio-static" | "power-up" | "power-down"
+  | "explosion" | "gunshot" | "laser" | "impact" | "debris" | "glass-break"
+  | "sword" | "arrow" | "shield" | "footsteps" | "horse"
+  | "thunder" | "fire-burst" | "splash" | "wind-gust"
+  | "magic" | "portal" | "spell-fail" | "creature-roar" | "whisper"
+  | "trap" | "lock-click" | "coin" | "item-pickup" | "heal";
+
 /** Cinematic effect queued by the DM via trigger_effect. Supports repeats. */
 export type StageEffect = {
   id: string;
-  kind: StageEffectKind;
+  /** Optional linked visual. Omitted for sound-only events. */
+  kind?: StageEffectKind;
+  /** One or more simultaneous one-shot cues. Missing files simply stay silent. */
+  cues?: SfxCue[];
   /** 0..1 strength. */
   strength: number;
   /** How many times to fire (default 1). */
