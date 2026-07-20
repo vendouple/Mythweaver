@@ -389,12 +389,15 @@ export type StageEffect = {
  * not the moment it lands in state.
  */
 export type BeatEffect = {
-  kind: StageEffectKind;
+  /** Optional synchronized visual enhancement. */
+  visual?: StageEffectKind;
+  /** One or more sounds fired when this beat begins performing. */
+  cues?: SfxCue[];
   /** 0..1 strength. Default 0.6. */
   strength?: number;
-  /** How many times to fire (1-8). Default 1. */
+  /** How many times to fire (1-12). Default 1. */
   repeat?: number;
-  /** Delay in ms between repeats (0-5000). Default 0. */
+  /** Delay in ms between repeats (0-10000). Default 0. */
   delayMs?: number;
 };
 

@@ -660,21 +660,26 @@ function normalizeEffects(raw: unknown): StageEffect[] {
 
 /**
  * Validate a beat-linked effect (DisplayEvent.effect) from untrusted model
- * output. Returns undefined when the kind is missing/invalid so a bad payload
- * simply drops the effect rather than firing a random one.
+ * output. Returns undefined when both the visual and cues are missing/invalid
+ * so a bad payload simply drops the effect rather than firing a random one.
  */
 export function normalizeBeatEffect(raw: unknown): import("./types").BeatEffect | undefined {
   if (!raw || typeof raw !== "object") return undefined;
   const item = raw as Record<string, unknown>;
-  if (!EFFECT_KINDS.includes(item.kind as StageEffectKind)) return undefined;
+  const visual = EFFECT_KINDS.includes(item.visual as StageEffectKind) ? item.visual as StageEffectKind : undefined;
+  const cues = Array.isArray(item.cues)
+    ? item.cues.map(String).filter((cue): cue is import("./types").SfxCue => SFX_CUES.includes(cue as import("./types").SfxCue)).slice(0, 4)
+    : undefined;
+  if (!visual && !cues?.length) return undefined;
   const strengthRaw = Number(item.strength ?? 0.6);
   const repeatRaw = Number(item.repeat ?? 1);
   const delayRaw = Number(item.delayMs ?? 0);
   return {
-    kind: item.kind as StageEffectKind,
+    visual,
+    cues: cues?.length ? cues : undefined,
     strength: Number.isFinite(strengthRaw) ? Math.max(0, Math.min(1, strengthRaw)) : 0.6,
-    repeat: Number.isFinite(repeatRaw) ? Math.max(1, Math.min(8, Math.round(repeatRaw))) : undefined,
-    delayMs: Number.isFinite(delayRaw) ? Math.max(0, Math.min(5000, Math.round(delayRaw))) : undefined
+    repeat: Number.isFinite(repeatRaw) ? Math.max(1, Math.min(12, Math.round(repeatRaw))) : undefined,
+    delayMs: Number.isFinite(delayRaw) ? Math.max(0, Math.min(10000, Math.round(delayRaw))) : undefined
   };
 }
 

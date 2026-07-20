@@ -281,13 +281,13 @@ const narrateTurnTool: AquaToolDefinition = {
               abilityUsed: { type: "string" },
               effect: {
                 type: "object",
-                description: "Optional cinematic effect LINKED to this beat — it fires the instant this line plays on the TV, not at turn start. Use it to land a thunderclap, spell flash, or heartbeat exactly on the words that earn it. Omit on beats that need no effect.",
-                required: ["kind"],
+                description: "Optional cinematic effect LINKED to this beat — its cues and optional visual fire the instant this line plays on the TV, not at turn start. Use it to land thunder, a door, an explosion, a spell, or a heartbeat exactly on the words that earn it. Provide cues, visual, or both. Omit on beats that need no effect.",
                 properties: {
-                  kind: { type: "string", enum: ["shake", "flash", "embers", "fog", "rain", "snow", "darkness", "heartbeat"] },
+                  cues: { type: "array", minItems: 1, maxItems: 4, items: { type: "string", enum: ["beat", "heartbeat", "rumble", "flash", "darkness", "door-creak", "door-open", "door-close", "knock", "airlock-open", "airlock-close", "code-beep", "code-success", "code-denied", "alarm", "siren", "radio-static", "power-up", "power-down", "explosion", "gunshot", "laser", "impact", "debris", "glass-break", "sword", "arrow", "shield", "footsteps", "horse", "thunder", "fire-burst", "splash", "wind-gust", "magic", "portal", "spell-fail", "creature-roar", "whisper", "trap", "lock-click", "coin", "item-pickup", "heal"] } },
+                  visual: { type: "string", enum: ["shake", "flash", "embers", "fog", "rain", "snow", "darkness", "heartbeat"] },
                   strength: { type: "number", description: "0.0-1.0 impact strength. Default 0.6." },
-                  repeat: { type: "number", description: "How many times to fire (1-8). Default 1." },
-                  delayMs: { type: "number", description: "Delay in ms between repeats (0-5000). Default 0." }
+                  repeat: { type: "number", description: "How many times to fire (1-12). Default 1." },
+                  delayMs: { type: "number", description: "Delay in ms between repeats (0-10000). Default 0." }
                 }
               }
             }
