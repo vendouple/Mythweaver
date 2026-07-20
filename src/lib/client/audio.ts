@@ -18,6 +18,7 @@ type MusicLibrary = {
   tracks: string[];
   byContext: Record<string, string[]>;
   sfx: string[];
+  ambience: Record<string, string[]>;
 };
 
 /** Fallback shelves, most-specific first. "any" = loose files in BGM/. */
@@ -165,12 +166,13 @@ async function loadLibrary(): Promise<MusicLibrary> {
         library = {
           tracks: Array.isArray(data.tracks) ? data.tracks : [],
           byContext: data.byContext && typeof data.byContext === "object" ? data.byContext : {},
-          sfx: Array.isArray(data.sfx) ? data.sfx : []
+          sfx: Array.isArray(data.sfx) ? data.sfx : [],
+          ambience: data.ambience && typeof data.ambience === "object" ? data.ambience : {}
         };
         return library;
       })
       .catch(() => {
-        library = { tracks: [], byContext: {}, sfx: [] };
+        library = { tracks: [], byContext: {}, sfx: [], ambience: {} };
         return library;
       });
   }
@@ -181,6 +183,12 @@ async function loadLibrary(): Promise<MusicLibrary> {
 export async function loadSfxManifest(): Promise<string[]> {
   const lib = await loadLibrary();
   return lib.sfx;
+}
+
+/** Exposed to the environmental-bed engine so music and ambience share one request. */
+export async function loadAmbienceManifest(): Promise<Record<string, string[]>> {
+  const lib = await loadLibrary();
+  return lib.ambience;
 }
 
 function shuffled<T>(items: T[]): T[] {

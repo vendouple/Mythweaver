@@ -28,15 +28,39 @@ import { MUSIC_THEMES, MusicTheme } from "./musicTheme";
 
 const dataRoot = path.join(process.cwd(), "data", "campaigns");
 
-const activeHosts: Map<string, number> = ((globalThis as any).activeHosts ??= new Map<string, number>());
+type HostSession = { token: string; lastSeenAt: number };
+const hostSessions: Map<string, HostSession> = ((globalThis as any).hostSessions ??= new Map<string, HostSession>());
+const HOST_SESSION_STALE_MS = Math.max(5000, Number(process.env.HOST_SESSION_STALE_MS) || 15000);
 
-export function recordHostHeartbeat(campaignId: string) {
-  activeHosts.set(campaignId, Date.now());
+/**
+ * Passive per-poll heartbeat from a TV. Auto-adopts `token` as the live
+ * session ONLY when nothing else currently holds it live (first open, or the
+ * previous holder went stale) — never force-steals from a fresh rival, so a
+ * second TV opening mid-session doesn't silently boot the first one. Callers
+ * without a token (shouldn't happen post-migration) are treated as live for
+ * back-compat rather than breaking the poll.
+ */
+export function touchHostSession(campaignId: string, token: string): { isLive: boolean } {
+  if (!token) return { isLive: true };
+  const existing = hostSessions.get(campaignId);
+  const rivalFresh = !!existing && existing.token !== token && Date.now() - existing.lastSeenAt < HOST_SESSION_STALE_MS;
+  if (rivalFresh) return { isLive: false };
+  hostSessions.set(campaignId, { token, lastSeenAt: Date.now() });
+  return { isLive: true };
+}
+
+/**
+ * Explicit takeover: unconditionally installs `token` as the live session
+ * regardless of a rival's freshness. Only reached after the user confirms the
+ * "Already open on another screen — Take over?" prompt.
+ */
+export function claimHostSession(campaignId: string, token: string) {
+  if (token) hostSessions.set(campaignId, { token, lastSeenAt: Date.now() });
 }
 
 export function isHostHeartbeatActive(campaignId: string): boolean {
-  const lastActive = activeHosts.get(campaignId);
-  return lastActive ? (Date.now() - lastActive < 15000) : false;
+  const session = hostSessions.get(campaignId);
+  return !!session && Date.now() - session.lastSeenAt < HOST_SESSION_STALE_MS;
 }
 
 // Per-player presence, in-memory (globalThis) so a poll doesn't hit disk. A
@@ -44,6 +68,12 @@ export function isHostHeartbeatActive(campaignId: string): boolean {
 // window; no record at all is treated as present (grace for fresh joins / after
 // a server restart), so we never falsely skip someone who simply hasn't polled.
 const PLAYER_AWAY_MS = Math.max(8000, Number(process.env.PLAYER_AWAY_MS) || 20000);
+// Distinct from PLAYER_AWAY_MS (which stays fast so a slow-loading phone never
+// blocks other players' turns): this only delays the DM's "weave them out of
+// the story" narration, so a real wifi blip — or a table resuming a session
+// while phones are still reconnecting — has time to resolve before anyone's
+// character is narratively parked somewhere.
+export const DEPARTURE_WEAVE_GRACE_MS = Math.max(30_000, Number(process.env.DEPARTURE_WEAVE_GRACE_MS) || 120_000);
 // A DM turn that never reaches its finally/catch (server restart, crashed
 // process mid-retry) can leave dmStatus stuck forever, freezing every
 // controller on reload (they hard-lock on dmStatus being set). Past this age,
@@ -79,9 +109,11 @@ export function reconcilePresence(campaign: Campaign): { wentAway: string[]; ret
     const wasAway = player.away === true;
     if (!present && !wasAway) {
       player.away = true;
+      player.awaySince = Date.now();
       wentAway.push(player.id);
     } else if (present && wasAway) {
       player.away = false;
+      player.awaySince = undefined;
       returned.push(player.id);
     }
   }
@@ -509,7 +541,23 @@ function normalizeCampaign(raw: Partial<Campaign> & { suggestedActions?: unknown
 }
 
 const AMBIENCE_MOODS: AmbienceMood[] = ["calm", "tense", "adrenaline", "battle", "boss", "mystery", "dread", "triumph", "wonder", "somber", "outro"];
+const AMBIENCE_SOUNDS: NonNullable<Ambience["sounds"]> = [
+  "none", "storm", "rain", "wind", "snow", "ocean", "water", "forest", "swamp", "desert", "insects", "birds",
+  "cave", "dungeon", "tavern", "village", "castle", "city", "traffic", "crowd", "office", "industrial",
+  "machinery", "electrical", "ventilation", "laboratory", "spaceship", "western-town", "wasteland",
+  "battlefield", "fire", "supernatural"
+];
+const AMBIENCE_ACOUSTICS: NonNullable<Ambience["acoustics"]> = [
+  "outdoors", "indoors", "small-room", "large-hall", "cave", "distant", "muffled", "underwater"
+];
 const EFFECT_KINDS: StageEffectKind[] = ["shake", "flash", "embers", "fog", "rain", "snow", "darkness", "heartbeat"];
+const SFX_CUES: import("./types").SfxCue[] = [
+  "beat", "heartbeat", "rumble", "flash", "darkness", "door-creak", "door-open", "door-close", "knock",
+  "airlock-open", "airlock-close", "code-beep", "code-success", "code-denied", "alarm", "siren", "radio-static",
+  "power-up", "power-down", "explosion", "gunshot", "laser", "impact", "debris", "glass-break", "sword", "arrow",
+  "shield", "footsteps", "horse", "thunder", "fire-burst", "splash", "wind-gust", "magic", "portal", "spell-fail",
+  "creature-roar", "whisper", "trap", "lock-click", "coin", "item-pickup", "heal"
+];
 const ENDING_KINDS: EndingKind[] = ["victory", "defeat", "bittersweet", "escape", "draw", "cliffhanger"];
 
 function normalizeEndingStats(raw: unknown): CampaignEnding["stats"] {
@@ -569,10 +617,18 @@ function normalizeAmbience(raw: unknown): Ambience | undefined {
   const item = raw as Partial<Ambience>;
   const mood = AMBIENCE_MOODS.includes(item.mood as AmbienceMood) ? (item.mood as AmbienceMood) : "calm";
   const intensity = Math.max(0, Math.min(1, Number(item.intensity ?? 0.5)));
+  const sounds = Array.isArray(item.sounds)
+    ? item.sounds.filter((sound): sound is NonNullable<Ambience["sounds"]>[number] => AMBIENCE_SOUNDS.includes(sound as NonNullable<Ambience["sounds"]>[number])).slice(0, 2)
+    : undefined;
+  const acoustics = Array.isArray(item.acoustics)
+    ? item.acoustics.filter((acoustic): acoustic is NonNullable<Ambience["acoustics"]>[number] => AMBIENCE_ACOUSTICS.includes(acoustic as NonNullable<Ambience["acoustics"]>[number])).slice(0, 2)
+    : undefined;
   return {
     mood,
     intensity: Number.isFinite(intensity) ? intensity : 0.5,
     note: typeof item.note === "string" ? item.note : undefined,
+    sounds: sounds?.length ? sounds : undefined,
+    acoustics: acoustics?.length ? acoustics : undefined,
     updatedAt: String(item.updatedAt || new Date().toISOString())
   };
 }
@@ -584,15 +640,21 @@ function normalizeEffects(raw: unknown): StageEffect[] {
     .map((item) => {
       const repeatRaw = Number(item.repeat ?? 1);
       const delayRaw = Number(item.delayMs ?? 0);
+      const kind = EFFECT_KINDS.includes(item.kind as StageEffectKind) ? (item.kind as StageEffectKind) : undefined;
+      const cues = Array.isArray(item.cues)
+        ? item.cues.map(String).filter((cue): cue is import("./types").SfxCue => SFX_CUES.includes(cue as import("./types").SfxCue)).slice(0, 4)
+        : undefined;
       return {
         id: String(item.id || createId("fx")),
-        kind: EFFECT_KINDS.includes(item.kind as StageEffectKind) ? (item.kind as StageEffectKind) : "embers",
+        kind,
+        cues: cues?.length ? cues : undefined,
         strength: Math.max(0, Math.min(1, Number(item.strength ?? 0.6))) || 0.6,
         repeat: Number.isFinite(repeatRaw) ? Math.max(1, Math.min(8, Math.round(repeatRaw))) : undefined,
         delayMs: Number.isFinite(delayRaw) ? Math.max(0, Math.min(5000, Math.round(delayRaw))) : undefined,
         createdAt: String(item.createdAt || new Date().toISOString())
       };
     })
+    .filter((item) => item.kind || item.cues?.length)
     .slice(-12);
 }
 
@@ -633,6 +695,30 @@ export function pushStageEffect(
     id: createId("fx"),
     kind,
     strength: Math.max(0, Math.min(1, strength)),
+    repeat,
+    delayMs,
+    createdAt: new Date().toISOString()
+  });
+  campaign.effects = campaign.effects.slice(-12);
+}
+
+export function pushStageSfx(
+  campaign: Campaign,
+  cues: import("./types").SfxCue[],
+  opts?: { visual?: StageEffectKind; strength?: number; repeat?: number; delayMs?: number }
+) {
+  if (!campaign.effects) campaign.effects = [];
+  const repeat = opts?.repeat != null && Number.isFinite(opts.repeat)
+    ? Math.max(1, Math.min(12, Math.round(opts.repeat)))
+    : undefined;
+  const delayMs = opts?.delayMs != null && Number.isFinite(opts.delayMs)
+    ? Math.max(0, Math.min(10000, Math.round(opts.delayMs)))
+    : undefined;
+  campaign.effects.push({
+    id: createId("sfx"),
+    kind: opts?.visual,
+    cues: cues.slice(0, 4),
+    strength: Math.max(0, Math.min(1, opts?.strength ?? 0.6)),
     repeat,
     delayMs,
     createdAt: new Date().toISOString()
@@ -735,6 +821,7 @@ function normalizePlayer(player: Partial<Player>, now: string): Player {
     canAct: typeof player.canAct === "boolean" ? player.canAct : undefined,
     lastSeenAt: Number.isFinite(Number(player.lastSeenAt)) ? Number(player.lastSeenAt) : undefined,
     away: typeof player.away === "boolean" ? player.away : undefined,
+    awaySince: Number.isFinite(Number(player.awaySince)) ? Number(player.awaySince) : undefined,
     wovenOut: typeof player.wovenOut === "boolean" ? player.wovenOut : undefined,
     locationId: player.locationId ? String(player.locationId) : undefined
   };

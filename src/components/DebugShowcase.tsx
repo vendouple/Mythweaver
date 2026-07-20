@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import type { Campaign } from "@/lib/campaign/types";
 import { bgmStop } from "@/lib/client/audio";
+import { ambienceStop } from "@/lib/client/ambience";
 import HostStage from "@/components/HostStage";
 import MusicWidget from "@/components/MusicWidget";
 
@@ -77,7 +78,10 @@ const debugCampaign: Campaign = {
 
 export default function DebugShowcase({ onExit }: { onExit: () => void }) {
   // The gallery previews music (mood/outro/theme tabs) — silence the bard on exit.
-  useEffect(() => () => bgmStop(), []);
+  useEffect(() => () => {
+    bgmStop();
+    ambienceStop();
+  }, []);
   return (
     <>
       <HostStage campaign={debugCampaign} onExit={onExit} theme="fantasy" debugMode />

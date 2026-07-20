@@ -21,9 +21,11 @@ export default function JoinFlow({
   onSeated: (seat: StoredSeat) => void;
   onBack: () => void;
 }) {
-  const [step, setStep] = useState<"code" | "character">("code");
+  const [step, setStep] = useState<"code" | "picker" | "character">("code");
   const [code, setCode] = useState(initialCode?.toUpperCase() || "");
+  const [campaignId, setCampaignId] = useState<string | null>(null);
   const [tableTitle, setTableTitle] = useState<string | null>(null);
+  const [reconnectable, setReconnectable] = useState<{ id: string; name: string; characterName?: string }[]>([]);
   const [name, setName] = useState("");
   const [characterName, setCharacterName] = useState("");
   const [background, setBackground] = useState("");
@@ -53,12 +55,30 @@ export default function JoinFlow({
         return;
       }
       setCode(found.joinCode);
+      setCampaignId(found.id);
       setTableTitle(found.title);
-      setStep("character");
+      await refreshReconnectable(found.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not reach the table.");
     } finally {
       setBusy(null);
+    }
+  }
+
+  // Who's currently disconnected and reclaimable — lets a returning player pick
+  // themselves off a list instead of retyping their name (and risking a form
+  // full of blank background/personality boxes overwriting nothing, since
+  // rejoin no longer touches those fields anyway). Fails open to the normal
+  // creation form if the peek itself errors, so a hiccup here never blocks
+  // joining outright.
+  async function refreshReconnectable(id: string) {
+    try {
+      const { reconnectable: list } = await api.peekReconnect(id);
+      setReconnectable(list);
+      setStep(list.length > 0 ? "picker" : "character");
+    } catch {
+      setReconnectable([]);
+      setStep("character");
     }
   }
 
@@ -90,11 +110,11 @@ export default function JoinFlow({
   const queueTries = useRef(0);
   const cancelQueue = useRef(false);
 
-  const takeSeat = async (isRetry = false) => {
-    if (!name.trim()) {
-      setError("Tell the table your name first.");
-      return;
-    }
+  const performJoin = async (
+    joinCall: () => ReturnType<typeof api.join>,
+    isRetry: boolean,
+    onFail?: (message: string) => void
+  ) => {
     if (!isRetry) {
       queueTries.current = 0;
       cancelQueue.current = false;
@@ -102,15 +122,9 @@ export default function JoinFlow({
     }
     setError(null);
     try {
-      const { campaignId, player, isPartyLeader } = await api.join({
-        joinCode: code,
-        name: name.trim(),
-        characterName: characterName.trim(),
-        background: background.trim(),
-        personality: personality.trim()
-      });
+      const { campaignId: joinedId, player, isPartyLeader } = await joinCall();
       if (cancelQueue.current) return;
-      const seat: StoredSeat = { campaignId, playerId: player.id, name: player.name, isPartyLeader };
+      const seat: StoredSeat = { campaignId: joinedId, playerId: player.id, name: player.name, isPartyLeader };
       saveSeat(seat);
       onSeated(seat);
     } catch (err) {
@@ -120,13 +134,45 @@ export default function JoinFlow({
         queueTries.current += 1;
         setBusy("queued");
         setTimeout(() => {
-          if (!cancelQueue.current) takeSeat(true);
+          if (!cancelQueue.current) performJoin(joinCall, true, onFail);
         }, QUEUE_RETRY_MS);
         return;
       }
       setError(message);
       setBusy(null);
+      onFail?.(message);
     }
+  };
+
+  const takeSeat = () => {
+    if (!name.trim()) {
+      setError("Tell the table your name first.");
+      return;
+    }
+    performJoin(
+      () =>
+        api.join({
+          joinCode: code,
+          name: name.trim(),
+          characterName: characterName.trim(),
+          background: background.trim(),
+          personality: personality.trim()
+        }),
+      false
+    );
+  };
+
+  // Tapped from the reconnect picker — claims a specific disconnected seat by
+  // id instead of name-matching. On a 409 (someone else just reconnected as
+  // that seat), re-peek so the stale entry disappears from the list.
+  const claimSeat = (playerId: string) => {
+    performJoin(
+      () => api.join({ joinCode: code, rejoinPlayerId: playerId }),
+      false,
+      (message) => {
+        if (/already reconnected/i.test(message) && campaignId) refreshReconnectable(campaignId);
+      }
+    );
   };
 
   return (
@@ -163,9 +209,45 @@ export default function JoinFlow({
               {busy === "code" ? "Knocking…" : "Knock on the door"}
             </button>
           </>
-        ) : (
+        ) : step === "picker" ? (
           <>
             <button className="ghost-button" onClick={() => setStep("code")}>← Different table</button>
+            <h1 className="join-title small">{tableTitle}</h1>
+            <p className="panel-hint">A few seats are waiting to be reclaimed — is one of them yours?</p>
+
+            {reconnectable.map((seat) => (
+              <button key={seat.id} className="choice-card resume-seat" disabled={busy !== null} onClick={() => claimSeat(seat.id)}>
+                <span className="choice-title">{seat.characterName || seat.name}</span>
+                <span className="choice-sub">{seat.name}</span>
+              </button>
+            ))}
+
+            {error ? <div className="form-error">{error}</div> : null}
+            {busy === "queued" ? (
+              <div className="join-queued">
+                <span className="forge-circle small" aria-hidden />
+                <p>The world is still being woven — your seat is saved, and you&apos;ll step in the moment it&apos;s ready.</p>
+                <button
+                  className="ghost-button"
+                  onClick={() => {
+                    cancelQueue.current = true;
+                    setBusy(null);
+                  }}
+                >
+                  Stop waiting
+                </button>
+              </div>
+            ) : null}
+
+            <button className="ghost-button" disabled={busy !== null} onClick={() => setStep("character")}>
+              + Start a new character instead
+            </button>
+          </>
+        ) : (
+          <>
+            <button className="ghost-button" onClick={() => setStep(reconnectable.length > 0 ? "picker" : "code")}>
+              {reconnectable.length > 0 ? "← Back" : "← Different table"}
+            </button>
             <h1 className="join-title small">{tableTitle}</h1>
             <p className="panel-hint">Who takes this seat?</p>
 

@@ -25,15 +25,24 @@ function post<T>(url: string, body: Record<string, unknown>): Promise<T> {
 export const api = {
   listCampaigns: () => request<{ campaigns: CampaignSummary[] }>("/api/campaigns"),
   createCampaign: (body: Record<string, unknown>) => post<{ campaign: Campaign }>("/api/campaigns", body),
-  getCampaign: (id: string, host?: boolean, playerId?: string) => {
+  getCampaign: (id: string, host?: boolean, playerId?: string, hostToken?: string) => {
     const qs = new URLSearchParams();
     if (host) qs.set("host", "1");
     if (playerId) qs.set("playerId", playerId);
+    if (hostToken) qs.set("hostToken", hostToken);
     const suffix = qs.toString() ? `?${qs.toString()}` : "";
-    return request<{ campaign: Campaign; hostActive?: boolean }>(`/api/campaigns/${encodeURIComponent(id)}${suffix}`);
+    return request<{ campaign: Campaign; hostActive?: boolean; hostSession?: { isLive: boolean } }>(
+      `/api/campaigns/${encodeURIComponent(id)}${suffix}`
+    );
   },
   deleteCampaign: (id: string) =>
     request<{ success: boolean }>(`/api/campaigns/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  /** Pre-join projection: who's currently disconnected and reclaimable, with
+   *  no story/message content leaked to someone who hasn't joined yet. */
+  peekReconnect: (id: string) =>
+    request<{ id: string; title: string; status: string; reconnectable: { id: string; name: string; characterName?: string }[] }>(
+      `/api/campaigns/${encodeURIComponent(id)}?peek=1`
+    ),
   join: (body: Record<string, unknown>) =>
     post<{ campaignId: string; player: Player; isPartyLeader: boolean }>("/api/join", body),
   chat: (body: Record<string, unknown>) => post<{ campaign?: Campaign; error?: string }>("/api/chat", body),
@@ -50,26 +59,31 @@ export const api = {
  * relaxed when the table is idle. Pass host=true so the server records the
  * TV heartbeat (used to gate mid-session joins).
  */
-export function useCampaignPoll(campaignId: string | null, host: boolean, playerId?: string) {
+export function useCampaignPoll(campaignId: string | null, host: boolean, playerId?: string, hostToken?: string) {
   const [campaign, setCampaign] = useState<Campaign | null>(null);
   const [lost, setLost] = useState(false);
   // A transient state between the first failed poll and giving up (>4). Lets the
   // UI show "Reconnecting…" and auto-resume instead of flashing "unreachable".
   const [reconnecting, setReconnecting] = useState(false);
   const [hostActive, setHostActive] = useState(true);
+  // Only meaningful when `host` is true: whether THIS tab's hostToken is the
+  // one the server currently considers live (see touchHostSession). Stays
+  // true for non-host pollers, who never receive a hostSession back.
+  const [liveHost, setLiveHost] = useState(true);
   const campaignRef = useRef<Campaign | null>(null);
   const failures = useRef(0);
 
   const refresh = useCallback(async () => {
     if (!campaignId) return;
     try {
-      const { campaign: next, hostActive: hostUp } = await api.getCampaign(campaignId, host, playerId);
+      const { campaign: next, hostActive: hostUp, hostSession } = await api.getCampaign(campaignId, host, playerId, hostToken);
       failures.current = 0;
       campaignRef.current = next;
       setCampaign(next);
       setLost(false);
       setReconnecting(false);
       setHostActive(hostUp !== false);
+      if (hostSession) setLiveHost(hostSession.isLive);
     } catch {
       failures.current += 1;
       if (failures.current > 4) {
@@ -79,7 +93,7 @@ export function useCampaignPoll(campaignId: string | null, host: boolean, player
         setReconnecting(true);
       }
     }
-  }, [campaignId, host, playerId]);
+  }, [campaignId, host, playerId, hostToken]);
 
   useEffect(() => {
     if (!campaignId) return;
@@ -105,7 +119,7 @@ export function useCampaignPoll(campaignId: string | null, host: boolean, player
     };
   }, [campaignId, host, refresh]);
 
-  return { campaign, refresh, lost, reconnecting, hostActive };
+  return { campaign, refresh, lost, reconnecting, hostActive, liveHost };
 }
 
 export type StoredSeat = {
@@ -156,4 +170,30 @@ export function accentColor(value: string | undefined, fallback = "#c9a35c"): st
 
 export function createActionId() {
   return `act_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+const TV_TOKEN_KEY = "mythweaver.tvToken";
+
+/**
+ * Per-TAB identity for a Host/TV view — deliberately sessionStorage, NOT
+ * localStorage (which is shared across tabs and would defeat telling one TV
+ * apart from another). Persists across a refresh of the same tab, cleared
+ * when the tab closes, so reopening the same physical screen doesn't spuriously
+ * look like a rival TV taking over.
+ */
+export function getTvToken(): string {
+  const fresh = () => `tv_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+  try {
+    let token = sessionStorage.getItem(TV_TOKEN_KEY);
+    if (!token) {
+      token = fresh();
+      sessionStorage.setItem(TV_TOKEN_KEY, token);
+    }
+    return token;
+  } catch {
+    // Private-mode storage failures only affect the takeover-prompt UX (this
+    // tab may look like a "new" TV on every remount) — never correctness, the
+    // server still only ever treats one token as live at a time.
+    return fresh();
+  }
 }

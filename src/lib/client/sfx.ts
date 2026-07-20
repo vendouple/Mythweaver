@@ -1,6 +1,7 @@
 "use client";
 
 import { loadSfxManifest } from "@/lib/client/audio";
+import type { SfxCue } from "@/lib/campaign/types";
 
 /**
  * Table foley. Every cue has a hand-rolled WebAudio synth fallback so the
@@ -8,20 +9,15 @@ import { loadSfxManifest } from "@/lib/client/audio";
  * public/music/SFX/ (e.g. "join.mp3", "beat.mp3") and it is used instead.
  */
 
-export type SfxName =
+export type SfxName = SfxCue
   | "tap"        // small UI touch (action card, tab)
   | "confirm"    // begin / summon buttons
   | "send"       // free-form action dispatched to the Weaver
-  | "join"       // a hero takes a seat in the lobby
-  | "beat"       // the chronicle turns to a new story beat
-  | "flash"      // stage flash effect
-  | "rumble"     // stage shake effect
-  | "darkness"   // darkness falls
-  | "heartbeat"; // horror pulse
+  | "join";      // a hero takes a seat in the lobby
 
 let sfxMuted = false;
 let fileMap: Record<string, string> | null = null;
-let manifestRequested = false;
+let manifestPromise: Promise<void> | null = null;
 let ctx: AudioContext | null = null;
 
 const SFX_VOLUME_KEY = "mythweaver-sfx-volume";
@@ -51,9 +47,8 @@ export function sfxGetVolume() {
 }
 
 function ensureManifest() {
-  if (manifestRequested) return;
-  manifestRequested = true;
-  loadSfxManifest()
+  if (manifestPromise) return manifestPromise;
+  manifestPromise = loadSfxManifest()
     .then((files) => {
       fileMap = {};
       for (const url of files) {
@@ -65,6 +60,7 @@ function ensureManifest() {
     .catch(() => {
       fileMap = {};
     });
+  return manifestPromise;
 }
 
 function audioContext(): AudioContext | null {
@@ -108,7 +104,7 @@ function tone(
   osc.stop(start + opts.dur + 0.05);
 }
 
-const SYNTHS: Record<SfxName, (context: AudioContext, master: GainNode) => void> = {
+const SYNTHS: Partial<Record<SfxName, (context: AudioContext, master: GainNode) => void>> = {
   tap(context, master) {
     tone(context, master, { type: "sine", from: 540, to: 340, dur: 0.09, peak: 0.5 });
   },
@@ -197,7 +193,10 @@ const SYNTHS: Record<SfxName, (context: AudioContext, master: GainNode) => void>
 /** Fire a cue. Silently does nothing if audio is unavailable or muted. */
 export function playSfx(name: SfxName, volume = 1) {
   if (sfxMuted || sfxVolume <= 0) return;
-  ensureManifest();
+  if (!fileMap) {
+    ensureManifest().then(() => playSfx(name, volume));
+    return;
+  }
   try {
     const fileUrl = fileMap?.[name];
     if (fileUrl) {
@@ -206,12 +205,14 @@ export function playSfx(name: SfxName, volume = 1) {
       el.play().catch(() => undefined);
       return;
     }
+    const synth = SYNTHS[name];
+    if (!synth) return;
     const context = audioContext();
     if (!context) return;
     const master = context.createGain();
     master.gain.value = 0.16 * volume * sfxVolume;
     master.connect(context.destination);
-    SYNTHS[name]?.(context, master);
+    synth(context, master);
   } catch {
     // Foley is decoration; never let it break the game.
   }

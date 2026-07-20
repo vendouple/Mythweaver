@@ -4,9 +4,9 @@ import { createId } from "@/lib/utils/ids";
 import { aquaConfig, aquaFetch, fastModelTarget, AquaFetchOptions, AquaMessage, AquaToolCall, AquaToolDefinition } from "./client";
 import { runTool, toolDefinitions, applyNpcGroupFields, applyConditionFields } from "@/lib/tools/registry";
 import { generateImage } from "@/lib/aqua/images";
-import { AmbienceMood, Campaign, DisplayEvent, PlayerStat, StoryCharacter } from "@/lib/campaign/types";
+import { AmbienceMood, Campaign, DisplayEvent, Player, PlayerStat, StoryCharacter } from "@/lib/campaign/types";
 import { MUSIC_THEMES, MusicTheme } from "@/lib/campaign/musicTheme";
-import { advanceCombat, buildExplorationResolution, ENEMY_SLOT, syncFocusedMirror, isPartySplit, rotateActiveLocation, startCombat, endCombat } from "@/lib/campaign/turns";
+import { advanceCombat, buildExplorationResolution, ENEMY_SLOT, syncFocusedMirror, isPartySplit, rotateActiveLocation, startCombat, endCombat, eligiblePlayerIdsInLocation } from "@/lib/campaign/turns";
 
 // Tiered server-log verbosity (DEBUG_VERBOSE):
 //   0 / unset → errors only (quiet; default so the console isn't flooded)
@@ -37,6 +37,21 @@ export function serverError(category: string, message: string, error?: any) {
   const timestamp = new Date().toLocaleTimeString();
   const errorMsg = error instanceof Error ? error.stack : String(error || "");
   console.error(`\x1b[31m[DND ERROR]\x1b[0m [${timestamp}] \x1b[36m[${category}]\x1b[0m ${message}${errorMsg ? `\n${errorMsg}` : ""}`);
+}
+
+/**
+ * Same as serverLog but tagged in pink and labeled [SMALL MODEL] — every call
+ * site that actually hits fastModelTarget() (housekeeping, and the parse-retry
+ * ladder when PARSE_RETRY_USE_FAST_MODEL is on) should log through here instead
+ * of serverLog, so the small model's activity is visually distinct from the
+ * large RP model's usual magenta/cyan lines in the console.
+ */
+export function serverLogSmall(category: string, message: string, data?: any, level?: number) {
+  const needed = level ?? 1;
+  if (VERBOSE_LEVEL < needed) return;
+  const timestamp = new Date().toLocaleTimeString();
+  const dataStr = data ? ` | ${typeof data === "object" ? JSON.stringify(data) : data}` : "";
+  console.log(`\x1b[38;5;213m[SMALL MODEL]\x1b[0m [${timestamp}] \x1b[36m[${category}]\x1b[0m ${message}${dataStr}`);
 }
 
 /**
@@ -636,27 +651,46 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
       // still can't produce one, fail the turn cleanly: the error path
       // restores the party's previous choices so they simply retry.
       const maxParseRetries = Math.max(1, Number(process.env.PARSE_RETRIES) || 3);
+      // Repackaging an already-decided turn into narrate_turn args is pure
+      // reformatting, not creative generation, so it's a fit for the small
+      // housekeeping model when one is configured — cheaper/faster than
+      // re-running the whole conversation through the large model. Set
+      // PARSE_RETRY_USE_FAST_MODEL=0 to fall back to the old behavior (retry
+      // with CHAT_MODEL) if the small model ever starts altering the narration
+      // instead of just repackaging it.
+      const parseRetryFlag = String(process.env.PARSE_RETRY_USE_FAST_MODEL ?? "1").toLowerCase().trim();
+      const parseRetryDisabled = ["0", "false", "off", "no"].includes(parseRetryFlag);
+      const useFastModelForRetry = !parseRetryDisabled && !!aquaConfig().fastModel;
       for (let attempt = 1; attempt <= maxParseRetries && !parsedJson; attempt += 1) {
-        await logCampaignDebug(campaignId, `[AI Retry] Parse failed — forcing narrate_turn (attempt ${attempt}/${maxParseRetries}).`);
-        serverLog("DM Parser", `Parse failed — retrying with forced narrate_turn (attempt ${attempt}/${maxParseRetries}).`);
+        const { model: retryModel, options: retryModelOptions } = useFastModelForRetry
+          ? fastModelTarget()
+          : { model: aquaConfig().chatModel, options: {} as AquaFetchOptions };
+        await logCampaignDebug(campaignId, `[AI Retry] Parse failed — forcing narrate_turn on the ${useFastModelForRetry ? "small" : "large"} model (attempt ${attempt}/${maxParseRetries}).`);
+        if (useFastModelForRetry) {
+          serverLogSmall("DM Parser", `Repackaging turn ${attempt}/${maxParseRetries} into narrate_turn args (no new content, reformat only).`);
+        } else {
+          serverLog("DM Parser", `Parse failed — retrying with forced narrate_turn (attempt ${attempt}/${maxParseRetries}).`);
+        }
         void writeDmStatus(campaignId, `The Weaver re-threads the tale… (${attempt}/${maxParseRetries})`);
         try {
           const retryResponse = (await aquaFetch("/chat/completions", {
             method: "POST",
             body: JSON.stringify({
-              model: aquaConfig().chatModel,
+              model: retryModel,
               messages: [
                 ...messages,
                 { role: "assistant", content },
                 {
                   role: "user",
-                  content: "Your previous response could not be parsed and was discarded. Do NOT write prose, XML, or markdown. Call the narrate_turn tool EXACTLY ONCE right now, carrying this turn's story beats and final state as valid JSON arguments."
+                  content: useFastModelForRetry
+                    ? "Your previous response could not be parsed and was discarded. Do NOT write prose, XML, or markdown, and do NOT invent, add, or omit any story beats, dialogue, or state changes. Repackage EXACTLY what was already decided above — call the narrate_turn tool EXACTLY ONCE, carrying this turn's story beats and final state as valid JSON arguments."
+                    : "Your previous response could not be parsed and was discarded. Do NOT write prose, XML, or markdown. Call the narrate_turn tool EXACTLY ONCE right now, carrying this turn's story beats and final state as valid JSON arguments."
                 }
               ],
               tools: [narrateTurnTool],
               tool_choice: { type: "function", function: { name: "narrate_turn" } }
             })
-          }, INTERACTIVE_FETCH)) as ChatCompletionResponse;
+          }, { ...INTERACTIVE_FETCH, ...retryModelOptions })) as ChatCompletionResponse;
           const retryMessage = retryResponse.choices?.[0]?.message || retryResponse.message;
           const retryCall = retryMessage ? normalizeToolCalls(retryMessage).find((c) => c.function.name === "narrate_turn") : undefined;
           if (retryCall) {
@@ -664,7 +698,7 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
               ? JSON.parse(retryCall.function.arguments || "{}")
               : (retryCall.function.arguments as Record<string, any>) || {};
             content = JSON.stringify(parsedJson);
-            await logCampaignDebug(campaignId, `[AI Retry] Forced narrate_turn succeeded on attempt ${attempt}.`);
+            await logCampaignDebug(campaignId, `[AI Retry] Forced narrate_turn succeeded on attempt ${attempt} (${useFastModelForRetry ? "small" : "large"} model).`);
             break;
           }
           // Some endpoints ignore tool_choice and answer in content — give the
@@ -680,7 +714,7 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
           }
         } catch (err) {
           await logCampaignDebug(campaignId, `[AI Retry] Forced narrate_turn attempt ${attempt} failed: ${err instanceof Error ? err.message : String(err)}`);
-          serverError("DM Parser", `Forced narrate_turn retry ${attempt}/${maxParseRetries} failed`, err);
+          serverError("DM Parser", `Forced narrate_turn retry ${attempt}/${maxParseRetries} failed (${useFastModelForRetry ? "small" : "large"} model)`, err);
         }
       }
       if (!parsedJson) {
@@ -1233,6 +1267,61 @@ export async function waitForDmIdle(campaignId: string, timeoutMs = 180_000): Pr
   }
 }
 
+function humanizeDuration(ms: number): string {
+  const minutes = ms / 60_000;
+  if (minutes < 1) return "under a minute";
+  if (minutes < 60) return `about ${Math.max(1, Math.round(minutes))} minute${Math.round(minutes) === 1 ? "" : "s"}`;
+  const hours = minutes / 60;
+  if (hours < 24) return `about ${Math.round(hours)} hour${Math.round(hours) === 1 ? "" : "s"}`;
+  const days = hours / 24;
+  return `about ${Math.round(days)} day${Math.round(days) === 1 ? "" : "s"}`;
+}
+
+/**
+ * Extra context lines for a reintegration (rejoin/return) prompt: whether
+ * their last known location is now abandoned (so the DM can relocate them
+ * instead of leaving them narratively stranded alone), and how long they were
+ * gone (so the DM can size the "meanwhile…" catch-up beat instead of always
+ * giving a flat one-line return). Both derived from existing state — no new
+ * counters beyond Player.awaySince.
+ */
+export function buildAbsenceBriefing(campaign: Campaign, player: Player): string[] {
+  const lines: string[] = [];
+
+  const lastLoc = (campaign.locations || []).find((l) => l.id === player.locationId);
+  if (lastLoc) {
+    const othersHere = eligiblePlayerIdsInLocation(campaign, lastLoc.id).filter((id) => id !== player.id);
+    if (othersHere.length === 0) {
+      const focus = getFocusedLocation(campaign);
+      lines.push(
+        focus.id === lastLoc.id
+          ? `Their last known location was "${lastLoc.name}", which is also where the story is focused now — reintegrate them there.`
+          : `Their last known location, "${lastLoc.name}", is now empty of other party members — the group has moved on to "${focus.name}". Relocate them into the current scene there rather than leaving them narratively stranded alone.`
+      );
+    }
+  }
+
+  if (player.awaySince) {
+    const beatsElapsed = campaign.displayEvents.filter(
+      (e) => (e.type === "narration" || e.type === "dialogue") && Date.parse(e.createdAt) > player.awaySince!
+    ).length;
+    // displayEvents is trimmed to the last 80 (normalizeDisplayEvents) — if
+    // every kept event postdates their absence, more may have scrolled off.
+    const capped = beatsElapsed > 0 && beatsElapsed >= campaign.displayEvents.length && campaign.displayEvents.length >= 80
+      ? " (possibly more — the chronicle only keeps recent beats)"
+      : "";
+    lines.push(
+      `They've been disconnected for roughly ${humanizeDuration(Date.now() - player.awaySince)}` +
+        (beatsElapsed > 0 ? `, during which ~${beatsElapsed} story beat${beatsElapsed === 1 ? "" : "s"} happened${capped}` : "") +
+        `. Size the "meanwhile…" catch-up beat to match — a brief aside for a short gap, a fuller recap for a long one.`
+    );
+  } else {
+    lines.push(`Their absence length isn't tracked (likely a server restart) — keep the catch-up brief and generic.`);
+  }
+
+  return lines;
+}
+
 /**
  * Small models occasionally double-encode structured fields — story arrives as
  * a JSON string ("[{...}]") instead of an array, playerActions as a stringified
@@ -1701,7 +1790,7 @@ function atmosphereDirective(): string {
   return `Atmosphere (you are the stage director this turn):
 - Call set_ambience when the emotional register shifts. Moods: calm, tense, adrenaline (chases, escapes, heists, races against time — excitement without combat), battle (ordinary combat), boss (climactic showdowns against a major villain or endgame threat), mystery, dread, triumph, wonder, somber. Use sparingly — once per real shift, not every turn.
 - EVERY turn, compare this scene's register against the "Current ambience/music playing" line in the context: if they no longer match (a fight broke out, dread gave way to triumph, the chase began), call set_ambience THIS TURN — the music only changes when you do. Do not let one mood drone through an entire act.
-- Stage effects have two timings: call trigger_effect to fire one IMMEDIATELY (at the start of the turn); OR attach an \`effect\` to a specific story beat in narrate_turn so it lands the instant that line performs on the TV. Prefer beat-linked effects for immersion; use repeat/delayMs for multi-hit impacts.`;
+- Cinematic effects have two timings: call trigger_effect to fire one or more sound cues IMMEDIATELY, optionally paired with a synchronized visual enhancement; OR attach an \`effect\` to a specific story beat in narrate_turn so its visual lands the instant that line performs on the TV. Layer cues for richer moments and use repeat/delayMs for heartbeats, knocks, alarms, footsteps, gunfire, or multi-hit impacts. Missing cue files safely remain silent.`;
 }
 
 /**
@@ -1896,6 +1985,7 @@ async function runHousekeeping(campaign: Campaign): Promise<void> {
   ].join("\n\n");
 
   const { model, options } = fastModelTarget();
+  serverLogSmall("Housekeeping", `Sweep starting for campaign ${campaign.id} on ${model} (${staleCount} stale messages).`);
   try {
     const response = (await aquaFetch("/chat/completions", {
       method: "POST",
@@ -1928,9 +2018,9 @@ async function runHousekeeping(campaign: Campaign): Promise<void> {
         campaign.storyCharacters = campaign.storyCharacters.filter((c) => c.id === keepId || !removeIds.includes(c.id));
       }
     }
-    serverLog("Housekeeping", `Sweep applied for campaign ${campaign.id} (trimmed ${staleCount} messages)`);
+    serverLogSmall("Housekeeping", `Sweep applied for campaign ${campaign.id} (trimmed ${staleCount} messages)`);
   } catch (err) {
-    serverError("Housekeeping", "Housekeeping sweep failed (non-fatal)", err);
+    serverError("Housekeeping [small model]", "Housekeeping sweep failed (non-fatal)", err);
   }
 }
 

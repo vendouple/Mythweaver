@@ -609,9 +609,10 @@ NOT hopeful-calm — restless and unresolved:
 
 ## Sound effects — `public/music/SFX/`
 
-Every cue below already has a built-in synthesized fallback, so the game is
-fully voiced with zero files. Drop a file with the exact name to replace a
-cue with something richer (Suno's SFX-style generations or any foley pack).
+UI cues and the original stage cues have synthesized fallbacks. The expanded
+cinematic catalog is deliberately file-backed: if a matching file is absent,
+that cue does nothing and never substitutes an unrelated sound. Drop a file
+with the exact basename below to enable it. MP3, OGG, M4A, and WAV are supported.
 
 | File name       | Cue                                            | Suggested character |
 |-----------------|------------------------------------------------|---------------------|
@@ -630,3 +631,51 @@ Dice Theater.
 
 Keep SFX short (≤ 1.5 s except rumble/darkness), mixed quiet, and free of
 reverb tails that overlap the music.
+
+### Cinematic cue filenames
+
+`trigger_effect` is the single AI-facing cinematic tool. It can fire up to
+four cues simultaneously, repeat the group with a delay, and pair the sound
+with one optional visual enhancement (`shake`, `flash`, `embers`, `fog`,
+`rain`, `snow`, `darkness`, or `heartbeat`). There is no separate SFX tool.
+
+| Group | Exact basenames |
+| --- | --- |
+| Doors | `door-creak`, `door-open`, `door-close`, `knock` |
+| Sci-fi access | `airlock-open`, `airlock-close`, `code-beep`, `code-success`, `code-denied` |
+| Systems | `alarm`, `siren`, `radio-static`, `power-up`, `power-down` |
+| Destruction | `explosion`, `impact`, `debris`, `glass-break` |
+| Ranged weapons | `gunshot`, `laser`, `arrow` |
+| Melee/action | `sword`, `shield`, `footsteps`, `horse` |
+| Weather accents | `thunder`, `fire-burst`, `splash`, `wind-gust` |
+| Magic/horror | `magic`, `portal`, `spell-fail`, `creature-roar`, `whisper` |
+| Interaction | `trap`, `lock-click`, `coin`, `item-pickup`, `heal` |
+
+Examples: `explosion.mp3` plus `debris.mp3` with visual `shake`; repeated
+`heartbeat.mp3` at 320 ms for panic or 850 ms for dread; `airlock-open.mp3`
+plus `alarm.mp3` with visual `flash`.
+
+## Environmental ambience — `public/music/AMBIENCE/`
+
+Environmental beds are independent of BGM and SFX. Put reusable long-form
+loops in category folders such as `AMBIENCE/rain/` or
+`AMBIENCE/machinery/`. The AI may select up to two beds, or use `none` for
+intentional silence. When no sounds are specified, the TV infers categories
+from the current scene text.
+
+Available categories:
+
+`storm`, `rain`, `wind`, `snow`, `ocean`, `water`, `forest`, `swamp`,
+`desert`, `insects`, `birds`, `cave`, `dungeon`, `tavern`, `village`,
+`castle`, `city`, `traffic`, `crowd`, `office`, `industrial`, `machinery`,
+`electrical`, `ventilation`, `laboratory`, `spaceship`, `western-town`,
+`wasteland`, `battlefield`, `fire`, `supernatural`.
+
+Acoustic modifiers alter the same source files at playback time, so duplicate
+"cave" or "distant" recordings are unnecessary. `muffled`, `distant`, and
+`underwater` apply low-pass filtering; `indoors`, `small-room`, `large-hall`,
+and `cave` add progressively larger synthetic room responses. `outdoors`
+leaves the source dry.
+
+Use seamless or naturally steady recordings, ideally 30 seconds or longer.
+Avoid music, dialogue, singular story events, and obvious loop-boundary hits.
