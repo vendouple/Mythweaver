@@ -526,7 +526,7 @@ export default function HostStage({
     if (!beat?.effect || !beat.id) return;
     if (beatFxFiredRef.current.has(beat.id)) return;
     beatFxFiredRef.current.add(beat.id);
-    fireEffect(beat.effect.kind, beat.effect.strength ?? 0.6, beat.effect.repeat, beat.effect.delayMs);
+    fireEffect(beat.effect.visual, beat.effect.strength ?? 0.6, beat.effect.repeat, beat.effect.delayMs, beat.effect.cues);
   }, [currentBeat, fireEffect]);
 
   const [now, setNow] = useState(() => Date.now());
