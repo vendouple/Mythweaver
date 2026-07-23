@@ -60,7 +60,8 @@ const CATEGORY_RULES: CategoryRule[] = [
   { category: "wasteland", pattern: /\b(wasteland|post-apocalyptic|post apocalyptic|ruins|bunker|fallout|scrapyard)\b/i, group: "place" },
   { category: "battlefield", pattern: /\b(battlefield|war zone|trenches|artillery|gunfire|siege)\b/i, group: "place" },
   { category: "fire", pattern: /\b(fire|flames|campfire|bonfire|hearth|burning|inferno)\b/i, group: "detail" },
-  { category: "supernatural", pattern: /\b(haunted|ghost|spirit|spectral|occult|ritual|portal|eldritch|cursed)\b/i, group: "detail" }
+  { category: "supernatural", pattern: /\b(haunted|ghost|spirit|spectral|occult|ritual|portal|eldritch|cursed)\b/i, group: "detail" },
+  { category: "underwater", pattern: /\b(underwater|submerged|beneath the waves|deep sea|ocean floor|scuba|diving bell)\b/i, group: "place" }
 ];
 
 const AMBIENCE_VOLUME_KEY = "mythweaver-ambience-volume";

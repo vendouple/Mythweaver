@@ -321,7 +321,7 @@ export type AmbienceSound =
   | "city" | "traffic" | "crowd" | "office" | "industrial"
   | "machinery" | "electrical" | "ventilation" | "laboratory"
   | "spaceship" | "western-town" | "wasteland" | "battlefield"
-  | "fire" | "supernatural";
+  | "fire" | "supernatural" | "underwater";
 
 export type AmbienceAcoustic =
   | "outdoors"

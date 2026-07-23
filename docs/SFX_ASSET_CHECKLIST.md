@@ -19,17 +19,17 @@ and ambience. Avoid long silent starts or tails.
 These currently have synthesized Web Audio fallbacks, but recorded versions
 can be added later for a more polished and consistent sound.
 
-- [ ] `tap.mp3` - Light, unobtrusive interface tap.
-- [ ] `confirm.mp3` - Warm two-note confirmation.
-- [ ] `send.mp3` - Quick magical or energetic dispatch whoosh.
-- [ ] `join.mp3` - Welcoming three-note flourish when a player joins.
+- [x] `tap.mp3` - Light, unobtrusive interface tap.
+- [x] `confirm.mp3` - Warm two-note confirmation.
+- [x] `send.mp3` - Quick magical or energetic dispatch whoosh.
+- [x] `join.mp3` - Welcoming three-note flourish when a player joins.
 
 ## Cinematic stage effects
 
 `flash` and `darkness` currently have synthesized fallbacks. The other missing
 stage cues remain silent until a matching file is added.
 
-- [ ] `flash.mp3` - Bright magical burst, camera flash, or lightning snap.
+- [x] `flash.mp3` - Bright magical burst, camera flash, or lightning snap.
 - [ ] `darkness.mp3` - Descending shadow swell or ominous low whoosh.
 
 ## Doors and entrances

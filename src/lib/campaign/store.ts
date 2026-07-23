@@ -545,7 +545,7 @@ const AMBIENCE_SOUNDS: NonNullable<Ambience["sounds"]> = [
   "none", "storm", "rain", "wind", "snow", "ocean", "water", "forest", "swamp", "desert", "insects", "birds",
   "cave", "dungeon", "tavern", "village", "castle", "city", "traffic", "crowd", "office", "industrial",
   "machinery", "electrical", "ventilation", "laboratory", "spaceship", "western-town", "wasteland",
-  "battlefield", "fire", "supernatural"
+  "battlefield", "fire", "supernatural", "underwater"
 ];
 const AMBIENCE_ACOUSTICS: NonNullable<Ambience["acoustics"]> = [
   "outdoors", "indoors", "small-room", "large-hall", "cave", "distant", "muffled", "underwater"
