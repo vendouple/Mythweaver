@@ -704,7 +704,7 @@ export async function runTool(campaignId: string, name: string, args: Record<str
       }
       const mood = rawMood as AmbienceMood;
       const rawIntensity = Number(args.intensity ?? 0.6);
-      const validSounds: AmbienceSound[] = ["none", "storm", "rain", "wind", "snow", "ocean", "water", "forest", "swamp", "desert", "insects", "birds", "cave", "dungeon", "tavern", "village", "castle", "city", "traffic", "crowd", "office", "industrial", "machinery", "electrical", "ventilation", "laboratory", "spaceship", "western-town", "wasteland", "battlefield", "fire", "supernatural"];
+      const validSounds: AmbienceSound[] = ["none", "storm", "rain", "wind", "snow", "ocean", "water", "forest", "swamp", "desert", "insects", "birds", "cave", "dungeon", "tavern", "village", "castle", "city", "traffic", "crowd", "office", "industrial", "machinery", "electrical", "ventilation", "laboratory", "spaceship", "western-town", "wasteland", "battlefield", "fire", "supernatural", "underwater"];
       const validAcoustics: AmbienceAcoustic[] = ["outdoors", "indoors", "small-room", "large-hall", "cave", "distant", "muffled", "underwater"];
       const sounds = Array.isArray(args.sounds)
         ? args.sounds.map(String).filter((sound): sound is AmbienceSound => validSounds.includes(sound as AmbienceSound)).slice(0, 2)
