@@ -77,6 +77,9 @@ DEFAULT_TARGET = 6
 DEFAULT_WORKERS = 2
 POLL_SECONDS = 60
 BAD_DURATION_SECONDS = 7 * 60 + 50  # 7:50
+# Reject downloads that are clearly not real tracks (error pages, stubs, etc.).
+# Real BGM here is typically 2–5 MB; 64 KB is a safe floor.
+MIN_AUDIO_BYTES = 64 * 1024
 MEDIA_EXTENSIONS = {".mp3", ".wav", ".m4a", ".ogg"}
 SLOT_FILENAME_RE = re.compile(r"^(?P<prefix>.+?)(?P<slot>\d+)$")
 
@@ -285,8 +288,27 @@ def pair_start_for(slot: int) -> int:
 
 
 def duration_seconds(media_file: Path) -> float:
-    """Read duration via ffprobe (rejects damaged / overlong tracks)."""
-    result = subprocess.run(
+    """Read duration via ffprobe (rejects damaged / overlong tracks).
+
+    Tries a larger probe window first — some Suno MP3s have messy ID3/padding
+    that trips the default probe even when players can still decode them.
+    Falls back to a plain probe if the first attempt fails.
+    """
+    probe_attempts = (
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-probesize",
+            "10M",
+            "-analyzeduration",
+            "30M",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=nk=1:nw=1",
+            str(media_file),
+        ],
         [
             "ffprobe",
             "-v",
@@ -297,13 +319,68 @@ def duration_seconds(media_file: Path) -> float:
             "default=nk=1:nw=1",
             str(media_file),
         ],
-        capture_output=True,
-        check=False,
-        text=True,
     )
-    if result.returncode != 0:
-        raise RuntimeError(result.stderr.strip() or "ffprobe could not read the file")
-    return float(result.stdout.strip())
+    errors: list[str] = []
+    for command in probe_attempts:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            check=False,
+            text=True,
+        )
+        if result.returncode == 0:
+            text = result.stdout.strip()
+            if text:
+                return float(text)
+            errors.append("ffprobe returned empty duration")
+            continue
+        errors.append(result.stderr.strip() or "ffprobe could not read the file")
+    raise RuntimeError(errors[-1] if errors else "ffprobe could not read the file")
+
+
+def looks_like_audio_header(media_file: Path) -> bool:
+    """Cheap magic-byte check before we trust a download as audio."""
+    try:
+        with media_file.open("rb") as handle:
+            head = handle.read(12)
+    except OSError:
+        return False
+    if len(head) < 3:
+        return False
+    if head.startswith(b"ID3"):
+        return True
+    # MPEG frame sync (mp3)
+    if head[0] == 0xFF and (head[1] & 0xE0) == 0xE0:
+        return True
+    # RIFF/WAVE
+    if head.startswith(b"RIFF") and b"WAVE" in head:
+        return True
+    # MP4/M4A ftyp box
+    if len(head) >= 8 and head[4:8] == b"ftyp":
+        return True
+    # Ogg
+    if head.startswith(b"OggS"):
+        return True
+    return False
+
+
+def validate_audio_file(media_file: Path) -> float:
+    """Return duration if the file is usable audio; raise RuntimeError otherwise.
+
+    Used when culling shelves (invalid → delete + regen) and before promoting a
+    download over an existing track (invalid download is discarded, good file kept).
+    """
+    if not media_file.is_file():
+        raise RuntimeError("file missing")
+    size = media_file.stat().st_size
+    if size < MIN_AUDIO_BYTES:
+        raise RuntimeError(f"too small ({size} bytes; need >= {MIN_AUDIO_BYTES})")
+    if not looks_like_audio_header(media_file):
+        raise RuntimeError("not a recognized audio header (HTML/JSON/truncated download?)")
+    duration = duration_seconds(media_file)
+    if duration <= 0:
+        raise RuntimeError("zero/negative duration")
+    return duration
 
 
 def format_duration(seconds: float) -> str:
@@ -345,7 +422,8 @@ def inspect_shelf(
     if not skip_duration_check:
         for slot, track in list(slot_to_track.items()):
             try:
-                duration = duration_seconds(track)
+                # Truly invalid / unreadable / overlong → mark for delete + regen.
+                duration = validate_audio_file(track)
                 if duration >= BAD_DURATION_SECONDS:
                     print(
                         f"  BAD DURATION {format_duration(duration)} "
@@ -353,7 +431,7 @@ def inspect_shelf(
                     )
                     invalid_slots.add(slot)
             except (RuntimeError, ValueError, FileNotFoundError) as error:
-                print(f"  WARNING could not inspect {track.name}: {error}")
+                print(f"  WARNING invalid track {track.name}: {error}")
                 invalid_slots.add(slot)
 
     # A bad track dooms its entire pair — delete partner too.
@@ -555,6 +633,11 @@ def submit_job(shelf: Shelf, start_slot: int) -> Job:
 
 
 def download(url: str, destination: Path) -> None:
+    """Download to a temp path and validate before the caller promotes it.
+
+    Invalid payloads are deleted and retried. Existing final tracks are never
+    overwritten by a bad download — only a validated .part is promoted.
+    """
     request = urllib.request.Request(
         url,
         headers={
@@ -570,8 +653,48 @@ def download(url: str, destination: Path) -> None:
         if stop_requested() and attempt > 1:
             raise RuntimeError("Stop requested during download retry")
         try:
-            with urllib.request.urlopen(request, timeout=180) as response, destination.open("wb") as output:
-                shutil.copyfileobj(response, output)
+            with urllib.request.urlopen(request, timeout=180) as response:
+                content_type = (response.headers.get("Content-Type") or "").lower()
+                # CDN sometimes returns HTML/JSON error bodies with HTTP 200.
+                if content_type and not any(
+                    token in content_type
+                    for token in (
+                        "audio/",
+                        "video/",
+                        "application/octet-stream",
+                        "binary/",
+                        "mpeg",
+                    )
+                ):
+                    preview = response.read(256)
+                    destination.unlink(missing_ok=True)
+                    raise RuntimeError(
+                        f"unexpected Content-Type {content_type!r}; "
+                        f"body starts {preview[:80]!r}"
+                    )
+                with destination.open("wb") as output:
+                    shutil.copyfileobj(response, output)
+            try:
+                validate_audio_file(destination)
+            except (RuntimeError, ValueError) as validation_error:
+                destination.unlink(missing_ok=True)
+                last_error = validation_error
+                if attempt < MAX_NETWORK_RETRIES:
+                    delay = RETRY_BASE_SECONDS * attempt
+                    print(
+                        f"Downloaded invalid audio (attempt {attempt}/{MAX_NETWORK_RETRIES}): "
+                        f"{validation_error}; retrying in {delay}s...",
+                        file=sys.stderr,
+                    )
+                    if interruptible_sleep(delay):
+                        raise RuntimeError(
+                            "Stop requested during download retry"
+                        ) from validation_error
+                    continue
+                raise RuntimeError(
+                    f"Downloaded invalid audio after {MAX_NETWORK_RETRIES} attempts: "
+                    f"{validation_error}"
+                ) from validation_error
             return
         except urllib.error.HTTPError as error:
             detail = error.read().decode("utf-8", errors="replace")
@@ -603,6 +726,9 @@ def download(url: str, destination: Path) -> None:
                     raise RuntimeError("Stop requested during download retry") from error
                 continue
             raise RuntimeError(f"Network error: {reason}") from error
+        except RuntimeError:
+            # Content-type / validation failures already cleaned destination.
+            raise
 
     raise RuntimeError(f"Download failed after {MAX_NETWORK_RETRIES} attempts: {last_error}")
 
@@ -618,8 +744,10 @@ def complete_job(job: Job, response: dict[str, Any]) -> None:
         for offset, record in enumerate(records):
             destination = job.shelf.path / f"{slug}{job.start_slot + offset}.mp3"
             temporary = destination.with_suffix(".mp3.part")
+            # download() validates the .part; existing destination stays put on failure.
             download(record["audio_url"], temporary)
             temporary_files.append((temporary, destination))
+        # Promote only after BOTH halves of the pair validated.
         for temporary, destination in temporary_files:
             temporary.replace(destination)
         print(
