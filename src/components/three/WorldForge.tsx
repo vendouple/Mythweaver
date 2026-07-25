@@ -2,8 +2,17 @@
 
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
-import { bgmGetAnalyser } from "@/lib/client/audio";
+import { createMusicPulse } from "@/lib/client/musicPulse";
 import { themeVisual, ThemeKey, ThemeVisual } from "@/components/three/themeVisuals";
+import {
+  GROUND,
+  groundFragment,
+  SIGIL_FIGURE,
+  makeSigilFigureTexture,
+  INHABIT,
+  createInhabitants
+} from "@/components/three/worldSignature";
+import { createThemeProp } from "@/components/three/themeProps";
 
 /* ═══════════════════════════════════════════════════════════════════════════
    THE WORLDFORGE — one visual language for the Gathering and the Weaving.
@@ -252,6 +261,128 @@ const KITS: Record<ThemeKey, LandmarkDef[]> = {
     { prims: ring("box", [0.34, 0.4, 0.1], 5, 1.05, 0.2, 0.22) },
     { prims: [{ g: "box", a: [0.3, 1.6, 0.3], p: [-0.75, 0.8, 0] }, { g: "box", a: [1.9, 0.3, 0.34], p: [0.35, 0.24, 0.15], r: [0, 0.2, 1.32] }] },
     { float: true, prims: [{ g: "tet", a: [0.2], p: [0, 1.5, 0] }, { g: "tet", a: [0.15], p: [0.6, 2.0, 0.3] }, { g: "tet", a: [0.12], p: [-0.5, 2.4, -0.2] }] }
+  ],
+  cyberpunk: [
+    // A megatower stack crowned with a holo-billboard mast.
+    { prims: [{ g: "box", a: [1.1, 1.5, 1.1], p: [0, 0.75, 0] }, { g: "box", a: [0.8, 1.4, 0.8], p: [0.1, 2.2, 0] }, { g: "box", a: [0.5, 1.2, 0.5], p: [-0.05, 3.5, 0] }, { g: "box", a: [1.5, 0.7, 0.06], p: [0, 4.4, 0.3] }, { g: "cyl", a: [0.03, 0.03, 1.1, 4], p: [0, 4.9, 0] }] },
+    { prims: [{ g: "box", a: [0.7, 2.6, 0.7], p: [-0.4, 1.3, 0] }, { g: "box", a: [0.5, 1.7, 0.5], p: [0.55, 0.85, 0.35] }, { g: "box", a: [1.1, 0.05, 0.3], p: [0.1, 2.0, 0.2], r: [0, 0.3, 0.1] }] },
+    // Antenna masts with dish clusters.
+    { prims: trio(() => [{ g: "cyl", a: [0.035, 0.035, 1.6, 4], p: [0, 0.8, 0] }, { g: "cone", a: [0.18, 0.24, 6], p: [0, 1.72, 0] }], [[0, 0], [0.7, 0.3], [-0.55, 0.45]]) },
+    { prims: ring("box", [0.24, 1.25, 0.08], 6, 1.05, 0.62) },
+    // A pedestrian skybridge between two pylons.
+    { prims: [{ g: "box", a: [0.22, 1.9, 0.22], p: [-0.9, 0.95, 0] }, { g: "box", a: [0.22, 1.9, 0.22], p: [0.9, 0.95, 0] }, { g: "box", a: [2.3, 0.16, 0.55], p: [0, 1.95, 0] }, { g: "box", a: [2.3, 0.04, 0.06], p: [0, 2.12, 0.25] }] },
+    { float: true, prims: [{ g: "box", a: [0.2, 0.2, 0.2], p: [0, 1.9, 0] }, { g: "box", a: [0.15, 0.15, 0.15], p: [0.75, 2.5, 0.3] }, { g: "oct", a: [0.12], p: [-0.65, 3.0, -0.25] }] }
+  ],
+  spaceopera: [
+    // A cathedral-spire throne tower, all buttress and crown.
+    { prims: [{ g: "cyl", a: [0.62, 0.85, 2.4, 8], p: [0, 1.2, 0] }, { g: "cone", a: [0.72, 1.5, 8], p: [0, 3.15, 0] }, { g: "torus", a: [0.5, 0.05, 6, 20], p: [0, 3.0, 0], r: [Math.PI / 2, 0, 0] }, { g: "oct", a: [0.3], p: [0, 4.3, 0] }] },
+    // Docked cruisers on a mooring cradle.
+    { prims: [{ g: "cyl", a: [0.28, 0.16, 2.4, 7], p: [-0.3, 1.0, 0], r: [0, 0, Math.PI / 2.1] }, { g: "box", a: [1.5, 0.05, 0.5], p: [-0.3, 1.0, 0] }, { g: "cyl", a: [0.18, 0.1, 1.5, 6], p: [0.85, 0.5, 0.5], r: [0, 0.6, Math.PI / 2.1] }] },
+    { prims: trio(() => [{ g: "cyl", a: [0.07, 0.09, 1.5, 8], p: [0, 0.75, 0] }, { g: "oct", a: [0.2], p: [0, 1.65, 0] }], [[0, 0], [0.72, 0.32], [-0.58, 0.46]]) },
+    { prims: ring("box", [0.26, 1.0, 0.14], 8, 1.05, 0.5) },
+    // A ceremonial gate arch with a keystone jewel.
+    { prims: [{ g: "cyl", a: [0.16, 0.2, 1.7, 8], p: [-0.85, 0.85, 0] }, { g: "cyl", a: [0.16, 0.2, 1.7, 8], p: [0.85, 0.85, 0] }, { g: "torus", a: [0.9, 0.11, 6, 20, Math.PI], p: [0, 1.7, 0] }, { g: "oct", a: [0.2], p: [0, 2.7, 0] }] },
+    { float: true, prims: [{ g: "oct", a: [0.2], p: [0, 2.0, 0] }, { g: "oct", a: [0.16], p: [0.8, 2.6, 0.3] }, { g: "tet", a: [0.14], p: [-0.7, 3.1, -0.25] }] }
+  ],
+  gothic: [
+    // A cathedral bell tower with a spire and flanking pinnacles.
+    { prims: [{ g: "box", a: [0.85, 2.8, 0.85], p: [0, 1.4, 0] }, { g: "cone", a: [0.7, 1.8, 4], p: [0, 3.7, 0], r: [0, Math.PI / 4, 0] }, { g: "cone", a: [0.16, 0.7, 4], p: [-0.5, 3.1, 0.5] }, { g: "cone", a: [0.16, 0.7, 4], p: [0.5, 3.1, -0.5] }] },
+    // A crumbling wing with a collapsed roofline.
+    { prims: [{ g: "box", a: [1.15, 1.9, 0.9], p: [-0.35, 0.95, 0], r: [0, 0, 0.05] }, { g: "box", a: [0.7, 1.3, 0.7], p: [0.7, 0.65, 0.4], r: [0, 0.4, -0.09] }, { g: "cone", a: [0.6, 0.8, 4], p: [-0.35, 2.2, 0], r: [0.12, 0, 0] }] },
+    // Iron cross grave markers.
+    { prims: trio((i) => [{ g: "box", a: [0.07, 1.3, 0.07], p: [0, 0.65, 0], r: [0, 0, 0.12 * (i - 1)] }, { g: "box", a: [0.42, 0.07, 0.07], p: [0, 1.05, 0], r: [0, 0, 0.12 * (i - 1)] }], [[0, 0], [0.62, 0.38], [-0.55, 0.42]]) },
+    { prims: ring("box", [0.22, 0.95, 0.14], 6, 1.0, 0.42, 0.12) },
+    // A wrought-iron gate under a pointed arch.
+    { prims: [{ g: "cyl", a: [0.11, 0.13, 1.8, 6], p: [-0.85, 0.9, 0] }, { g: "cyl", a: [0.11, 0.13, 1.8, 6], p: [0.85, 0.9, 0] }, { g: "cone", a: [0.16, 0.4, 4], p: [-0.85, 2.0, 0] }, { g: "cone", a: [0.16, 0.4, 4], p: [0.85, 2.0, 0] }, { g: "torus", a: [0.86, 0.06, 5, 18, Math.PI], p: [0, 1.8, 0] }] },
+    { float: true, prims: [{ g: "tet", a: [0.16], p: [0, 1.7, 0] }, { g: "sphere", a: [0.12, 6, 5], p: [0.62, 2.25, 0.28] }, { g: "tet", a: [0.11], p: [-0.55, 2.7, -0.22] }] }
+  ],
+  urbanfantasy: [
+    // A brownstone walk-up with a fire escape and a rooftop water tank.
+    { prims: [{ g: "box", a: [1.0, 2.6, 0.95], p: [0, 1.3, 0] }, { g: "box", a: [1.1, 0.12, 1.05], p: [0, 2.65, 0] }, { g: "cyl", a: [0.32, 0.32, 0.6, 8], p: [0.25, 3.0, 0] }, { g: "cone", a: [0.36, 0.24, 8], p: [0.25, 3.4, 0] }, { g: "box", a: [0.06, 1.9, 0.5], p: [-0.55, 1.3, 0.5] }] },
+    { prims: [{ g: "box", a: [0.8, 1.8, 0.8], p: [-0.4, 0.9, 0] }, { g: "box", a: [0.62, 2.4, 0.62], p: [0.55, 1.2, 0.35] }, { g: "box", a: [0.7, 0.05, 0.2], p: [0.55, 2.45, 0.35] }] },
+    // Streetlamps with warded glass.
+    { prims: trio(() => [{ g: "cyl", a: [0.045, 0.06, 1.7, 6], p: [0, 0.85, 0] }, { g: "oct", a: [0.16], p: [0, 1.8, 0] }], [[0, 0], [0.72, 0.32], [-0.58, 0.44]]) },
+    // Standing stones with a ley-line cant — the old world under the new.
+    { prims: ring("box", [0.26, 0.9, 0.16], 6, 1.05, 0.45, 0.14) },
+    // A subway entrance: rail, stair mouth, and a warded lintel.
+    { prims: [{ g: "box", a: [0.16, 1.0, 0.16], p: [-0.8, 0.5, 0] }, { g: "box", a: [0.16, 1.0, 0.16], p: [0.8, 0.5, 0] }, { g: "box", a: [1.9, 0.14, 0.5], p: [0, 1.05, 0] }, { g: "box", a: [1.5, 0.06, 0.9], p: [0, 0.05, 0.5], r: [0.3, 0, 0] }] },
+    { float: true, prims: [{ g: "oct", a: [0.2], p: [0, 1.8, 0] }, { g: "tet", a: [0.15], p: [0.7, 2.4, 0.3] }, { g: "oct", a: [0.12], p: [-0.6, 2.85, -0.22] }] }
+  ],
+  steampunk: [
+    // A boiler house: pressure vessel, chimney stack, and a pipe run.
+    { prims: [{ g: "cyl", a: [0.7, 0.7, 1.6, 10], p: [0, 0.8, 0], r: [0, 0, Math.PI / 2] }, { g: "cyl", a: [0.24, 0.3, 2.4, 8], p: [0.1, 2.0, 0] }, { g: "torus", a: [0.3, 0.06, 5, 14], p: [0.1, 3.1, 0], r: [Math.PI / 2, 0, 0] }, { g: "cyl", a: [0.09, 0.09, 1.2, 6], p: [-0.7, 1.5, 0.35] }] },
+    { prims: [{ g: "cyl", a: [0.75, 0.9, 1.5, 8], p: [-0.3, 0.75, 0] }, { g: "torus", a: [0.55, 0.11, 5, 12], p: [-0.3, 1.5, 0], r: [Math.PI / 2, 0, 0] }, { g: "cyl", a: [0.4, 0.5, 1.0, 7], p: [0.75, 0.5, 0.4] }] },
+    // Pipe stanchions with valve wheels.
+    { prims: trio(() => [{ g: "cyl", a: [0.09, 0.11, 1.25, 8], p: [0, 0.62, 0] }, { g: "torus", a: [0.19, 0.045, 5, 12], p: [0, 1.3, 0], r: [Math.PI / 2, 0, 0] }], [[0, 0], [0.7, 0.32], [-0.56, 0.44]]) },
+    // Upright gear teeth instead of standing stones.
+    { prims: ring("box", [0.22, 0.6, 0.22], 8, 1.0, 0.32) },
+    // A riveted trestle bridge with a gearbox housing.
+    { prims: [{ g: "box", a: [0.26, 1.5, 0.26], p: [-0.85, 0.75, 0] }, { g: "box", a: [0.26, 1.5, 0.26], p: [0.85, 0.75, 0] }, { g: "box", a: [2.2, 0.24, 0.45], p: [0, 1.6, 0] }, { g: "cyl", a: [0.28, 0.28, 0.5, 8], p: [0, 1.95, 0], r: [Math.PI / 2, 0, 0] }] },
+    { float: true, prims: [{ g: "torus", a: [0.2, 0.05, 5, 10], p: [0, 1.7, 0] }, { g: "torus", a: [0.15, 0.04, 5, 9], p: [0.68, 2.25, 0.3], r: [0.6, 0, 0] }, { g: "oct", a: [0.11], p: [-0.58, 2.7, -0.22] }] }
+  ],
+  pirate: [
+    // A lighthouse over the anchorage.
+    { prims: [{ g: "cyl", a: [0.42, 0.68, 2.6, 9], p: [0, 1.3, 0] }, { g: "cyl", a: [0.5, 0.5, 0.42, 9], p: [0, 2.8, 0] }, { g: "cone", a: [0.55, 0.6, 9], p: [0, 3.3, 0] }, { g: "oct", a: [0.16], p: [0, 3.75, 0] }] },
+    // A beached hull, ribs to the sky.
+    { prims: [{ g: "cyl", a: [0.55, 0.2, 2.6, 6], p: [-0.25, 0.6, 0], r: [0, 0.4, Math.PI / 2.2] }, { g: "cyl", a: [0.05, 0.05, 2.2, 5], p: [-0.1, 1.7, 0], r: [0.2, 0, 0.12] }, { g: "box", a: [0.9, 1.2, 0.03], p: [0.15, 1.8, 0], r: [0, 0, 0.12] }] },
+    // Mooring posts with coiled rope.
+    { prims: trio(() => [{ g: "cyl", a: [0.15, 0.17, 0.95, 7], p: [0, 0.47, 0] }, { g: "torus", a: [0.19, 0.05, 5, 12], p: [0, 0.8, 0], r: [Math.PI / 2, 0, 0] }], [[0, 0], [0.75, 0.34], [-0.6, 0.44]]) },
+    // Cannon barrels standing on end, a ring of black iron.
+    { prims: ring("cyl", [0.11, 0.14, 0.8, 8], 6, 1.0, 0.4, 0.18) },
+    // A gallows-arm crane over the dock.
+    { prims: [{ g: "cyl", a: [0.13, 0.16, 2.0, 7], p: [-0.55, 1.0, 0] }, { g: "box", a: [1.9, 0.18, 0.22], p: [0.25, 1.95, 0] }, { g: "cyl", a: [0.03, 0.03, 0.8, 4], p: [1.1, 1.5, 0] }, { g: "box", a: [0.3, 0.3, 0.3], p: [1.1, 1.0, 0] }] },
+    { float: true, prims: [{ g: "tet", a: [0.2], p: [0, 1.5, 0] }, { g: "box", a: [0.34, 0.05, 0.16], p: [0.65, 2.0, 0.3] }, { g: "tet", a: [0.13], p: [-0.55, 2.4, -0.2] }] }
+  ],
+  eastasian: [
+    // A tiered pagoda — the silhouette that says the genre in one shape.
+    { prims: [{ g: "cyl", a: [0.45, 0.5, 1.0, 8], p: [0, 0.5, 0] }, { g: "cone", a: [1.15, 0.34, 4], p: [0, 1.15, 0], r: [0, Math.PI / 4, 0] }, { g: "cyl", a: [0.36, 0.4, 0.85, 8], p: [0, 1.75, 0] }, { g: "cone", a: [0.95, 0.3, 4], p: [0, 2.3, 0], r: [0, Math.PI / 4, 0] }, { g: "cyl", a: [0.28, 0.3, 0.7, 8], p: [0, 2.85, 0] }, { g: "cone", a: [0.75, 0.28, 4], p: [0, 3.3, 0], r: [0, Math.PI / 4, 0] }, { g: "cyl", a: [0.04, 0.04, 0.7, 4], p: [0, 3.75, 0] }] },
+    // Terraced mountain crags.
+    { prims: [{ g: "cone", a: [1.2, 2.4, 5], p: [-0.3, 1.2, 0] }, { g: "cone", a: [0.82, 1.6, 5], p: [0.78, 0.8, 0.42] }] },
+    // A bamboo stand.
+    { prims: trio((i) => [{ g: "cyl", a: [0.07, 0.07, 1.9, 6], p: [0, 0.95, 0], r: [0, 0, 0.07 * (i - 1)] }, { g: "cyl", a: [0.05, 0.05, 0.5, 5], p: [0.14, 1.9, 0], r: [0, 0, 0.5] }], [[0, 0], [0.6, 0.34], [-0.5, 0.42]]) },
+    // Stone lanterns in a ring.
+    { prims: ring("box", [0.26, 0.7, 0.26], 6, 1.0, 0.36) },
+    // A torii gate.
+    { prims: [{ g: "cyl", a: [0.13, 0.15, 1.8, 8], p: [-0.85, 0.9, 0], r: [0, 0, 0.03] }, { g: "cyl", a: [0.13, 0.15, 1.8, 8], p: [0.85, 0.9, 0], r: [0, 0, -0.03] }, { g: "box", a: [2.45, 0.16, 0.3], p: [0, 1.92, 0] }, { g: "box", a: [2.15, 0.13, 0.24], p: [0, 1.6, 0] }] },
+    { float: true, prims: [{ g: "oct", a: [0.16], p: [0, 1.7, 0] }, { g: "tet", a: [0.13], p: [0.66, 2.25, 0.3] }, { g: "oct", a: [0.11], p: [-0.56, 2.7, -0.22] }] }
+  ],
+  superhero: [
+    // A skyscraper HQ with a beacon mast.
+    { prims: [{ g: "box", a: [1.0, 3.2, 1.0], p: [0, 1.6, 0] }, { g: "box", a: [0.7, 0.7, 0.7], p: [0, 3.55, 0] }, { g: "cyl", a: [0.035, 0.035, 1.2, 4], p: [0, 4.4, 0] }, { g: "oct", a: [0.26], p: [0, 5.1, 0] }] },
+    { prims: [{ g: "box", a: [0.8, 2.2, 0.8], p: [-0.42, 1.1, 0] }, { g: "box", a: [0.6, 1.5, 0.6], p: [0.55, 0.75, 0.35] }] },
+    // Rooftop signal projectors.
+    { prims: trio(() => [{ g: "cyl", a: [0.09, 0.13, 1.1, 6], p: [0, 0.55, 0] }, { g: "cone", a: [0.24, 0.36, 8], p: [0, 1.28, 0] }], [[0, 0], [0.72, 0.32], [-0.56, 0.44]]) },
+    // A ring of monument pylons.
+    { prims: ring("box", [0.28, 1.15, 0.14], 6, 1.05, 0.58) },
+    // A suspension span — the bridge every third-act fight happens on.
+    { prims: [{ g: "box", a: [0.2, 2.2, 0.2], p: [-0.9, 1.1, 0] }, { g: "box", a: [0.2, 2.2, 0.2], p: [0.9, 1.1, 0] }, { g: "box", a: [2.4, 0.12, 0.6], p: [0, 0.9, 0] }, { g: "box", a: [0.04, 0.04, 0.04], p: [0, 2.2, 0] }, { g: "torus", a: [0.9, 0.03, 4, 16, Math.PI], p: [0, 1.0, 0], r: [0, 0, Math.PI] }] },
+    { float: true, prims: [{ g: "tet", a: [0.22], p: [0, 1.9, 0] }, { g: "oct", a: [0.16], p: [0.75, 2.5, 0.3] }, { g: "tet", a: [0.13], p: [-0.65, 3.0, -0.25] }] }
+  ],
+  pulp: [
+    // A stepped ziggurat temple with an idol niche.
+    { prims: [{ g: "box", a: [2.0, 0.6, 2.0], p: [0, 0.3, 0] }, { g: "box", a: [1.5, 0.55, 1.5], p: [0, 0.87, 0] }, { g: "box", a: [1.0, 0.5, 1.0], p: [0, 1.4, 0] }, { g: "box", a: [0.55, 0.6, 0.55], p: [0, 1.95, 0] }, { g: "oct", a: [0.22], p: [0, 2.5, 0] }] },
+    // Jungle-swallowed ruins.
+    { prims: [{ g: "box", a: [1.1, 1.4, 0.9], p: [-0.35, 0.7, 0], r: [0, 0.2, 0.08] }, { g: "cone", a: [0.7, 1.5, 5], p: [0.7, 0.75, 0.4] }, { g: "box", a: [0.9, 0.24, 0.24], p: [-0.1, 1.5, 0.2], r: [0, 0.5, 0.3] }] },
+    // Carved totem posts.
+    { prims: trio((i) => [{ g: "box", a: [0.2, 1.35, 0.2], p: [0, 0.68, 0], r: [0, 0.4 * i, 0.06 * (i - 1)] }, { g: "oct", a: [0.16], p: [0, 1.45, 0] }], [[0, 0], [0.68, 0.34], [-0.55, 0.44]]) },
+    // A ring of fallen columns, half-standing.
+    { prims: ring("cyl", [0.17, 0.19, 0.85, 8], 6, 1.0, 0.42, 0.2) },
+    // A rope bridge over the chasm.
+    { prims: [{ g: "cyl", a: [0.13, 0.15, 1.6, 6], p: [-0.9, 0.8, 0], r: [0, 0, 0.09] }, { g: "cyl", a: [0.13, 0.15, 1.6, 6], p: [0.9, 0.8, 0], r: [0, 0, -0.09] }, { g: "box", a: [2.3, 0.06, 0.5], p: [0, 1.35, 0] }, { g: "box", a: [2.3, 0.03, 0.03], p: [0, 1.62, 0.24] }] },
+    { float: true, prims: [{ g: "tet", a: [0.2], p: [0, 1.6, 0] }, { g: "tet", a: [0.15], p: [0.66, 2.15, 0.3] }, { g: "oct", a: [0.12], p: [-0.56, 2.6, -0.22] }] }
+  ],
+  cozy: [
+    // A cottage with a chimney — the warmest silhouette in the set.
+    { prims: [{ g: "box", a: [1.5, 1.2, 1.3], p: [0, 0.6, 0] }, { g: "cone", a: [1.25, 0.9, 4], p: [0, 1.65, 0], r: [0, Math.PI / 4, 0] }, { g: "box", a: [0.3, 0.9, 0.3], p: [0.5, 1.75, 0.3] }, { g: "box", a: [0.36, 0.12, 0.36], p: [0.5, 2.25, 0.3] }] },
+    // A little barn and a woodshed.
+    { prims: [{ g: "box", a: [1.05, 1.0, 0.95], p: [-0.35, 0.5, 0] }, { g: "cone", a: [0.9, 0.6, 4], p: [-0.35, 1.3, 0], r: [0, Math.PI / 4, 0] }, { g: "box", a: [0.7, 0.6, 0.6], p: [0.7, 0.3, 0.4] }] },
+    // Round little trees in the garden.
+    { prims: trio(() => [{ g: "cyl", a: [0.09, 0.11, 0.6, 6], p: [0, 0.3, 0] }, { g: "sphere", a: [0.42, 7, 6], p: [0, 0.95, 0] }], [[0, 0], [0.75, 0.34], [-0.6, 0.46]]) },
+    // A ring of garden lanterns on low posts.
+    { prims: ring("box", [0.16, 0.5, 0.16], 6, 1.0, 0.28) },
+    // A garden gate with a flower arch.
+    { prims: [{ g: "cyl", a: [0.09, 0.1, 1.2, 6], p: [-0.7, 0.6, 0] }, { g: "cyl", a: [0.09, 0.1, 1.2, 6], p: [0.7, 0.6, 0] }, { g: "torus", a: [0.72, 0.07, 5, 16, Math.PI], p: [0, 1.2, 0] }, { g: "box", a: [1.2, 0.5, 0.05], p: [0, 0.35, 0] }] },
+    { float: true, prims: [{ g: "sphere", a: [0.14, 6, 5], p: [0, 1.5, 0] }, { g: "sphere", a: [0.11, 6, 5], p: [0.6, 2.0, 0.28] }, { g: "sphere", a: [0.09, 6, 5], p: [-0.5, 2.4, -0.2] }] }
   ]
 };
 
@@ -333,6 +464,117 @@ const EMBLEMS: Record<ThemeKey, { prims: Prim[]; y: number }> = {
       { g: "torus", a: [0.85, 0.14, 5, 9], r: [Math.PI / 2, 0, 0] },
       ...ring("box", [0.2, 0.32, 0.2], 6, 1.0, 0)
     ]
+  },
+  cyberpunk: {
+    // A torn-loose holo-billboard frame, still cycling its ad.
+    y: 5.0,
+    prims: [
+      { g: "box", a: [2.2, 1.3, 0.06] },
+      { g: "box", a: [2.4, 0.07, 0.14], p: [0, 0.72, 0] },
+      { g: "box", a: [2.4, 0.07, 0.14], p: [0, -0.72, 0] },
+      { g: "cyl", a: [0.05, 0.05, 1.2, 4], p: [0, -1.3, 0] },
+      { g: "oct", a: [0.16], p: [1.35, 0.4, 0] }
+    ]
+  },
+  spaceopera: {
+    // A capital ship: spine, command tower, and engine nacelles.
+    y: 5.8,
+    prims: [
+      { g: "cyl", a: [0.2, 0.42, 3.4, 8], r: [0, 0, Math.PI / 2] },
+      { g: "box", a: [0.5, 0.45, 0.5], p: [-0.5, 0.4, 0] },
+      { g: "cyl", a: [0.16, 0.16, 0.7, 6], p: [1.75, 0.22, 0.3], r: [0, 0, Math.PI / 2] },
+      { g: "cyl", a: [0.16, 0.16, 0.7, 6], p: [1.75, 0.22, -0.3], r: [0, 0, Math.PI / 2] },
+      { g: "box", a: [0.06, 0.9, 1.6], p: [0.3, 0, 0] }
+    ]
+  },
+  gothic: {
+    // A rose window torn from its wall, tracery and all.
+    y: 4.2,
+    prims: [
+      { g: "torus", a: [0.95, 0.06, 6, 28] },
+      { g: "torus", a: [0.5, 0.05, 5, 20] },
+      { g: "box", a: [1.9, 0.05, 0.05] },
+      { g: "box", a: [1.9, 0.05, 0.05], r: [0, 0, Math.PI / 3] },
+      { g: "box", a: [1.9, 0.05, 0.05], r: [0, 0, -Math.PI / 3] }
+    ]
+  },
+  urbanfantasy: {
+    // A ley-line compass: a warded ring around a floating sigil stone.
+    y: 4.8,
+    prims: [
+      { g: "torus", a: [1.0, 0.045, 5, 26], r: [Math.PI / 2.6, 0, 0] },
+      { g: "torus", a: [0.7, 0.035, 5, 20], r: [0, Math.PI / 3, 0.5] },
+      { g: "oct", a: [0.34] },
+      { g: "tet", a: [0.16], p: [0.95, 0.2, 0] }
+    ]
+  },
+  steampunk: {
+    // An airship: gasbag envelope, gondola, and a stern propeller.
+    y: 5.2,
+    prims: [
+      { g: "sphere", a: [0.85, 10, 7] },
+      { g: "box", a: [1.0, 0.32, 0.42], p: [0, -0.95, 0] },
+      { g: "torus", a: [0.32, 0.04, 4, 12], p: [-1.1, -0.35, 0], r: [0, Math.PI / 2, 0] },
+      { g: "box", a: [0.7, 0.04, 0.04], p: [-1.1, -0.35, 0], r: [Math.PI / 4, 0, 0] },
+      { g: "cone", a: [0.3, 0.5, 6], p: [1.0, 0, 0], r: [0, 0, -Math.PI / 2] }
+    ]
+  },
+  pirate: {
+    // A ship's wheel, still turning where the helmsman left it.
+    y: 4.0,
+    prims: [
+      { g: "torus", a: [0.8, 0.075, 6, 22] },
+      { g: "torus", a: [0.3, 0.06, 5, 14] },
+      { g: "box", a: [1.9, 0.07, 0.07] },
+      { g: "box", a: [1.9, 0.07, 0.07], r: [0, 0, Math.PI / 4] },
+      { g: "box", a: [1.9, 0.07, 0.07], r: [0, 0, Math.PI / 2] },
+      { g: "box", a: [1.9, 0.07, 0.07], r: [0, 0, -Math.PI / 4] }
+    ]
+  },
+  eastasian: {
+    // A sky lantern trailing a paper streamer.
+    y: 4.6,
+    prims: [
+      { g: "cyl", a: [0.42, 0.42, 0.75, 10] },
+      { g: "torus", a: [0.44, 0.035, 4, 16], p: [0, 0.38, 0], r: [Math.PI / 2, 0, 0] },
+      { g: "torus", a: [0.44, 0.035, 4, 16], p: [0, -0.38, 0], r: [Math.PI / 2, 0, 0] },
+      { g: "box", a: [0.08, 0.9, 0.02], p: [0, -0.9, 0] },
+      { g: "oct", a: [0.1], p: [0, 0.62, 0] }
+    ]
+  },
+  superhero: {
+    // The signal itself: a beacon dish throwing an emblem into the sky.
+    y: 5.4,
+    prims: [
+      { g: "cyl", a: [0.7, 0.55, 0.3, 12], r: [Math.PI / 2.6, 0, 0] },
+      { g: "oct", a: [0.3], p: [0, 0.5, 0.35] },
+      { g: "cyl", a: [0.07, 0.07, 1.1, 6], p: [0, -0.7, 0] },
+      { g: "box", a: [1.5, 0.05, 0.05], p: [0, 0.1, 0.45], r: [0, 0, 0.5] },
+      { g: "box", a: [1.5, 0.05, 0.05], p: [0, 0.1, 0.45], r: [0, 0, -0.5] }
+    ]
+  },
+  pulp: {
+    // A biplane, banked hard over the lost valley.
+    y: 4.9,
+    prims: [
+      { g: "cyl", a: [0.2, 0.12, 1.9, 7], r: [0, 0, Math.PI / 2] },
+      { g: "box", a: [0.5, 0.04, 2.2], p: [0.15, 0.16, 0] },
+      { g: "box", a: [0.45, 0.04, 1.9], p: [0.2, -0.2, 0] },
+      { g: "box", a: [0.3, 0.04, 0.7], p: [-0.85, 0.06, 0] },
+      { g: "box", a: [0.04, 0.5, 0.3], p: [-0.9, 0.25, 0] },
+      { g: "box", a: [0.04, 0.9, 0.04], p: [1.0, 0, 0] }
+    ]
+  },
+  cozy: {
+    // A hanging lantern and a drifting teacup — the whole genre, orbiting.
+    y: 3.8,
+    prims: [
+      { g: "cyl", a: [0.34, 0.4, 0.55, 8] },
+      { g: "cone", a: [0.44, 0.24, 8], p: [0, 0.4, 0] },
+      { g: "torus", a: [0.14, 0.03, 4, 12], p: [0, 0.62, 0], r: [Math.PI / 2, 0, 0] },
+      { g: "cyl", a: [0.26, 0.18, 0.28, 10], p: [0.95, -0.25, 0.1] },
+      { g: "torus", a: [0.12, 0.025, 4, 10], p: [1.25, -0.25, 0.1], r: [0, Math.PI / 2, 0] }
+    ]
   }
 };
 
@@ -346,30 +588,96 @@ const DEBRIS_SHAPE: Record<ThemeKey, (rand: () => number) => THREE.BufferGeometr
   noir: (r) => new THREE.BoxGeometry(0.06, 0.4 + r() * 0.45, 0.06),
   modern: (r) => new THREE.IcosahedronGeometry(0.17 + r() * 0.18, 0),
   western: (r) => new THREE.BoxGeometry(0.45 + r() * 0.35, 0.07, 0.16),
-  postapoc: (r) => new THREE.TetrahedronGeometry(0.26 + r() * 0.34, 0)
+  postapoc: (r) => new THREE.TetrahedronGeometry(0.26 + r() * 0.34, 0),
+  // Shattered screen panels, still lit.
+  cyberpunk: (r) => new THREE.BoxGeometry(0.3 + r() * 0.34, 0.2 + r() * 0.2, 0.03),
+  // Hull plating off a capital ship.
+  spaceopera: (r) => new THREE.BoxGeometry(0.4 + r() * 0.4, 0.06, 0.3 + r() * 0.2),
+  // Broken masonry and window tracery.
+  gothic: (r) => new THREE.BoxGeometry(0.18 + r() * 0.2, 0.34 + r() * 0.3, 0.1),
+  // Loose sigil shards.
+  urbanfantasy: (r) => new THREE.OctahedronGeometry(0.18 + r() * 0.22, 0),
+  // Cogs and cast fittings.
+  steampunk: (r) => new THREE.CylinderGeometry(0.2 + r() * 0.18, 0.2 + r() * 0.18, 0.08, 7),
+  // Splintered planking and spar ends.
+  pirate: (r) => new THREE.BoxGeometry(0.5 + r() * 0.4, 0.06, 0.13),
+  // Roof tiles and lantern paper.
+  eastasian: (r) => new THREE.BoxGeometry(0.34 + r() * 0.26, 0.05, 0.22 + r() * 0.14),
+  // Rubble chunks torn out of a skyline.
+  superhero: (r) => new THREE.IcosahedronGeometry(0.2 + r() * 0.26, 0),
+  // Crates and packing cases off the expedition.
+  pulp: (r) => new THREE.BoxGeometry(0.26 + r() * 0.2, 0.2 + r() * 0.16, 0.22 + r() * 0.16),
+  // Drifting petals and leaves — nothing sharp in a cozy sky.
+  cozy: (r) => new THREE.SphereGeometry(0.13 + r() * 0.14, 6, 5)
 };
 
 /* ── per-theme audio flavor ────────────────────────────────────────────────
-   Beyond the bass beat (which fires the ground ripple), the music drives the
-   scene through three bands — bass, mids, treble — plus a mid-band onset
-   detector (the riff). Each genre reacts through its own channels so its
-   music feels alive in its own way: noir rain pours harder with the mids,
-   scifi rings spin up on treble, postapoc surges on the riff, horror lights
-   sag under the swell.
+   The scene listens to the score through `createMusicPulse`, which separates
+   the drum kit from everything else: KICK (45-130 Hz flux), SNARE (340-3600
+   Hz flux), HAT (3600-15000 Hz flux) and SWELL (a sustained crescendo, i.e.
+   strings and choir rather than percussion). Each genre answers those four
+   voices with its own emphasis, so a horror cue and a cyberpunk cue drive the
+   same geometry to completely different effect.
+
+   Continuous band channels (how the music's *texture* moves the world):
      rush    — mids accelerate the theme weather (rain / ash / embers)
-     twinkle — treble shimmers the dust, weather, and vortex motes
-     spin    — treble spins the ascension rings and foundation spokes
-     surge   — riff onsets flare the heart, emblems, and sigil
-     sag     — mids strain the lights (candle / reactor gutter deepens) */
-const AUDIO_FLAVOR: Record<ThemeKey, { rush: number; twinkle: number; spin: number; surge: number; sag: number }> = {
-  none: { rush: 0.5, twinkle: 0.6, spin: 0.4, surge: 0.6, sag: 0 },
-  fantasy: { rush: 0.9, twinkle: 1.1, spin: 0.4, surge: 0.7, sag: 0 },
-  scifi: { rush: 0.4, twinkle: 0.8, spin: 1.6, surge: 0.9, sag: 0 },
-  horror: { rush: 0.7, twinkle: 0.3, spin: 0.2, surge: 0.4, sag: 1.2 },
-  noir: { rush: 1.5, twinkle: 0.5, spin: 0.3, surge: 0.4, sag: 0.5 },
-  modern: { rush: 0.6, twinkle: 1.0, spin: 1.1, surge: 0.7, sag: 0 },
-  western: { rush: 1.2, twinkle: 0.6, spin: 0.4, surge: 0.6, sag: 0.6 },
-  postapoc: { rush: 1.0, twinkle: 0.5, spin: 0.5, surge: 1.65, sag: 0.8 }
+     twinkle — highs shimmer the dust, weather, and vortex motes
+     spin    — highs spin the oblique rings and foundation spokes
+     sag     — mids strain the lights (candle / reactor gutter deepens)
+
+   Transient channels (how a detected HIT lands — the visual "feedback"):
+     kick    — ground shockwave depth + equatorial ring thrust
+     snare   — meridian ring crack, sigil flash, spark stutter
+     hat     — sparkle ripple, dust glint, ring shimmer
+     swell   — heart bloom, beam column, emblem flare on crescendos */
+type AudioFlavor = {
+  rush: number;
+  twinkle: number;
+  spin: number;
+  sag: number;
+  kick: number;
+  snare: number;
+  hat: number;
+  swell: number;
+};
+
+const AUDIO_FLAVOR: Record<ThemeKey, AudioFlavor> = {
+  // Neutral: balanced across the kit.
+  none: { rush: 0.5, twinkle: 0.6, spin: 0.4, sag: 0, kick: 1, snare: 0.8, hat: 0.7, swell: 0.8 },
+  // Orchestral: the swell is the star, drums are ceremonial.
+  fantasy: { rush: 0.9, twinkle: 1.1, spin: 0.4, sag: 0, kick: 0.85, snare: 0.6, hat: 1.1, swell: 1.5 },
+  // Synth/percussive: crisp hats, machine-tight snare, hard four-on-the-floor.
+  scifi: { rush: 0.4, twinkle: 0.8, spin: 1.6, sag: 0, kick: 1.2, snare: 1.1, hat: 1.5, swell: 0.7 },
+  // Sparse and dread-driven: almost no kit, everything rides the swell/sag.
+  horror: { rush: 0.7, twinkle: 0.3, spin: 0.2, sag: 1.2, kick: 0.55, snare: 1.35, hat: 0.35, swell: 1.6 },
+  // Jazz: brushed snare and ride cymbal carry the groove, kick stays soft.
+  noir: { rush: 1.5, twinkle: 0.5, spin: 0.3, sag: 0.5, kick: 0.6, snare: 1.45, hat: 1.2, swell: 0.9 },
+  // Contemporary score: driving kick, tight percussive detail.
+  modern: { rush: 0.6, twinkle: 1.0, spin: 1.1, sag: 0, kick: 1.25, snare: 1.0, hat: 1.0, swell: 0.8 },
+  // Frontier: stomp-and-holler — heavy kick, handclap snare, little shimmer.
+  western: { rush: 1.2, twinkle: 0.6, spin: 0.4, sag: 0.6, kick: 1.3, snare: 1.15, hat: 0.5, swell: 0.9 },
+  // Industrial: the snare is a hammer strike and the kick shakes the ground.
+  postapoc: { rush: 1.0, twinkle: 0.5, spin: 0.5, sag: 0.8, kick: 1.45, snare: 1.6, hat: 0.6, swell: 0.7 },
+  // Synthwave: the hardest four-on-the-floor in the set, gated snare, arps.
+  cyberpunk: { rush: 1.1, twinkle: 1.0, spin: 1.8, sag: 0.7, kick: 1.6, snare: 1.3, hat: 1.6, swell: 0.6 },
+  // Full orchestra + choir: the crescendo IS the genre; drums are timpani.
+  spaceopera: { rush: 0.6, twinkle: 1.0, spin: 0.9, sag: 0, kick: 0.9, snare: 0.7, hat: 0.9, swell: 1.8 },
+  // Pipe organ and strings: enormous swells, a tolling bell for a kick.
+  gothic: { rush: 0.6, twinkle: 0.45, spin: 0.25, sag: 1.0, kick: 1.0, snare: 0.85, hat: 0.5, swell: 1.7 },
+  // Rock kit under strings — a full band, everything reads.
+  urbanfantasy: { rush: 0.9, twinkle: 1.05, spin: 0.9, sag: 0.3, kick: 1.15, snare: 1.2, hat: 1.15, swell: 1.1 },
+  // Mechanical: everything on the clockwork grid, hats are escapement ticks.
+  steampunk: { rush: 0.85, twinkle: 0.7, spin: 1.5, sag: 0.5, kick: 1.25, snare: 1.05, hat: 1.35, swell: 0.85 },
+  // Sea shanty: stomping kick and clapped downbeats, big choral swells.
+  pirate: { rush: 1.3, twinkle: 0.65, spin: 0.5, sag: 0.35, kick: 1.4, snare: 1.25, hat: 0.7, swell: 1.25 },
+  // Taiko and koto: thunderous kick, sharp rim, delicate plucked shimmer.
+  eastasian: { rush: 0.8, twinkle: 1.15, spin: 0.6, sag: 0.25, kick: 1.5, snare: 1.2, hat: 1.2, swell: 1.2 },
+  // Brass fanfare: heroic swells over a marching kit.
+  superhero: { rush: 0.85, twinkle: 1.0, spin: 1.2, sag: 0, kick: 1.3, snare: 1.25, hat: 1.0, swell: 1.55 },
+  // Adventure serial: snare rolls and timpani driving a big brass theme.
+  pulp: { rush: 1.15, twinkle: 0.8, spin: 0.8, sag: 0.3, kick: 1.2, snare: 1.4, hat: 0.85, swell: 1.35 },
+  // Acoustic and soft: barely any transient at all — it all rides the texture.
+  cozy: { rush: 0.5, twinkle: 0.95, spin: 0.3, sag: 0.15, kick: 0.6, snare: 0.55, hat: 0.9, swell: 1.15 }
 };
 
 /* ── the materialization shader ────────────────────────────────────────────
@@ -474,6 +782,7 @@ export default function WorldForge({
   mode = "weaving",
   progress = 0,
   drama = 0.5,
+  arrivals = 0,
   accent,
   theme = "none",
   title = ""
@@ -484,6 +793,14 @@ export default function WorldForge({
   progress?: number;
   /** Lobby charge (players seated); 0..1-ish. */
   drama?: number;
+  /**
+   * Lobby: a monotonically rising count of seated heroes. Every INCREASE fires
+   * a one-shot arrival rite in the scene — a thread of light strikes down into
+   * the circle, the ground answers with a ring, and the worldheart flares.
+   * The lobby used to have no events at all, only a slow `drama` ramp, so a
+   * hero taking their seat was invisible in 3D; this makes each one land.
+   */
+  arrivals?: number;
   accent?: string;
   theme?: ThemeKey | string | null;
   /** Weaving only: drawn into the in-scene readout (kicker + title + percent). */
@@ -494,6 +811,8 @@ export default function WorldForge({
   progressRef.current = progress;
   const dramaRef = useRef(drama);
   dramaRef.current = drama;
+  const arrivalsRef = useRef(arrivals);
+  arrivalsRef.current = arrivals;
   // Ref, not an effect dep: a sealed campaign's title is revealed mid-finale,
   // and rebuilding the whole scene for a caption change would reset the world.
   const titleRef = useRef(title);
@@ -602,6 +921,34 @@ export default function WorldForge({
       };
     });
 
+    /* -- the island's population --------------------------------------------
+       The world used to finish forging and stand there empty. Now the plateau
+       has PEOPLE on it, and they act out the genre while you wait: knights
+       trading blows on the snare, a hooded circle raising their arms on the
+       crescendo, smiths whose hammers fall on the kick, a patrol walking the
+       rim, an honor guard standing dead still. They fade in as the island
+       itself becomes solid, so the world visibly gets inhabited rather than
+       just built. Two draw calls for the whole crowd. */
+    const inhabitants = createInhabitants(
+      INHABIT[visual.key] || INHABIT.none,
+      visual,
+      sparkTexture,
+      // The plateau's top surface: the shared island cylinder, at its anchor.
+      0.75
+    );
+    scene.add(inhabitants.object);
+    disposables.push(inhabitants);
+
+    /* -- the theme's signature landmark -------------------------------------
+       The hero object that sells the genre at a glance, standing out past the
+       armillary: a ghost galleon riding real water for pirate, a spinner
+       hanging in the rain for cyberpunk, a wind-belled pagoda for east-asian,
+       an enchanted blade, an orbital station, a guttering candelabra… The
+       lobby cosmos has always had these; the Weaving and the Gathering were
+       missing them entirely, which is why every genre's sky looked alike. */
+    const themeProp = createThemeProp(scene, visual, "loom");
+    if (themeProp) disposables.push(themeProp);
+
     /* -- far debris: never assembles, pure depth dressing (themed) ---------- */
     const debrisShape = DEBRIS_SHAPE[visual.key] || DEBRIS_SHAPE.none;
     const debris: Array<{ line: THREE.LineSegments; radius: number; y: number; seed: number; speed: number }> = [];
@@ -647,7 +994,16 @@ export default function WorldForge({
       disposables.push(material);
     }
 
-    /* -- foundation grid (holographic scaffolding) ------------------------- */
+    /* -- the foundation: the genre's OWN ground -----------------------------
+       This plane is the largest thing on screen, and until now every genre got
+       the same holographic radar grid. Now each one stands on its own surface
+       (see worldSignature.ts): the pirate world floats on a luminous SEA with
+       rolling swell and caustics, cyberpunk on a live circuit die with data
+       running the traces, gothic on cathedral tracery, horror on something
+       under the floor that breathes, the frontier on cracked hardpan, and so
+       on. The kick/snare/hat transient tail is shared by every mode, so the
+       whole set still answers the drum kit identically. */
+    const groundMode = GROUND[visual.key] || GROUND.none;
     const gridUniforms = {
       uTime: { value: 0 },
       // Accumulated spoke drift — advanced on the CPU so treble can speed it
@@ -655,13 +1011,22 @@ export default function WorldForge({
       uSpin: { value: 0 },
       uEnergy: { value: 0.4 },
       uFade: { value: 1 },
-      // Beat-driven ripple: uPulseR is the ring's current radius, uPulseA its
-      // strength. The BGM's bass onsets (or a quiet metronome fallback) fire
-      // it, so the ground breathes in time with the music.
+      // TWO independent ground waves, so the floor tells the drums apart:
+      //   uPulse* — the KICK. A wide, soft swell that crosses the whole
+      //             foundation in exactly one beat (tempo-normalized).
+      //   uCrack* — the SNARE. A tight, bright, fast ring that stays close to
+      //             the center and is gone before the kick wave clears.
+      // Reading them as separate radii/strengths is what makes the ground feel
+      // like it's following a kit rather than throbbing at one rate.
       uPulseR: { value: 0 },
       uPulseA: { value: 0 },
+      uCrackR: { value: 0 },
+      uCrackA: { value: 0 },
+      // Hat shimmer: fine radial sparkle on the high end only.
+      uShimmer: { value: 0 },
       uColorA: { value: accentColor.clone() },
-      uColorB: { value: secondaryColor.clone() }
+      uColorB: { value: secondaryColor.clone() },
+      uColorHot: { value: brightColor.clone() }
     };
     const gridMaterial = new THREE.ShaderMaterial({
       uniforms: gridUniforms,
@@ -675,25 +1040,7 @@ export default function WorldForge({
         "  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);",
         "}"
       ].join("\n"),
-      fragmentShader: [
-        "varying vec2 vUv;",
-        "uniform float uTime; uniform float uSpin; uniform float uEnergy; uniform float uFade;",
-        "uniform float uPulseR; uniform float uPulseA;",
-        "uniform vec3 uColorA; uniform vec3 uColorB;",
-        "void main() {",
-        "  vec2 p = (vUv - 0.5) * 40.0;",
-        "  float r = length(p);",
-        "  float ang = atan(p.y, p.x) / 6.2831853;",
-        "  float ringLine = 1.0 - smoothstep(0.0, 0.09, abs(fract(r / 1.7) - 0.5) * 1.7);",
-        "  float spoke = 1.0 - smoothstep(0.0, 0.055, abs(fract(ang * 24.0 + uSpin) - 0.5) * (6.2831853 / 24.0) * r);",
-        "  float pulse = exp(-abs(r - uPulseR) * 1.6) * uPulseA;",
-        "  float falloff = exp(-r * 0.17);",
-        "  float glow = (ringLine * 0.42 + spoke * 0.26) * falloff + pulse * 0.7 * falloff;",
-        "  vec3 col = mix(uColorB, uColorA, clamp(ringLine + pulse, 0.0, 1.0));",
-        "  float a = glow * uEnergy * uFade;",
-        "  gl_FragColor = vec4(col * a, a);",
-        "}"
-      ].join("\n")
+      fragmentShader: groundFragment(groundMode)
     });
     const grid = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), gridMaterial);
     grid.rotation.x = -Math.PI / 2;
@@ -737,8 +1084,14 @@ export default function WorldForge({
       uMap: { value: glyphTexture },
       uCharge: { value: 0 },
       uTime: { value: 0 },
+      // Instrument-separated: the kick swells the whole circle evenly, the
+      // snare strikes ONE arc of glyphs at a time (uStrikeAt), and the swell
+      // lifts a slow bloom under everything. One shader, three legible voices.
       uBeat: { value: 0 },
-      uSurge: { value: 0 },
+      uStrike: { value: 0 },
+      uStrikeAt: { value: 0 },
+      uSwell: { value: 0 },
+      uShimmer: { value: 0 },
       uColor: { value: accentColor.clone() },
       uHot: { value: brightColor.clone() }
     };
@@ -759,14 +1112,25 @@ export default function WorldForge({
       fragmentShader: [
         "varying vec2 vUv;",
         "uniform sampler2D uMap;",
-        "uniform float uCharge; uniform float uTime; uniform float uBeat; uniform float uSurge;",
+        "uniform float uCharge; uniform float uTime; uniform float uBeat;",
+        "uniform float uStrike; uniform float uStrikeAt; uniform float uSwell; uniform float uShimmer;",
         "uniform vec3 uColor; uniform vec3 uHot;",
         "void main() {",
         "  vec4 tex = texture2D(uMap, vUv);",
         "  float id = floor(vUv.x * 40.0);",
         "  float twinkle = 0.72 + 0.28 * sin(uTime * (1.1 + mod(id, 3.0) * 0.5) + id * 13.7);",
-        "  float glow = uCharge * (0.5 + 0.9 * uCharge) * twinkle + (uBeat * 0.5 + uSurge * 0.45) * (0.25 + uCharge);",
-        "  vec3 col = mix(uColor, uHot, clamp(uCharge * 0.7 + uBeat * 0.35, 0.0, 1.0));",
+        // The snare STRIKES a place on the ring, not the whole ring: the arc
+        // distance is wrapped so the flare is a localized hot spot that jumps
+        // around the circle hit to hit. That reads unmistakably as a hit.
+        "  float d = abs(vUv.x - uStrikeAt);",
+        "  d = min(d, 1.0 - d);",
+        "  float strike = uStrike * exp(-d * 22.0);",
+        // Hats: a fast counter-rotating sparkle over individual glyphs.
+        "  float shimmer = uShimmer * (0.5 + 0.5 * sin(id * 5.1 - uTime * 14.0));",
+        "  float glow = uCharge * (0.5 + 0.9 * uCharge) * twinkle",
+        "    + (uBeat * 0.42 + uSwell * 0.5) * (0.25 + uCharge)",
+        "    + strike * 1.5 + shimmer * 0.35;",
+        "  vec3 col = mix(uColor, uHot, clamp(uCharge * 0.7 + uBeat * 0.3 + strike * 1.2, 0.0, 1.0));",
         "  float alpha = tex.a * glow;",
         "  gl_FragColor = vec4(col * alpha, alpha);",
         "}"
@@ -775,7 +1139,8 @@ export default function WorldForge({
     const sigilGlow = new THREE.Mesh(glyphGeometry, sigilGlowMaterial);
     sigilGlow.rotation.x = -Math.PI / 2;
     sigilGlow.position.y = 0.03;
-    sigilGlow.visible = !isLobby;
+    // Lit in BOTH modes now: the lobby's circle holds a low ember charge that
+    // rises with the seated party, so the gathering already feels like a rite.
     scene.add(sigilGlow);
     disposables.push(sigilGlowMaterial);
 
@@ -813,9 +1178,68 @@ export default function WorldForge({
     bandUv.needsUpdate = true;
     sigilBand.rotation.x = -Math.PI / 2;
     sigilBand.position.y = 0.026;
-    sigilBand.visible = !isLobby;
     scene.add(sigilBand);
     disposables.push(sigilBand.geometry, sigilBandMaterial);
+
+    /* -- the genre's magic circle -------------------------------------------
+       Inside the inscription, a real FIGURE now ignites: a warding pentacle
+       for fantasy, a binding hexagram for horror and gothic, a circuit die for
+       the machine genres, a compass rose for pirate and frontier, a crown gear
+       for steampunk, a lotus mandala for east-asian and cozy, a heraldic
+       starburst for the capes and the opera, an art-deco fan for noir. It
+       draws itself on from the center outward as the weave charges, so the
+       floor is visibly completing a spell rather than filling a progress bar. */
+    const figureTexture = makeSigilFigureTexture(
+      SIGIL_FIGURE[visual.key] || SIGIL_FIGURE.none,
+      accentHex,
+      visual.accentBright
+    );
+    figureTexture.anisotropy = anisotropy;
+    const figureUniforms = {
+      uMap: { value: figureTexture },
+      uCharge: { value: 0 },
+      uTime: { value: 0 },
+      uBeat: { value: 0 },
+      uSwell: { value: 0 },
+      uColor: { value: accentColor.clone() },
+      uHot: { value: brightColor.clone() }
+    };
+    const figureMaterial = new THREE.ShaderMaterial({
+      uniforms: figureUniforms,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      vertexShader: sigilVertexShader,
+      fragmentShader: [
+        "varying vec2 vUv;",
+        "uniform sampler2D uMap;",
+        "uniform float uCharge; uniform float uTime; uniform float uBeat; uniform float uSwell;",
+        "uniform vec3 uColor; uniform vec3 uHot;",
+        "void main() {",
+        "  vec4 tex = texture2D(uMap, vUv);",
+        "  if (tex.a < 0.01) discard;",
+        "  float d = length(vUv - 0.5) * 2.0;",
+        // The figure INSCRIBES itself outward: only the part of the drawing
+        // inside the charge front exists yet, with a hot nib at the front.
+        "  float front = uCharge * 1.16;",
+        "  float drawn = smoothstep(front, front - 0.13, d);",
+        "  float nib = exp(-abs(d - front) * 13.0) * step(0.02, uCharge) * (1.0 - step(1.0, uCharge));",
+        "  float breathe = 0.72 + 0.28 * sin(uTime * 1.1 - d * 4.2);",
+        "  float glow = drawn * (0.34 + uCharge * 0.62) * breathe + nib * 1.5",
+        "    + drawn * (uBeat * 0.4 + uSwell * 0.45);",
+        "  vec3 col = mix(uColor, uHot, clamp(nib * 1.5 + uBeat * 0.4 + uCharge * 0.35, 0.0, 1.0));",
+        "  float alpha = tex.a * glow;",
+        "  gl_FragColor = vec4(col * alpha, alpha);",
+        "}"
+      ].join("\n")
+    });
+    // Sits just inside the inscription ring so the two read as one seal.
+    const figure = new THREE.Mesh(new THREE.PlaneGeometry(11.2, 11.2), figureMaterial);
+    figure.rotation.x = -Math.PI / 2;
+    figure.position.y = 0.035;
+    scene.add(figure);
+    disposables.push(figureTexture, figure.geometry, figureMaterial);
 
     // Ritual embers: born on the inscription, rising in a gentle inward
     // spiral. Height, pace, and brightness all scale with the charge.
@@ -840,7 +1264,6 @@ export default function WorldForge({
       sizeAttenuation: true
     });
     const ritual = new THREE.Points(ritualGeometry, ritualMaterial);
-    ritual.visible = !isLobby;
     scene.add(ritual);
     disposables.push(ritualGeometry, ritualMaterial);
 
@@ -972,20 +1395,84 @@ export default function WorldForge({
     scene.add(beam);
     disposables.push(beamTexture, beam.geometry, beamMaterial);
 
-    /* -- ascension rings: halos that ignite AROUND the whole island world ---
-       Weaving-only spectacle that escalates with progress: each ring wakes as
-       the weave crosses its threshold (with a spark burst at the heart), so
-       the sky visibly gains structure the closer the world is to holding.
-       They orbit OUTSIDE everything solid — inner radius clears the island +
-       landmarks (~5.4) and the ground sigil (6.65), tilts stay shallow so the
-       widest ring never dips below the foundation or up into the heart — so
-       nothing ever clips through them. */
-    const ascRings: Array<{ mesh: THREE.Mesh; material: THREE.MeshBasicMaterial; threshold: number; tilt: number; speed: number; phase: number; lit: boolean }> = [];
+    /* -- the armillary: rings that ignite AROUND the whole island world ------
+       Formerly five near-flat halos at the same tilt — read as one thick
+       stripe, and every one of them answered the same single "beat". Now it's
+       a proper ARMILLARY SPHERE, and the variation is the point:
+
+         equatorial — flat planetary bands, the world's horizon. Driven by the
+                      KICK: they thrust outward and thicken on the low end.
+         meridian   — stood fully upright, PERPENDICULAR to the equator and to
+                      each other (a longitude cage). Driven by the SNARE: they
+                      snap and crack with the hit.
+         oblique    — canted at genre-flavored angles between the two, slowly
+                      precessing so they scissor through the meridians. Driven
+                      by the HATS: they shimmer and spin up.
+
+       Meridian rings stand upright and would slice through the island, so
+       theirs start beyond the world's silhouette; they also get a small
+       ELLIPTICAL squash on the vertical axis so the cage reads as a sphere in
+       perspective rather than as a set of identical hoops. Each ring wakes at
+       its own progress threshold with a spark burst at the heart, so the sky
+       visibly gains structure as the world approaches holding. */
+    type RingRole = "equatorial" | "meridian" | "oblique";
+    type AscRing = {
+      mesh: THREE.Mesh;
+      material: THREE.MeshBasicMaterial;
+      role: RingRole;
+      threshold: number;
+      /** Base orientation, in radians. */
+      tiltX: number;
+      tiltZ: number;
+      /** Fixed yaw for meridians (their perpendicular spacing). */
+      yaw: number;
+      /** Sway amplitude + speed for the living wobble. */
+      sway: number;
+      swaySpeed: number;
+      spin: number;
+      phase: number;
+      squash: number;
+      lit: boolean;
+      /** Per-ring transient response, 0 when this role ignores a channel. */
+      hit: number;
+      baseRadius: number;
+    };
+    const ascRings: AscRing[] = [];
     const RING_Y = 2.3;
-    for (let i = 0; i < 5; i += 1) {
-      const geometry = new THREE.TorusGeometry(6.9 + i * 0.7, 0.016 + i * 0.004, 6, 128);
+    // The genre's cant: how far the oblique rings lean off the equator. Rigid,
+    // machine-built worlds keep tight angles; wild ones splay dramatically.
+    const obliqueCant = 0.34 + motion.wobble * 0.5 + motion.swirl * 0.14;
+    const ringPlan: Array<{
+      role: RingRole;
+      radius: number;
+      thickness: number;
+      threshold: number;
+      tiltX: number;
+      tiltZ: number;
+      yaw: number;
+      sway: number;
+      swaySpeed: number;
+      spin: number;
+      squash: number;
+      color: THREE.Color;
+    }> = [
+      // Two flat planetary bands — the world's horizon line, doubled.
+      { role: "equatorial", radius: 6.9, thickness: 0.018, threshold: 0.12, tiltX: 0.06, tiltZ: 0.02, yaw: 0, sway: 0.05, swaySpeed: 0.22, spin: 0.26, squash: 1, color: accentColor },
+      { role: "equatorial", radius: 8.9, thickness: 0.03, threshold: 0.62, tiltX: -0.09, tiltZ: -0.03, yaw: 0, sway: 0.06, swaySpeed: 0.17, spin: -0.19, squash: 1, color: accentColor },
+      // Three upright meridians, evenly spaced in yaw — a longitude cage. The
+      // 60° spacing means each is genuinely perpendicular to the equator and
+      // maximally separated from its siblings.
+      { role: "meridian", radius: 7.6, thickness: 0.02, threshold: 0.28, tiltX: Math.PI / 2, tiltZ: 0, yaw: 0, sway: 0.045, swaySpeed: 0.31, spin: 0, squash: 0.82, color: secondaryColor },
+      { role: "meridian", radius: 7.9, thickness: 0.017, threshold: 0.46, tiltX: Math.PI / 2, tiltZ: 0, yaw: Math.PI / 3, sway: 0.05, swaySpeed: 0.26, spin: 0, squash: 0.78, color: secondaryColor },
+      { role: "meridian", radius: 8.3, thickness: 0.015, threshold: 0.78, tiltX: Math.PI / 2, tiltZ: 0, yaw: (Math.PI / 3) * 2, sway: 0.055, swaySpeed: 0.35, spin: 0, squash: 0.74, color: brightColor },
+      // Two obliques scissoring between the planes at the genre's own cant.
+      { role: "oblique", radius: 7.2, thickness: 0.014, threshold: 0.2, tiltX: obliqueCant, tiltZ: obliqueCant * 0.55, yaw: 0.7, sway: 0.09, swaySpeed: 0.4, spin: 0.52, squash: 0.94, color: brightColor },
+      { role: "oblique", radius: 9.6, thickness: 0.012, threshold: 0.9, tiltX: -obliqueCant * 1.25, tiltZ: obliqueCant * 0.4, yaw: -1.1, sway: 0.11, swaySpeed: 0.33, spin: -0.44, squash: 0.9, color: accentColor }
+    ];
+    for (const plan of ringPlan) {
+      const geometry = new THREE.TorusGeometry(plan.radius, plan.thickness, 6, 132);
       const material = new THREE.MeshBasicMaterial({
-        color: i % 2 ? secondaryColor : accentColor,
+        color: plan.color,
         transparent: true,
         opacity: 0,
         depthWrite: false,
@@ -998,11 +1485,19 @@ export default function WorldForge({
       ascRings.push({
         mesh,
         material,
-        threshold: 0.18 + i * 0.16,
-        tilt: (0.09 + i * 0.02) * (i % 2 ? -1 : 1),
-        speed: (0.22 + i * 0.09) * (i % 2 ? -1 : 1),
-        phase: i * 1.3,
-        lit: false
+        role: plan.role,
+        threshold: plan.threshold,
+        tiltX: plan.tiltX,
+        tiltZ: plan.tiltZ,
+        yaw: plan.yaw,
+        sway: plan.sway,
+        swaySpeed: plan.swaySpeed,
+        spin: plan.spin,
+        phase: plan.yaw,
+        squash: plan.squash,
+        lit: false,
+        hit: 0,
+        baseRadius: plan.radius
       });
       disposables.push(geometry, material);
     }
@@ -1236,6 +1731,70 @@ export default function WorldForge({
       ripple.mesh.visible = true;
     };
 
+    /* -- the arrival rite (lobby): a hero takes their seat ---------------------
+       A thread of light drops out of the dark into a point on the inscription
+       ring, the ground answers with a ripple, the heart flares, and sparks
+       scatter off the impact. Each arrival claims the NEXT seat around the
+       circle, so a filling table reads as a circle being closed one place at a
+       time rather than as a brightness slider being nudged. */
+    const boltMaterial = new THREE.MeshBasicMaterial({
+      color: brightColor,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide
+    });
+    const bolt = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.22, 16, 7, 1, true), boltMaterial);
+    bolt.visible = false;
+    scene.add(bolt);
+    disposables.push(bolt.geometry, boltMaterial);
+    // Seat glyphs: a mote of light left standing at each claimed place, so the
+    // circle keeps a visible record of who is already here.
+    const SEATS = 8;
+    const seatMaterial = new THREE.PointsMaterial({
+      map: sparkTexture,
+      color: brightColor,
+      size: 0.42,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      sizeAttenuation: true
+    });
+    const seatPositions = new Float32Array(SEATS * 3);
+    for (let i = 0; i < SEATS; i += 1) {
+      const angle = (i / SEATS) * Math.PI * 2;
+      seatPositions[i * 3] = Math.cos(angle) * 6.05;
+      seatPositions[i * 3 + 1] = 0.22;
+      seatPositions[i * 3 + 2] = Math.sin(angle) * 6.05;
+    }
+    const seatGeometry = new THREE.BufferGeometry();
+    seatGeometry.setAttribute("position", new THREE.BufferAttribute(seatPositions, 3));
+    const seats = new THREE.Points(seatGeometry, seatMaterial);
+    seats.visible = isLobby;
+    scene.add(seats);
+    disposables.push(seatGeometry, seatMaterial);
+    // A fresh mount (TV reload with the table already half full) adopts the
+    // current count silently — only heroes who arrive AFTER this get a rite,
+    // so a reload doesn't replay everyone's entrance at once.
+    let seenArrivals = arrivalsRef.current;
+    let seatsClaimed = isLobby ? Math.min(SEATS, seenArrivals) : 0;
+    let arrivalT = -1;
+    let arrivalFlare = 0;
+    const spawnArrival = () => {
+      arrivalT = 0;
+      arrivalFlare = 1;
+      const angle = ((seatsClaimed % SEATS) / SEATS) * Math.PI * 2;
+      seatsClaimed += 1;
+      const x = Math.cos(angle) * 6.05;
+      const z = Math.sin(angle) * 6.05;
+      bolt.position.set(x, 8, z);
+      bolt.visible = true;
+      spawnRipple();
+      spawnBurst(tmpB.set(x, 0.3, z));
+    };
+
     /* -- pointer parallax ---------------------------------------------------- */
     const pointer = { x: 0, y: 0 };
     const onPointerMove = (event: PointerEvent) => {
@@ -1257,30 +1816,20 @@ export default function WorldForge({
     /* -- animation ------------------------------------------------------------ */
     const clock = new THREE.Clock();
     const flavor = AUDIO_FLAVOR[visual.key] || AUDIO_FLAVOR.none;
+    const pulse = createMusicPulse();
     let frame = 0;
     let smoothP = isLobby ? 0 : Math.min(0.04, progressRef.current);
     let finaleT = -1;
-    let freqData: Uint8Array<ArrayBuffer> | null = null;
-    let musicLevel = 0;
-    // Beat tracker: bass onsets fire the ground pulse (and kick the heart +
-    // sigil) on the music's actual beat. Fires on a rising edge over a slow
-    // envelope — with a TIGHT margin so it catches real kicks readily, not
-    // just the loudest spikes — and a tempo catch-up guarantees a pulse at
-    // least every ~1s while music plays. With no analyser it falls back to a
-    // quiet metronome.
-    let bassPrev = 0;
-    let bassAvg = 0;
-    let beatCool = 0;
-    let beatKick = 0;
+    // Set when the weave reaches 100%; the finale then waits for a downbeat.
+    let finaleArm = -1;
+    // Ground shockwave clock, restarted by each kick. It is normalized by the
+    // detected tempo, so the wave crosses the foundation in exactly one beat:
+    // slow dirges get a long, wide swell, fast cues get tight rapid rings.
     let pulseT = 1;
-    let lastBeatAt = -10;
-    // Mid/treble bands + the riff detector (mid-band onsets): each genre's
-    // AUDIO_FLAVOR routes these into its own channels.
-    let midLevel = 0;
-    let trebleLevel = 0;
-    let midAvg = 0;
-    let midCool = 0;
-    let midKick = 0;
+    let pulseSpan = 0.95;
+    // A separate, faster wave for the snare — a tight bright crack close to the
+    // center rather than a slow ground swell.
+    let crackT = 1;
     // Accumulated phases, so band-driven speed changes never jump the pattern.
     let weatherPhase = 0;
     let gridSpin = 0;
@@ -1304,67 +1853,35 @@ export default function WorldForge({
       }
       const p = smoothP;
 
-      // Music drive from the shared BGM analyser (silent fallback: slow sine).
-      const analyser = bgmGetAnalyser();
-      beatCool -= dt;
-      midCool -= dt;
-      let beatNow = false;
-      if (analyser) {
-        if (!freqData || freqData.length !== analyser.frequencyBinCount) {
-          freqData = new Uint8Array(analyser.frequencyBinCount);
-        }
-        analyser.getByteFrequencyData(freqData);
-        const nBins = freqData.length;
-        const band = (from: number, to: number) => {
-          const a = Math.floor(nBins * from);
-          const b = Math.max(a + 1, Math.floor(nBins * to));
-          let sum = 0;
-          for (let i = a; i < b; i += 1) sum += freqData![i];
-          return sum / ((b - a) * 255);
-        };
-        const bass = band(0, 0.09);
-        const mid = band(0.1, 0.42);
-        const treble = band(0.45, 0.9);
-        musicLevel += (band(0, 0.25) - musicLevel) * Math.min(1, dt * 8);
-        midLevel += (mid - midLevel) * Math.min(1, dt * 7);
-        trebleLevel += (treble - trebleLevel) * Math.min(1, dt * 7);
-        // Beat: a rising bass edge over its slow envelope. The margin is
-        // barely above the average at all — almost any local rise qualifies —
-        // and the average itself re-catches quickly after each hit so the
-        // NEXT beat doesn't need to wait for a quiet gap first. A short tempo
-        // catch-up backstops the rest: the pulse should read as frequent even
-        // on material the transient detector doesn't cleanly catch.
-        bassAvg += (bass - bassAvg) * Math.min(1, dt * 1.8);
-        const rising = bass - bassPrev > 0.006;
-        bassPrev += (bass - bassPrev) * Math.min(1, dt * 14);
-        if (beatCool <= 0 && bass > 0.045 && rising && bass > bassAvg * 1.03 + 0.004) beatNow = true;
-        if (beatCool <= 0 && !beatNow && musicLevel > 0.04 && t - lastBeatAt > 0.8) beatNow = true;
-        // The riff: mid-band onsets (stabs, snares, lead hits) — same loose
-        // margin, so a genre's riff (postapoc's especially) reads as a beat
-        // of its own instead of an occasional accent.
-        midAvg += (mid - midAvg) * Math.min(1, dt * 1.8);
-        if (midCool <= 0 && mid > 0.05 && mid > midAvg * 1.04 + 0.003) {
-          midKick = 1;
-          midCool = 0.16;
-        }
-      } else {
-        musicLevel += ((0.22 + Math.sin(t * 0.9) * 0.1) - musicLevel) * Math.min(1, dt * 2);
-        midLevel += ((0.16 + Math.sin(t * 0.63 + 1.2) * 0.08) - midLevel) * Math.min(1, dt * 2);
-        trebleLevel += ((0.12 + Math.sin(t * 1.1 + 2.4) * 0.06) - trebleLevel) * Math.min(1, dt * 2);
-        if (beatCool <= 0 && t - lastBeatAt >= 1.9) beatNow = true;
-      }
-      if (beatNow) {
-        beatCool = 0.14;
-        lastBeatAt = t;
+      /* music: instrument-separated (see lib/client/musicPulse) --------------
+         `music.kick/snare/hat` are instant-attack, fast-decay envelopes fired
+         by per-band spectral flux onsets; `music.swell` is a sustained
+         crescendo that percussion cannot trip. The genre's AUDIO_FLAVOR scales
+         each one, so the same cue drives a noir world through its ride cymbal
+         and a postapoc world through its hammer-blow snare. */
+      const music = pulse.read(dt, t);
+      const musicLevel = music.level;
+      const midLevel = music.mid;
+      // "High end" for shimmer purposes spans treble + air, weighted toward
+      // whichever the music actually has (brightness), so a dark cue does not
+      // get sparkles it hasn't earned.
+      const trebleLevel = music.treble * 0.6 + music.air * 0.4;
+      const kickHit = music.kick * flavor.kick;
+      const snareHit = music.snare * flavor.snare;
+      const hatHit = music.hat * flavor.hat;
+      const swell = music.swell * flavor.swell;
+      // The scene's single "something just happened" envelope, for the few
+      // places that want a generic accent — dominated by whichever instrument
+      // this genre listens to hardest.
+      const beatKick = Math.max(kickHit, snareHit * 0.8, hatHit * 0.5);
+      if (music.kickHit) {
         pulseT = 0;
-        beatKick = 1;
+        // Cross the foundation in one beat, clamped to a watchable window.
+        pulseSpan = Math.min(1.5, Math.max(0.42, music.beatPeriod > 0 ? music.beatPeriod : 0.95));
       }
-      pulseT = Math.min(1.2, pulseT + dt / 0.95);
-      // Snappier decay on both kicks — an instant attack (set to 1 on
-      // detection) with a fast fade reads as a hit, not a slow swell.
-      beatKick = Math.max(0, beatKick - dt * 3.6);
-      midKick = Math.max(0, midKick - dt * 3.2);
-      const surge = midKick * flavor.surge;
+      if (music.snareHit) crackT = 0;
+      pulseT = Math.min(1.2, pulseT + dt / pulseSpan);
+      crackT = Math.min(1.2, crackT + dt / 0.34);
 
       // Theme light gutter — layered sines so candlelight sputters organically,
       // plus the flavor's sag: horror candles and wasteland reactors strain
@@ -1377,26 +1894,40 @@ export default function WorldForge({
       if (flavor.sag > 0) gutter *= 1 - Math.min(0.35, flavor.sag * midLevel * 0.3);
 
       /* landmarks: drift → tractor in → lock → materialize ------------------ */
+      // Lobby only: the party's charge CLOSES RANKS. Every hero who takes a
+      // seat draws the scattered fragments a little nearer and calms their
+      // tumble, so a full table visibly has its world circling close and
+      // steady while an empty one has it lost far out in the dark. It never
+      // docks — that's the Weaving's job — it just stops being distant.
+      const gather = isLobby ? easeOutCubic(charge) : 0;
       let frontier: Landmark | null = null;
+      // How solid the island itself is — the population can only stand on it
+      // once there's a floor under them.
+      let islandSolid = 0;
       for (const lm of landmarks) {
         const k = isLobby ? 0 : clamp01((p - lm.windowStart) / lm.windowWidth);
         const flight = easeOutCubic(Math.min(1, k / 0.62));
         const m = easeInOutCubic(clamp01((k - 0.58) / 0.42));
+        if (lm === landmarks[0]) islandSolid = m;
         if (!frontier && k > 0 && k < 1) frontier = lm;
 
         if (flight < 1) {
           // Ghost orbit out in the dark; the tractor arc blends home from it.
-          const angle = lm.seed * Math.PI * 2 + t * 0.05 * motion.swirl * lm.dir;
-          const bob = Math.sin(t * 0.5 + lm.seed * 9) * (0.5 + motion.wobble * 0.25);
+          // In the lobby the orbit itself tightens and the ring aligns toward
+          // the island's own height as the table fills.
+          const orbitR = lm.orbitRadius * (1 - gather * 0.34);
+          const orbitY = THREE.MathUtils.lerp(lm.orbitY, lm.anchor.y + 2.2, gather * 0.45);
+          const angle = lm.seed * Math.PI * 2 + t * 0.05 * motion.swirl * lm.dir * (1 + gather * 0.5);
+          const bob = Math.sin(t * 0.5 + lm.seed * 9) * (0.5 + motion.wobble * 0.25) * (1 - gather * 0.4);
           tmp.set(
-            Math.cos(angle) * lm.orbitRadius,
-            lm.orbitY + bob,
-            Math.sin(angle) * lm.orbitRadius
+            Math.cos(angle) * orbitR,
+            orbitY + bob,
+            Math.sin(angle) * orbitR
           );
           lm.group.position.lerpVectors(tmp, lm.anchor, flight);
           // A rising arc so fragments swoop in instead of beelining.
           lm.group.position.y += Math.sin(flight * Math.PI) * 1.6;
-          const tumble = (1 - flight) * (0.6 + motion.wobble * 0.4);
+          const tumble = (1 - flight) * (0.6 + motion.wobble * 0.4) * (1 - gather * 0.45);
           lm.group.rotation.set(
             Math.sin(t * 0.31 + lm.seed * 7) * tumble,
             t * 0.23 * lm.dir * tumble + lm.seed * 6,
@@ -1422,9 +1953,13 @@ export default function WorldForge({
         }
 
         lm.flash = Math.max(0, lm.flash - dt * 2.2);
+        // The ghost wireframes catch the snare — a stagger through the fragments
+        // (each one offset by its seed) so the unforged world flickers with the
+        // hits instead of glowing at one flat level.
+        const stagger = 0.5 + 0.5 * Math.cos((lm.seed * 6.283 + t * 0.4) % 6.283);
         const ghostGlow = isLobby
-          ? 0.1 + charge * 0.1 + musicLevel * 0.06
-          : 0.14 + musicLevel * 0.05;
+          ? 0.1 + charge * 0.12 + musicLevel * 0.06 + snareHit * 0.16 * stagger
+          : 0.14 + musicLevel * 0.05 + snareHit * 0.1 * stagger;
         const wireAlpha =
           m > 0
             ? THREE.MathUtils.lerp(0.9, 0.16, m)
@@ -1438,7 +1973,9 @@ export default function WorldForge({
           for (const mesh of lm.matter) mesh.visible = showMatter;
         }
         lm.uniforms.uReveal.value = m;
-        lm.uniforms.uEdgeGain.value = 1.3 + musicLevel * 1.6 + lm.flash * 2;
+        // The materialization scan line burns hotter on the kick — matter looks
+        // like it's being hammered into being on the downbeat.
+        lm.uniforms.uEdgeGain.value = 1.3 + musicLevel * 1.4 + kickHit * 1.8 + lm.flash * 2;
       }
 
       /* spark bursts --------------------------------------------------------- */
@@ -1465,30 +2002,132 @@ export default function WorldForge({
         burst.material.opacity = (1 - k) * 0.95;
       }
 
-      /* ascension rings -------------------------------------------------------- */
-      if (!isLobby) {
-        for (const halo of ascRings) {
-          const on = p >= halo.threshold;
-          if (on && !halo.lit) {
-            halo.lit = true;
-            spawnBurst(tmpB.set(0, HEART_Y, 0));
-          }
-          const target = on
-            ? (0.13 + 0.28 * easeOutCubic(clamp01((p - halo.threshold) / 0.1))) * (0.75 + musicLevel * 0.7 + beatKick * 0.5 + surge * 0.55)
-            : 0;
-          halo.material.opacity += (target * gutter - halo.material.opacity) * Math.min(1, dt * 2.4);
-          // Near-flat planetary rings with a slow, shallow precession — the
-          // tilt is capped so the widest ring stays clear of ground and heart.
-          // Spin rides an accumulated phase so treble can speed it up (scifi
-          // rings race, horror barely turns) without the ring ever jumping.
-          halo.phase += dt * halo.speed * (0.35 + p * 0.65) * (1 + trebleLevel * flavor.spin * 1.6);
-          halo.mesh.rotation.set(
-            Math.PI / 2 + Math.sin(t * 0.22 + halo.tilt * 9) * halo.tilt,
-            halo.phase,
-            Math.cos(t * 0.19 + halo.tilt * 5) * halo.tilt * 0.5
-          );
-          halo.mesh.scale.setScalar(1 + musicLevel * 0.03 + beatKick * 0.025);
+      /* the island's population -------------------------------------------------
+         They arrive with the ground under them: invisible while the island is
+         still in flight, present the moment it's solid. In the lobby the world
+         hasn't been made yet, so nobody lives there — the crowd is one of the
+         payoffs of the weave completing. Fighters answer the snare, smiths the
+         kick, everybody breathes with the level. */
+      inhabitants.update(
+        t,
+        dt,
+        isLobby ? 0 : clamp01((islandSolid - 0.45) / 0.35),
+        clamp01(snareHit),
+        clamp01(kickHit),
+        musicLevel
+      );
+
+      /* the signature landmark ------------------------------------------------
+         Its `drive` is the scene's energy: the lobby's gathering charge, or the
+         weave's progress lifted by the music, so the galleon heaves harder and
+         the spinner's fans wind up as the world comes together. */
+      if (themeProp) {
+        themeProp.update(t, dt, (isLobby ? 0.5 + charge * 0.5 : 0.6 + p * 0.6) + musicLevel * 0.3);
+      }
+
+      /* the armillary ----------------------------------------------------------
+         Three ring ROLES, three different answers to the music. The variation
+         is both geometric (flat / upright / canted) and rhythmic (kick /
+         snare / hat), so the cage reads as an instrument rather than a stripe.
+         In the lobby a first equatorial band and one meridian are already lit
+         at low charge, so the unforged world has structure to grow into. */
+      for (const halo of ascRings) {
+        // Lobby: only the two lowest-threshold rings, and faintly. Weaving:
+        // each wakes as the weave crosses its own threshold.
+        const on = isLobby ? halo.threshold <= 0.3 && charge > 0.05 : p >= halo.threshold;
+        halo.mesh.visible = on || halo.material.opacity > 0.004;
+        if (on && !halo.lit) {
+          halo.lit = true;
+          if (!isLobby) spawnBurst(tmpB.set(0, HEART_Y, 0));
         }
+        // Per-role transient: the ring only reacts to ITS instrument, so a
+        // snare-heavy cue visibly cracks the meridians while the equator holds
+        // steady, and vice versa on a kick-driven one.
+        const roleHit =
+          halo.role === "equatorial" ? kickHit
+            : halo.role === "meridian" ? snareHit
+              : hatHit;
+        halo.hit = Math.max(halo.hit - dt * 4.5, roleHit);
+
+        const wake = isLobby
+          ? charge * 0.5
+          : easeOutCubic(clamp01((p - halo.threshold) / 0.1));
+        const base = isLobby ? 0.06 + charge * 0.07 : 0.13 + 0.28 * wake;
+        const target = on
+          ? base * (0.72 + musicLevel * 0.6 + halo.hit * 0.85 + swell * 0.4)
+          : 0;
+        halo.material.opacity += (target * gutter - halo.material.opacity) * Math.min(1, dt * 2.4);
+
+        // Rotation: equatorials and obliques precess on an accumulated phase
+        // (so the high end can spin them up without the pattern jumping);
+        // meridians hold their fixed yaw — that perpendicular cage only reads
+        // as a cage if it doesn't spin away — and instead BREATHE on the snare.
+        const spinGain = halo.role === "oblique" ? 1 + trebleLevel * flavor.spin * 2.2 : 1 + trebleLevel * flavor.spin * 0.9;
+        halo.phase += dt * halo.spin * (0.35 + (isLobby ? charge : p) * 0.65) * spinGain;
+        const swayA = Math.sin(t * halo.swaySpeed + halo.yaw * 3.1) * halo.sway;
+        const swayB = Math.cos(t * halo.swaySpeed * 0.83 + halo.yaw * 1.7) * halo.sway * 0.6;
+        if (halo.role === "meridian") {
+          // Upright: X is the standing rotation, Y the fixed longitude. The
+          // sway tips it just off true so it never looks like a decal.
+          halo.mesh.rotation.set(halo.tiltX + swayA, halo.yaw, halo.tiltZ + swayB);
+        } else {
+          halo.mesh.rotation.set(Math.PI / 2 + halo.tiltX + swayA, halo.phase, halo.tiltZ + swayB);
+        }
+        // Elliptical squash: meridians are flattened on their local Y so the
+        // cage reads as a sphere in perspective, not a stack of hoops. The
+        // instrument's hit thrusts the ring outward — kick pushes the equator
+        // wide and heavy, the snare snaps the meridians, hats flutter the
+        // obliques — each with a different amount, which is the tell that the
+        // rings are listening to different things.
+        const thrust = halo.role === "equatorial" ? halo.hit * 0.05
+          : halo.role === "meridian" ? halo.hit * 0.03
+            : halo.hit * 0.018;
+        const grow = 1 + musicLevel * 0.025 + thrust;
+        halo.mesh.scale.set(grow, grow * halo.squash, grow);
+      }
+
+      /* the arrival rite (lobby) ------------------------------------------------ */
+      if (isLobby) {
+        if (arrivalsRef.current > seenArrivals) {
+          seenArrivals = arrivalsRef.current;
+          spawnArrival();
+        }
+        if (arrivalT >= 0) {
+          arrivalT += dt;
+          const k = arrivalT / 0.85;
+          if (k >= 1) {
+            arrivalT = -1;
+            bolt.visible = false;
+            boltMaterial.opacity = 0;
+          } else {
+            // The thread STRIKES down fast, then the column dissipates upward.
+            const strike = easeOutCubic(Math.min(1, k / 0.28));
+            const fade = clamp01((k - 0.28) / 0.72);
+            bolt.position.y = THREE.MathUtils.lerp(9, 4.2, strike) + fade * 3.4;
+            bolt.scale.set(1 - fade * 0.6, 1 + fade * 0.3, 1 - fade * 0.6);
+            boltMaterial.opacity = (1 - fade) * 0.85;
+          }
+        }
+        arrivalFlare = Math.max(0, arrivalFlare - dt * 1.6);
+        // Claimed seats glow and breathe; the newest one is briefly brightest.
+        seatMaterial.opacity = seatsClaimed > 0
+          ? (0.35 + Math.sin(t * 1.4) * 0.08 + arrivalFlare * 0.5 + hatHit * 0.15) * gutter
+          : 0;
+        seatMaterial.size = 0.34 + arrivalFlare * 0.22 + musicLevel * 0.06;
+        const sAttr = seatGeometry.getAttribute("position") as THREE.BufferAttribute;
+        for (let i = 0; i < SEATS; i += 1) {
+          // Unclaimed seats are parked far below the floor rather than hidden,
+          // so one Points object can carry the whole circle.
+          const claimed = i < Math.min(seatsClaimed, SEATS);
+          const angle = (i / SEATS) * Math.PI * 2 + sigilSpin;
+          sAttr.setXYZ(
+            i,
+            Math.cos(angle) * 6.05,
+            claimed ? 0.24 + Math.sin(t * 1.7 + i * 2.1) * 0.07 : -50,
+            Math.sin(angle) * 6.05
+          );
+        }
+        sAttr.needsUpdate = true;
       }
 
       /* progress ripples -------------------------------------------------------- */
@@ -1525,10 +2164,13 @@ export default function WorldForge({
         vAttr.setXYZ(i, Math.cos(angle) * radius, y, Math.sin(angle) * radius);
       }
       vAttr.needsUpdate = true;
-      vortexMaterial.opacity = (isLobby ? 0.4 + charge * 0.2 : 0.55 - easeInOutCubic(p) * 0.25) * (0.8 + musicLevel * 0.4) * gutter;
-      // The dust burns brighter-per-mote as it contracts toward the heart,
-      // and sparkles with the music's high end.
-      vortexMaterial.size = 0.055 * (1 + (isLobby ? charge * 0.3 : p * 0.9)) * (1 + trebleLevel * flavor.twinkle * 0.35);
+      vortexMaterial.opacity = (isLobby ? 0.4 + charge * 0.2 : 0.55 - easeInOutCubic(p) * 0.25) * (0.8 + musicLevel * 0.35 + swell * 0.25) * gutter;
+      // The dust burns brighter-per-mote as it contracts toward the heart, and
+      // GLINTS on the hats — a cymbal is a shower of tiny highlights, which is
+      // exactly what this particle field can say better than anything else.
+      vortexMaterial.size = 0.055
+        * (1 + (isLobby ? charge * 0.3 : p * 0.9))
+        * (1 + trebleLevel * flavor.twinkle * 0.3 + hatHit * flavor.twinkle * 0.4);
 
       /* builder stream --------------------------------------------------------- */
       const streamOn = !isLobby && frontier !== null && p < 0.97;
@@ -1578,7 +2220,7 @@ export default function WorldForge({
       // ash rides the swells) via an accumulated phase — no speed jumps —
       // and treble makes the motes themselves glint.
       weatherPhase += dt * weatherSpeed * (1 + midLevel * flavor.rush * 1.4);
-      weatherMaterial.size = visual.dust.size * 1.4 * (1 + trebleLevel * flavor.twinkle * 0.5);
+      weatherMaterial.size = visual.dust.size * 1.4 * (1 + trebleLevel * flavor.twinkle * 0.45 + hatHit * flavor.hat * 0.3);
       const weatherAlpha = isLobby ? 0.3 + charge * 0.15 : clamp01((p - 0.2) / 0.25) * (0.35 + p * 0.35);
       weatherMaterial.opacity += (weatherAlpha * gutter - weatherMaterial.opacity) * Math.min(1, dt * 2);
       if (weatherMaterial.opacity > 0.02) {
@@ -1601,20 +2243,24 @@ export default function WorldForge({
         piece.line.position.set(Math.cos(angle) * piece.radius, piece.y + Math.sin(t * 0.4 + piece.seed) * 0.5, Math.sin(angle) * piece.radius);
         piece.line.rotation.set(t * 0.2 * piece.speed, t * 0.16 * piece.speed, 0);
       }
-      debrisMaterial.opacity = (0.08 + musicLevel * 0.05) * gutter;
+      debrisMaterial.opacity = (0.08 + musicLevel * 0.04 + hatHit * 0.06) * gutter;
 
       /* theme emblems ---------------------------------------------------------- */
+      // The genre's relics ride the CRESCENDO: they flare on a swell (the
+      // orchestral moment, not the drum hit) and drift out a little wider with
+      // it, so the sky opens up when the score opens up.
       for (const emblem of emblems) {
         const angle = emblem.phase + t * 0.055 * emblem.dir * (0.5 + motion.swirl * 0.5);
+        const radius = emblem.radius * (1 + swell * 0.05);
         emblem.group.position.set(
-          Math.cos(angle) * emblem.radius,
-          emblem.y + Math.sin(t * 0.45 + emblem.phase) * 0.5,
-          Math.sin(angle) * emblem.radius
+          Math.cos(angle) * radius,
+          emblem.y + Math.sin(t * 0.45 + emblem.phase) * 0.5 + swell * 0.4,
+          Math.sin(angle) * radius
         );
-        emblem.group.rotation.y = t * 0.18 * emblem.dir;
+        emblem.group.rotation.y = t * 0.18 * emblem.dir + snareHit * 0.1 * emblem.dir;
         emblem.group.rotation.z = Math.sin(t * 0.33 + emblem.phase) * (0.1 + motion.wobble * 0.06);
         const target = isLobby ? 0.2 + charge * 0.25 : 0.22 + p * 0.35;
-        emblem.material.opacity += ((target + musicLevel * 0.15 + surge * 0.3) * gutter - emblem.material.opacity) * Math.min(1, dt * 2);
+        emblem.material.opacity += ((target + musicLevel * 0.12 + swell * 0.42) * gutter - emblem.material.opacity) * Math.min(1, dt * 2);
       }
 
       /* foundation, ritual sigil, heart, beam ----------------------------------- */
@@ -1624,10 +2270,15 @@ export default function WorldForge({
       gridUniforms.uSpin.value = gridSpin;
       const buildEnergy = isLobby ? 0.3 + charge * 0.35 : 0.45 + p * 0.55 - easeInOutCubic(clamp01((p - 0.9) / 0.1)) * 0.6;
       gridUniforms.uEnergy.value = (buildEnergy + musicLevel * 0.2) * gutter;
-      // The ground ripple rides the beat tracker: born at the center on each
-      // onset, racing outward and fading.
+      // The KICK's wave: born at the center, crossing the whole foundation in
+      // one detected beat, weighted by how much low end this genre listens to.
       gridUniforms.uPulseR.value = easeOutCubic(clamp01(pulseT)) * 17;
-      gridUniforms.uPulseA.value = (1 - clamp01(pulseT)) * (0.85 + musicLevel * 0.7);
+      gridUniforms.uPulseA.value = (1 - clamp01(pulseT)) * (0.55 + music.bass * 0.8) * flavor.kick;
+      // The SNARE's crack: a quarter of the distance in a third of the time.
+      gridUniforms.uCrackR.value = easeOutCubic(clamp01(crackT)) * 6.5;
+      gridUniforms.uCrackA.value = Math.pow(1 - clamp01(crackT), 1.8) * 0.7 * flavor.snare;
+      // The HATS: shimmer only, no wave.
+      gridUniforms.uShimmer.value = hatHit * 0.5 + trebleLevel * flavor.hat * 0.25;
 
       // The ritual circle turns — and spins up as it charges. Base inscription
       // stays dim; the glow overlay above it carries the charge.
@@ -1635,25 +2286,43 @@ export default function WorldForge({
       glyphRing.rotation.z = sigilSpin;
       glyphMaterial.opacity = (isLobby ? 0.2 + charge * 0.12 : 0.16 + musicLevel * 0.05) * gutter;
 
-      if (!isLobby) {
-        // The whole inscription charges with progress — every glyph glowing,
-        // kicked by the beat, flared by the riff.
+      {
+        // The inscription charges with progress — every glyph glowing, swelled
+        // by the kick, STRUCK arc-by-arc by the snare, shimmered by the hats.
+        // In the lobby it holds a low ember charge driven by the seated party,
+        // so the circle is already alive before the weave begins.
+        const sigilCharge = isLobby ? charge * 0.34 : p;
         sigilGlow.rotation.z = sigilSpin;
-        sigilUniforms.uCharge.value = p;
+        sigilUniforms.uCharge.value = sigilCharge;
         sigilUniforms.uTime.value = t;
-        sigilUniforms.uBeat.value = beatKick;
-        sigilUniforms.uSurge.value = surge;
-        sigilBandUniforms.uCharge.value = p * gutter;
+        sigilUniforms.uBeat.value = kickHit;
+        sigilUniforms.uSwell.value = swell;
+        sigilUniforms.uShimmer.value = hatHit * 0.8;
+        // Each snare lands somewhere NEW on the ring — walked by an irrational
+        // step so consecutive hits never repeat a position.
+        if (music.snareHit) sigilUniforms.uStrikeAt.value = (sigilUniforms.uStrikeAt.value + 0.381966) % 1;
+        sigilUniforms.uStrike.value = snareHit;
+        // The genre's magic circle inscribes itself outward with the charge.
+        // In the lobby it holds a small central figure — the seal is begun but
+        // not yet drawn — and closing the ring is the Weaving's work.
+        figure.rotation.z = -sigilSpin * 0.45;
+        figureUniforms.uCharge.value = isLobby ? charge * 0.3 : easeOutCubic(p);
+        figureUniforms.uTime.value = t;
+        figureUniforms.uBeat.value = beatKick;
+        figureUniforms.uSwell.value = swell;
+        sigilBandUniforms.uCharge.value = sigilCharge * gutter;
         sigilBandUniforms.uBeat.value = beatKick;
 
         // Ritual embers: the curtain rises taller, denser, and faster the
-        // closer the world is to holding.
-        ritualPhase += dt * (0.3 + p * 0.9) * (1 + midLevel * 0.35);
-        const ritualTarget = p > 0.02 ? p * 0.8 * (0.75 + musicLevel * 0.5) * gutter : 0;
+        // closer the world is to holding — and in the lobby it's a low hearth
+        // glow that grows with the party.
+        const emberCharge = isLobby ? charge * 0.4 : p;
+        ritualPhase += dt * (0.3 + emberCharge * 0.9) * (1 + midLevel * 0.35);
+        const ritualTarget = emberCharge > 0.02 ? emberCharge * 0.8 * (0.75 + musicLevel * 0.5) * gutter : 0;
         ritualMaterial.opacity += (ritualTarget - ritualMaterial.opacity) * Math.min(1, dt * 2);
-        ritualMaterial.size = 0.05 + p * 0.03 + trebleLevel * flavor.twinkle * 0.02;
+        ritualMaterial.size = 0.05 + emberCharge * 0.03 + trebleLevel * flavor.twinkle * 0.02;
         if (ritualMaterial.opacity > 0.02) {
-          const riseH = 2.2 + p * 3.0;
+          const riseH = 2.2 + emberCharge * 3.0;
           const rAttr = ritualGeometry.getAttribute("position") as THREE.BufferAttribute;
           for (let i = 0; i < RITUAL; i += 1) {
             const u = (ritualSeeds[i * 4 + 1] + ritualPhase * ritualSeeds[i * 4 + 2]) % 1;
@@ -1665,27 +2334,51 @@ export default function WorldForge({
         }
       }
 
+      /* the worldheart ---------------------------------------------------------
+         The heart is where the instruments are most legible, because each one
+         moves a DIFFERENT property of it rather than all of them scaling the
+         same orb: the kick compresses the core (a squashed thud), the snare
+         jolts the shell's rotation (a visible flinch), the hats sparkle the
+         inner cage's opacity, and a crescendo blooms the halo wide. */
       const breath = Math.sin(t * 1.6) * 0.05;
       const heartScale = isLobby
         ? 0.45 + charge * 0.22 + breath * 0.5
         : Math.max(0.08, 0.28 + p * 1.0 + breath * p);
-      heart.scale.setScalar(heartScale);
-      heart.rotation.y = t * 0.3;
-      heartWireOuter.rotation.x = t * 0.21;
+      // Kick = a vertical squash-and-stretch, the classic weight cue.
+      const thud = kickHit * 0.14;
+      heart.scale.set(heartScale * (1 + thud * 0.5), heartScale * (1 - thud), heartScale * (1 + thud * 0.5));
+      // Snare = an angular jolt that decays out; the shell visibly flinches.
+      heart.rotation.y = t * 0.3 + snareHit * 0.22;
+      heartWireOuter.rotation.x = t * 0.21 + snareHit * 0.16;
       heartWireOuter.rotation.z = -t * 0.13;
-      heartWireInner.rotation.x = -t * 0.17;
-      heartCore.scale.setScalar(1 + Math.sin(t * 2.4) * 0.12 + musicLevel * 0.25 + beatKick * 0.32);
-      heartGlowMaterial.opacity = (0.35 + musicLevel * 0.4 + (isLobby ? charge * 0.15 : p * 0.25)) * gutter;
-      heartLight.intensity = (isLobby ? 4 + charge * 8 : 4 + p * 22) * gutter + musicLevel * 16 + beatKick * 11 + surge * 16;
+      heartWireInner.rotation.x = -t * 0.17 - snareHit * 0.12;
+      (heartWireInner.material as THREE.LineBasicMaterial).opacity = clamp01(0.42 + hatHit * 0.5 + trebleLevel * flavor.hat * 0.3);
+      (heartWireOuter.material as THREE.LineBasicMaterial).opacity = clamp01(0.18 + swell * 0.3 + musicLevel * 0.15);
+      heartCore.scale.setScalar(1 + Math.sin(t * 2.4) * 0.12 + musicLevel * 0.25 + kickHit * 0.4);
+      // Swell = the halo bloom. Strings open it up; drums barely touch it.
+      heartGlow.scale.setScalar(6 * (1 + swell * 0.22 + musicLevel * 0.06));
+      heartGlowMaterial.opacity = (0.35 + musicLevel * 0.3 + swell * 0.4 + arrivalFlare * 0.4 + (isLobby ? charge * 0.15 : p * 0.25)) * gutter;
+      heartLight.intensity = (isLobby ? 4 + charge * 8 : 4 + p * 22) * gutter
+        + musicLevel * 14 + kickHit * 13 + snareHit * 7 + swell * 20 + arrivalFlare * 30;
 
-      beamMaterial.opacity = ((isLobby ? 0.08 + charge * 0.1 : 0.1 + p * 0.3 - easeInOutCubic(clamp01((p - 0.92) / 0.08)) * 0.25) + musicLevel * 0.12) * gutter;
-      beam.rotation.y = t * 0.5;
+      // The light column is the crescendo's instrument: it stretches upward on
+      // a swell and spins up with the high end.
+      beamMaterial.opacity = ((isLobby ? 0.08 + charge * 0.1 : 0.1 + p * 0.3 - easeInOutCubic(clamp01((p - 0.92) / 0.08)) * 0.25) + musicLevel * 0.1 + swell * 0.16) * gutter;
+      beam.scale.set(1 + swell * 0.12, 1, 1 + swell * 0.12);
+      beam.rotation.y = t * (0.5 + trebleLevel * flavor.spin * 0.8);
 
-      /* finale ------------------------------------------------------------------ */
+      /* finale ------------------------------------------------------------------
+         The world holds ON A DOWNBEAT. Reaching 100% only ARMS the finale;
+         the shockwave then waits for the next detected kick so the flash and
+         the music land together. If no kick arrives (quiet tail, no analyser)
+         a short grace period fires it anyway, so the finale can never hang. */
       if (!isLobby && p >= 0.985 && finaleT < 0) {
-        finaleT = 0;
-        shock.visible = true;
-        spawnBurst(tmpB.set(0, 1.4, 0));
+        if (finaleArm < 0) finaleArm = t;
+        if (music.kickHit || t - finaleArm > 0.75) {
+          finaleT = 0;
+          shock.visible = true;
+          spawnBurst(tmpB.set(0, 1.4, 0));
+        }
       }
       if (finaleT >= 0) {
         finaleT += dt;
@@ -1704,13 +2397,19 @@ export default function WorldForge({
         }
       }
 
-      /* camera ------------------------------------------------------------------ */
-      const orbit = t * (isLobby ? 0.35 : 1) * motion.orbit + Math.PI * 0.35;
+      /* camera ------------------------------------------------------------------
+         The orbit itself now BREATHES with the score: a crescendo pulls the
+         camera back to take in the whole sky, and the kick gives it a subtle
+         dolly-in shove. Both are tiny by design — the shot should feel scored,
+         never seasick. In the lobby the orbit speeds up a touch as the table
+         fills, so the gathering visibly gains momentum. */
+      const orbit = t * (isLobby ? 0.35 + gather * 0.2 : 1) * motion.orbit + Math.PI * 0.35;
       // heartLift widens the end framing so the raised heart stays in shot.
-      const radius = isLobby
-        ? 17 - charge * 1.2
-        : 17.5 - easeOutCubic(p) * Math.max(2.5, 6 - heartLift * 0.9) - musicLevel * 0.4;
-      const height = isLobby ? 5.4 : 5.6 - p * Math.max(0.8, 2.2 - heartLift * 0.35);
+      const radius = (isLobby
+        ? 17 - charge * 1.4
+        : 17.5 - easeOutCubic(p) * Math.max(2.5, 6 - heartLift * 0.9) - musicLevel * 0.4)
+        + swell * 0.55 - kickHit * 0.16;
+      const height = (isLobby ? 5.4 : 5.6 - p * Math.max(0.8, 2.2 - heartLift * 0.35)) + swell * 0.2;
       const dampXY = 1 - Math.exp(-dt * 2.2);
       const dampZ = 1 - Math.exp(-dt * 1.2);
       tmp.set(

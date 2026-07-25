@@ -289,6 +289,296 @@ export const THEME_VISUALS: Record<ThemeKey, ThemeVisual> = {
       gathering: "Ash settles over the meeting ground…",
       joinGathering: "Another silhouette against the dust…"
     }
+  },
+  cyberpunk: {
+    key: "cyberpunk",
+    // Hot magenta on cold cyan — the neon-and-acid-rain palette.
+    accent: "#ff2fb9",
+    accentBright: "#ff9ae0",
+    secondary: "#2ff5ff",
+    fog: "#07030f",
+    fogDensity: 0.07,
+    ambient: "#2a1240",
+    dust: { color: "#ff6fd0", size: 0.036, flow: [0.06, -0.5] },
+    nebulae: ["#7a0fbf", "#2ff5ff", "#ff2fb9"],
+    effect: "rain",
+    dice: { body: "#0b0416", roughness: 0.12, metalness: 0.55, opacity: 0.3, edge: "#ff2fb9", edgeOpacity: 0.95 },
+    glyphs: "01∎▚▞◤◥╱╲ｱｲｳﬁ",
+    glyphFont: "38px monospace",
+    loom: {
+      heart: "255,90,210", world: "#0d0518", wireBoost: 1.9,
+      // Rain down the neon canyon, but the machine drive is fast and jittery.
+      motion: { swirl: 1.9, rise: -0.8, wobble: 0.75, ringSpeed: 1.9, ringSway: 0.018, orbit: 0.08, flicker: 0.35 }
+    },
+    copy: {
+      kicker: "Jacking in",
+      join: "A new runner spoofs the door",
+      reconnect: "Reconnecting — signal scrubbed clean",
+      depart: "A runner flatlines off the grid",
+      gathering: "The crew assembles in the sprawl…",
+      joinGathering: "Someone new buys into the run…"
+    }
+  },
+  spaceopera: {
+    key: "spaceopera",
+    // Imperial gold against deep royal blue: grand, ceremonial, vast.
+    accent: "#ffd76a",
+    accentBright: "#fff2c4",
+    secondary: "#5a7bff",
+    fog: "#02040e",
+    fogDensity: 0.038,
+    ambient: "#1b2452",
+    dust: { color: "#cfd8ff", size: 0.04, flow: [0.02, 0.05] },
+    nebulae: ["#3a3ac8", "#ffd76a", "#a03ad0"],
+    effect: "warp",
+    dice: { body: "#070b1c", roughness: 0.2, metalness: 0.85, opacity: 1, edge: "#ffd76a", edgeOpacity: 0.7 },
+    glyphs: "✦✧★⬡⬢◈❖⟡ΑΩΣΛ",
+    glyphFont: "42px serif",
+    loom: {
+      heart: "255,215,106", world: "#080d20", wireBoost: 1.5,
+      // Stately as a fleet under sail: broad slow swirl, majestic camera.
+      motion: { swirl: 1.5, rise: 0.08, wobble: 0.4, ringSpeed: 1.15, ringSway: 0.025, orbit: 0.055, flicker: 0 }
+    },
+    copy: {
+      kicker: "The fleet makes way",
+      join: "A new star joins the formation",
+      reconnect: "Comms restored — welcome back aboard",
+      depart: "A ship falls out of formation",
+      gathering: "The armada gathers at the jump point…",
+      joinGathering: "Clearing another ship to dock…"
+    }
+  },
+  gothic: {
+    key: "gothic",
+    // Blood-wine crimson and cold moonlit silver.
+    accent: "#b8324a",
+    accentBright: "#e88a9c",
+    secondary: "#9aa8c4",
+    fog: "#060407",
+    fogDensity: 0.082,
+    ambient: "#241a2c",
+    dust: { color: "#c9a8bc", size: 0.042, flow: [0.03, -0.14] },
+    nebulae: ["#3e0f22", "#5a4a70", "#b8324a"],
+    effect: "haunt",
+    dice: { body: "#12080f", roughness: 0.55, metalness: 0.35, opacity: 1, edge: "#b8324a", edgeOpacity: 0.6 },
+    glyphs: "✝♰♱☩⚜❦❧☙⁂†",
+    glyphFont: "46px serif",
+    loom: {
+      heart: "200,70,95", world: "#120a12", wireBoost: 0.95,
+      // A slow waltz in a draughty hall; candles gutter but never gust.
+      motion: { swirl: 0.7, rise: -0.15, wobble: 1.3, ringSpeed: 0.6, ringSway: 0.06, orbit: 0.032, flicker: 0.55 }
+    },
+    copy: {
+      kicker: "The house opens its doors",
+      join: "Another guest is admitted",
+      reconnect: "A guest returns from the east wing",
+      depart: "A guest is shown out — and not seen again",
+      gathering: "The candles are being lit…",
+      joinGathering: "Another place is set at the table…"
+    }
+  },
+  urbanfantasy: {
+    key: "urbanfantasy",
+    // Streetlight sodium against faerie violet — two worlds in one frame.
+    accent: "#a86cff",
+    accentBright: "#d9bcff",
+    secondary: "#ffb04f",
+    fog: "#060512",
+    fogDensity: 0.058,
+    ambient: "#2a2246",
+    dust: { color: "#c9a6ff", size: 0.044, flow: [0.05, 0.1] },
+    nebulae: ["#5a2ab0", "#ffb04f", "#2a4a8a"],
+    effect: "bokeh",
+    dice: { body: "#100b1e", roughness: 0.3, metalness: 0.6, opacity: 1, edge: "#a86cff", edgeOpacity: 0.7 },
+    glyphs: "✷✸❋⟠⟁⧉⧗ᛝᛞ☾",
+    glyphFont: "42px serif",
+    loom: {
+      heart: "170,110,255", world: "#0e0a1c", wireBoost: 1.25,
+      // City hum with a glamour on it: brisk but with a magical wobble.
+      motion: { swirl: 1.35, rise: 0.2, wobble: 1.05, ringSpeed: 1.1, ringSway: 0.04, orbit: 0.06, flicker: 0.18 }
+    },
+    copy: {
+      kicker: "The veil thins",
+      join: "Another initiate steps through",
+      reconnect: "A warded soul finds the door again",
+      depart: "The city swallows another name",
+      gathering: "Sigils are waking under the streetlights…",
+      joinGathering: "The circle widens for one more…"
+    }
+  },
+  steampunk: {
+    key: "steampunk",
+    // Polished brass and boiler-fire copper, with verdigris in the shadows.
+    accent: "#d9a04a",
+    accentBright: "#ffdca0",
+    secondary: "#4fb8a8",
+    fog: "#0a0705",
+    fogDensity: 0.068,
+    ambient: "#3a2c1c",
+    dust: { color: "#d9bc8a", size: 0.048, flow: [0.16, 0.14] },
+    nebulae: ["#7a4a1a", "#4fb8a8", "#4a3520"],
+    effect: "frontier",
+    dice: { body: "#1a120a", roughness: 0.4, metalness: 0.95, opacity: 1, edge: "#d9a04a", edgeOpacity: 0.7 },
+    glyphs: "⚙⚗⌘✜⊕⊗№℧Ω",
+    glyphFont: "42px serif",
+    loom: {
+      heart: "230,170,90", world: "#150f08", wireBoost: 1.15,
+      // Geared and deliberate: everything turns, nothing drifts. Boiler glow.
+      motion: { swirl: 1.05, rise: 0.3, wobble: 0.5, ringSpeed: 1.45, ringSway: 0.022, orbit: 0.05, flicker: 0.25 }
+    },
+    copy: {
+      kicker: "The boilers come to pressure",
+      join: "A new hand signs the manifest",
+      reconnect: "A hand returns to their station",
+      depart: "A berth is struck from the manifest",
+      gathering: "The gears are taking up their slack…",
+      joinGathering: "Another berth is made ready…"
+    }
+  },
+  pirate: {
+    key: "pirate",
+    // Sun-bleached gold on deep sea teal.
+    accent: "#f2c15c",
+    accentBright: "#ffe8a8",
+    secondary: "#2f9aa8",
+    fog: "#03080c",
+    fogDensity: 0.052,
+    ambient: "#1a3a42",
+    dust: { color: "#a8d8dc", size: 0.046, flow: [0.35, 0.06] },
+    nebulae: ["#1a5a68", "#f2c15c", "#0f3040"],
+    effect: "frontier",
+    dice: { body: "#0d1418", roughness: 0.5, metalness: 0.55, opacity: 1, edge: "#f2c15c", edgeOpacity: 0.65 },
+    glyphs: "☠⚓✠❈✷⊛†×∴",
+    glyphFont: "42px serif",
+    loom: {
+      heart: "242,193,92", world: "#0a1418", wireBoost: 1.05,
+      // A deck under a long swell: big rolling wobble, salt wind, lamp sway.
+      motion: { swirl: 1.2, rise: 0.18, wobble: 2.1, ringSpeed: 0.85, ringSway: 0.07, orbit: 0.048, flicker: 0.3 }
+    },
+    copy: {
+      kicker: "The anchor comes up",
+      join: "A new hand climbs aboard",
+      reconnect: "A hand hauled back over the rail",
+      depart: "A name struck from the ship's articles",
+      gathering: "The crew musters on deck…",
+      joinGathering: "Another berth swings in the hold…"
+    }
+  },
+  eastasian: {
+    key: "eastasian",
+    // Cinnabar and jade — lacquer, ink, and blossom.
+    accent: "#e8563c",
+    accentBright: "#ffab8f",
+    secondary: "#4fc99a",
+    fog: "#05070a",
+    fogDensity: 0.055,
+    ambient: "#22323a",
+    dust: { color: "#ffc4c9", size: 0.05, flow: [0.12, 0.06] },
+    nebulae: ["#8a1f2a", "#4fc99a", "#2a3a54"],
+    effect: "aurora",
+    dice: { body: "#120c0c", roughness: 0.35, metalness: 0.6, opacity: 1, edge: "#e8563c", edgeOpacity: 0.7 },
+    glyphs: "道天龍氣心風雷山水火月",
+    glyphFont: "40px serif",
+    loom: {
+      heart: "232,86,60", world: "#0d1014", wireBoost: 1.2,
+      // Petals on a mountain draft: unhurried, poised, precise.
+      motion: { swirl: 1.15, rise: 0.28, wobble: 0.85, ringSpeed: 0.95, ringSway: 0.03, orbit: 0.05, flicker: 0.1 }
+    },
+    copy: {
+      kicker: "The scroll unrolls",
+      join: "A new disciple bows in",
+      reconnect: "A disciple returns to the courtyard",
+      depart: "A disciple walks the road alone",
+      gathering: "The courtyard fills in silence…",
+      joinGathering: "Another cup is poured…"
+    }
+  },
+  superhero: {
+    key: "superhero",
+    // Primary-color comic energy: heroic red-orange and sky blue.
+    accent: "#ff4f3c",
+    accentBright: "#ffb0a0",
+    secondary: "#2f9cff",
+    fog: "#04070f",
+    fogDensity: 0.042,
+    ambient: "#1f3a5a",
+    dust: { color: "#ffe07a", size: 0.05, flow: [0.1, 0.3] },
+    nebulae: ["#2f5ad0", "#ffd23c", "#ff4f3c"],
+    effect: "bokeh",
+    dice: { body: "#0a1020", roughness: 0.22, metalness: 0.7, opacity: 1, edge: "#ff4f3c", edgeOpacity: 0.8 },
+    glyphs: "★✦⚡✷✸◆▲!?※",
+    glyphFont: "44px sans-serif",
+    loom: {
+      heart: "255,110,80", world: "#0a1020", wireBoost: 1.6,
+      // Big, bright, fast — the world assembles like a splash page.
+      motion: { swirl: 2.0, rise: 0.5, wobble: 0.6, ringSpeed: 1.7, ringSway: 0.03, orbit: 0.09, flicker: 0 }
+    },
+    copy: {
+      kicker: "The signal goes up",
+      join: "A new cape answers the call",
+      reconnect: "Comms back up — welcome back to the team",
+      depart: "A hero goes off the grid",
+      gathering: "The team is assembling…",
+      joinGathering: "One more answers the call…"
+    }
+  },
+  pulp: {
+    key: "pulp",
+    // Aged newsprint amber and jungle green — serial-adventure sepia.
+    accent: "#e8a33c",
+    accentBright: "#ffd48f",
+    secondary: "#5a9a4f",
+    fog: "#080604",
+    fogDensity: 0.058,
+    ambient: "#38301c",
+    dust: { color: "#d9c08a", size: 0.05, flow: [0.28, 0.1] },
+    nebulae: ["#6a4a1a", "#5a9a4f", "#3a2a18"],
+    effect: "frontier",
+    dice: { body: "#161008", roughness: 0.55, metalness: 0.45, opacity: 1, edge: "#e8a33c", edgeOpacity: 0.6 },
+    glyphs: "✈☀✜✠※◈☼⚒",
+    glyphFont: "42px serif",
+    loom: {
+      heart: "232,163,60", world: "#141008", wireBoost: 1.1,
+      // Breathless serial pacing: quick swirl, propeller-wash wobble.
+      motion: { swirl: 1.7, rise: 0.22, wobble: 1.4, ringSpeed: 1.2, ringSway: 0.045, orbit: 0.075, flicker: 0.2 }
+    },
+    copy: {
+      kicker: "The expedition sets out",
+      join: "Another adventurer signs on",
+      reconnect: "An adventurer stumbles back into camp",
+      depart: "An adventurer is lost to the jungle",
+      gathering: "The expedition assembles at the airfield…",
+      joinGathering: "One more seat on the plane…"
+    }
+  },
+  cozy: {
+    key: "cozy",
+    // Hearth amber and soft sage — lamplight, wool, and rain on a window.
+    accent: "#f2b46a",
+    accentBright: "#ffe0b8",
+    secondary: "#8fbf8a",
+    fog: "#0a0806",
+    fogDensity: 0.04,
+    ambient: "#3e3428",
+    dust: { color: "#ffd9a8", size: 0.052, flow: [0.03, 0.08] },
+    nebulae: ["#8a6a3a", "#8fbf8a", "#5a4a6a"],
+    effect: "bokeh",
+    dice: { body: "#1a1410", roughness: 0.7, metalness: 0.15, opacity: 1, edge: "#f2b46a", edgeOpacity: 0.5 },
+    glyphs: "❀✿❁☘♡✧⁕✤❃",
+    glyphFont: "42px serif",
+    loom: {
+      heart: "242,180,106", world: "#181208", wireBoost: 0.85,
+      // The gentlest personality in the set: everything drifts, nothing rushes.
+      motion: { swirl: 0.5, rise: 0.16, wobble: 0.7, ringSpeed: 0.45, ringSway: 0.03, orbit: 0.028, flicker: 0.12 }
+    },
+    copy: {
+      kicker: "The kettle goes on",
+      join: "Someone new pulls up a chair",
+      reconnect: "A familiar face is back — kettle's still warm",
+      depart: "Someone heads home for the night",
+      gathering: "Chairs are being pulled around the table…",
+      joinGathering: "Room for one more at the table…"
+    }
   }
 };
 

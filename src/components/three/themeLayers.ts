@@ -138,9 +138,13 @@ export function createThemeLayer(
     case "bokeh":
       return bokehLayer(scene, visual, bounds);
     case "frontier":
-      // Western and post-apoc share the shelf key but not the weather:
-      // hot horizontal dust gusts vs. ash sifting down through dead air.
-      return visual.key === "postapoc" ? ashLayer(scene, visual, bounds) : dustLayer(scene, visual, bounds);
+      // Several themes share this key but not the weather. Ash sifts DOWN
+      // through dead air (post-apoc fallout, steampunk soot and coal smoke);
+      // dust gusts SIDEWAYS on a hot wind (the western prairie, a pirate's
+      // salt spray, a pulp serial's desert expedition).
+      return visual.key === "postapoc" || visual.key === "steampunk"
+        ? ashLayer(scene, visual, bounds)
+        : dustLayer(scene, visual, bounds);
     default:
       return null;
   }
