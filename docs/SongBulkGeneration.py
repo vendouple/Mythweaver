@@ -56,7 +56,7 @@ BGM_ROOT = MYTHWEAVER_ROOT / "public" / "music" / "BGM"
 SOUND_DESIGN = SCRIPT_DIR / "SOUND_DESIGN.md"
 
 # Local-only. Do not commit a real key to source control.
-API_KEY = "sk-"
+API_KEY = ""
 PROMPT = """
 [INSTRUMENTAL, NO LYRICS SHOULD BE SUNG]
 [INSTRUMENTAL, NO LYRICS SHOULD BE SUNG]
