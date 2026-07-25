@@ -49,9 +49,16 @@ export default function HostLobby({ campaign, theme }: { campaign: Campaign; the
 
   return (
     <div className="lobby screen" data-music-theme={visual.key}>
-      {/* The unforged world: its fragments drift as wireframe ghosts, charging
-          a little brighter with every hero who takes a seat. */}
-      <WorldForge mode="lobby" drama={0.3 + Math.min(campaign.players.length * 0.14, 0.65)} theme={visual.key} />
+      {/* The unforged world: its fragments drift as wireframe ghosts and close
+          ranks with every hero who takes a seat. `arrivals` fires the in-scene
+          arrival rite — a thread of light strikes into the circle and claims a
+          place — so a hero joining is an EVENT in 3D, not just a brighter glow. */}
+      <WorldForge
+        mode="lobby"
+        drama={0.3 + Math.min(campaign.players.length * 0.14, 0.65)}
+        arrivals={campaign.players.length}
+        theme={visual.key}
+      />
       <div className="portal-veil" />
 
       <header className="lobby-mast">

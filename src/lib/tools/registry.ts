@@ -6,7 +6,7 @@ import { rollD20Mode, rollDice, judgeD20Outcome, difficultyDcBias, clampD20Dc } 
 import type { AquaToolDefinition } from "@/lib/aqua/client";
 import { AmbienceAcoustic, AmbienceMood, AmbienceSound, PlayerStat, SfxCue, StageEffectKind, StoryCharacter } from "@/lib/campaign/types";
 import type { Location as CampaignLocation } from "@/lib/campaign/types";
-import { MUSIC_THEMES, MusicTheme } from "@/lib/campaign/musicTheme";
+import { MUSIC_THEMES, MusicTheme, THEME_GUIDE } from "@/lib/campaign/musicTheme";
 import { startCombat, endCombat, syncFocusedMirror } from "@/lib/campaign/turns";
 
 export const toolDefinitions: AquaToolDefinition[] = [
@@ -237,12 +237,12 @@ export const toolDefinitions: AquaToolDefinition[] = [
     type: "function",
     function: {
       name: "set_theme",
-      description: "Choose the campaign's musical score shelf (fantasy/scifi/horror/noir/modern/western/postapoc). Call EXACTLY ONCE on the opening turn when offered; never mid-campaign. Match the theme to the campaign's GENRE, not to surface props: horror = haunted houses, ghosts, dread, gothic, supernatural, terror, curses; noir = detectives, 1920s-40s, mobsters, speakeasies, murder mysteries; scifi = spaceships, aliens, cyberpunk, future tech; modern = spies, hackers, contemporary thrillers; western = cowboys, frontier, saloons; postapoc = wasteland, fallout, raiders; fantasy = magic, dragons, wizards, medieval kingdoms. A Victorian haunted house is HORROR, not fantasy, even though it is set in the past. When in doubt, pick the genre that matches the THREAT and TONE, not the era.",
+      description: `Choose the campaign's musical score shelf. Call EXACTLY ONCE on the opening turn when offered; never mid-campaign. ${THEME_GUIDE}`,
       parameters: {
         type: "object",
         required: ["theme"],
         properties: {
-          theme: { type: "string", enum: ["fantasy", "scifi", "horror", "noir", "modern", "western", "postapoc"] }
+          theme: { type: "string", enum: MUSIC_THEMES }
         }
       }
     }

@@ -5,7 +5,7 @@ import { aquaConfig, aquaFetch, fastModelTarget, AquaFetchOptions, AquaMessage, 
 import { runTool, toolDefinitions, applyNpcGroupFields, applyConditionFields } from "@/lib/tools/registry";
 import { generateImage } from "@/lib/aqua/images";
 import { AmbienceMood, Campaign, DisplayEvent, Player, PlayerStat, StoryCharacter } from "@/lib/campaign/types";
-import { MUSIC_THEMES, MusicTheme } from "@/lib/campaign/musicTheme";
+import { MUSIC_THEMES, MusicTheme, THEME_GUIDE } from "@/lib/campaign/musicTheme";
 import { advanceCombat, buildExplorationResolution, ENEMY_SLOT, syncFocusedMirror, isPartySplit, rotateActiveLocation, startCombat, endCombat, eligiblePlayerIdsInLocation } from "@/lib/campaign/turns";
 
 // Tiered server-log verbosity (DEBUG_VERBOSE):
@@ -154,7 +154,7 @@ World grounding (do NOT fabricate the world):
 - NPCs/enemies track locationId just like players. A brand-new NPC defaults to the party's current location automatically — you only need locationId when introducing one somewhere else. When an EXISTING NPC's physical position changes (it follows the party into a new room, flees to another location, or you start combat somewhere it was standing elsewhere), set locationId in npcUpdates to keep it in sync — otherwise it silently stops appearing where the fight/scene actually is.
 
 Cinematic direction:
-- If set_theme is offered and no score is chosen yet, call set_theme EXACTLY ONCE on the opening turn. Match the theme to the campaign's GENRE — the threat and tone, NOT the era or surface props. A Victorian haunted house is HORROR (ghosts, dread, supernatural), not fantasy, even though it is set in the past. Noir = detectives/mobsters/1920s-40s murder mysteries. Scifi = spaceships/aliens/cyberpunk. Modern = spies/hackers/contemporary. Western = cowboys/frontier. Postapoc = wasteland/fallout. Fantasy = magic/dragons/wizards/medieval. When in doubt, ask: what shelf of music would a film score for this story sit on?
+- If set_theme is offered and no score is chosen yet, call set_theme EXACTLY ONCE on the opening turn. ${THEME_GUIDE}
 - Prefer atmosphere over words.
 
 Campaign endings (win/loss/draw/cliffhanger — can end EARLY):
@@ -1842,19 +1842,19 @@ export async function chooseCampaignTheme(campaignId: string): Promise<Campaign>
  * Ask the DM AI to pick a music theme for a campaign from its title, premise,
  * overview, and NPC blurbs. Returns the chosen theme or null if the model
  * didn't return a valid one. Uses a single tool-forced call to set_theme so
- * the model's reasoning is constrained to the 7 valid shelves.
+ * the model's reasoning is constrained to the valid shelves (MUSIC_THEMES).
  */
 async function aiPickTheme(campaign: Campaign): Promise<MusicTheme | null> {
   const setThemeTool: AquaToolDefinition = {
     type: "function",
     function: {
       name: "set_theme",
-      description: "Pick the campaign's musical score shelf based on its genre — the threat and tone, NOT the era or surface props. A Victorian haunted house is HORROR, not fantasy. Noir = detectives/mobsters/1920s-40s murder mysteries. Scifi = spaceships/aliens/cyberpunk. Modern = spies/hackers/contemporary. Western = cowboys/frontier. Postapoc = wasteland/fallout. Fantasy = magic/dragons/wizards/medieval. When in doubt: what shelf of music would a film score for this story sit on?",
+      description: `Pick the campaign's musical score shelf based on its genre. ${THEME_GUIDE}`,
       parameters: {
         type: "object",
         required: ["theme"],
         properties: {
-          theme: { type: "string", enum: ["fantasy", "scifi", "horror", "noir", "modern", "western", "postapoc"] }
+          theme: { type: "string", enum: MUSIC_THEMES }
         }
       }
     }
@@ -1871,7 +1871,7 @@ async function aiPickTheme(campaign: Campaign): Promise<MusicTheme | null> {
   const messages: AquaMessage[] = [
     {
       role: "system",
-      content: "You are the music director for a tabletop RPG campaign. Read the campaign's title, premise, and characters, then pick the single musical score shelf that best matches its GENRE — the threat and tone, not the era. Call set_theme exactly once with your choice."
+      content: `You are the music director for a tabletop RPG campaign. Read the campaign's title, premise, and characters, then pick the single musical score shelf that best matches its GENRE — the threat and tone, not the era. Call set_theme exactly once with your choice.\n\n${THEME_GUIDE}`
     },
     { role: "user", content: haystack }
   ];
