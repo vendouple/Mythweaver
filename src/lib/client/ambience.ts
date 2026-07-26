@@ -78,6 +78,8 @@ if (typeof window !== "undefined") {
 const state: AmbienceState = { categories: [], acoustics: [], muted: false, volume: userVolume };
 const listeners = new Set<(next: AmbienceState) => void>();
 const active = new Map<string, ActiveLayer>();
+/** Beds currently playing as a one-shot stage accent (see ambienceAccent). */
+const accents = new Set<string>();
 let desiredText = "";
 let desiredOptions: AmbienceOptions = {};
 let changeToken = 0;
@@ -232,6 +234,50 @@ export function ambienceSetScene(text: string, options: AmbienceOptions = {}) {
   desiredText = normalized;
   desiredOptions = options;
   applyScene(normalized, options).catch(() => undefined);
+}
+
+/**
+ * Swell a matching environmental bed for one stage effect, then fade it out.
+ *
+ * The visual-only stage effects (rain, snow, fog, embers) used to be silent —
+ * the DM could start a downpour on screen and the room stayed dry. This layers
+ * the real environment recording underneath the visual for as long as the
+ * effect lasts, then takes it away, WITHOUT disturbing the scene's standing
+ * beds: it runs its own element outside the `applyScene` reconciler, so the
+ * accent can't be reclaimed or cancelled by the next scene change.
+ *
+ * If the bed is already playing as a standing layer, this does nothing — the
+ * room already sounds right and doubling it would just get loud.
+ */
+export async function ambienceAccent(sound: AmbienceSound, holdMs = 6000, strength = 1) {
+  if (sound === "none" || state.muted || userVolume <= 0) return;
+  if (active.has(sound)) return;
+  if (accents.has(sound)) return;
+  try {
+    const library = await loadAmbienceManifest();
+    const tracks = library[sound];
+    if (!tracks?.length) return;
+    const element = new Audio(randomTrack(tracks));
+    element.loop = true;
+    element.preload = "auto";
+    element.volume = 0;
+    accents.add(sound);
+    // A touch under the standing beds: an accent should color the moment, not
+    // take over the room.
+    const peak = targetVolume(Math.max(active.size, 1) + 1) * 0.8 * Math.max(0.2, Math.min(1, strength));
+    await element.play().catch(() => undefined);
+    fade(element, 0, peak);
+    window.setTimeout(() => {
+      fade(element, element.volume, 0, () => {
+        element.pause();
+        element.removeAttribute("src");
+        element.load();
+        accents.delete(sound);
+      });
+    }, Math.max(500, holdMs));
+  } catch {
+    accents.delete(sound);
+  }
 }
 
 export function ambienceSetVolume(next: number) {

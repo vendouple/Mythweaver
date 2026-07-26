@@ -47,6 +47,25 @@ export const api = {
     post<{ campaignId: string; player: Player; isPartyLeader: boolean }>("/api/join", body),
   chat: (body: Record<string, unknown>) => post<{ campaign?: Campaign; error?: string }>("/api/chat", body),
   party: (body: Record<string, unknown>) => post<{ campaign?: Campaign; error?: string }>("/api/party", body),
+  listChatTargets: (campaignId: string) =>
+    post<{ targets: { id: string; alias: string; label: string; model: string }[]; selectedChatTargetId: string }>("/api/party", {
+      campaignId,
+      action: "listChatTargets"
+    }),
+  switchModel: (campaignId: string, playerId: string, targetId: string) =>
+    post<{ campaign?: Campaign; error?: string }>("/api/party", {
+      campaignId,
+      action: "switchModel",
+      playerId,
+      targetId
+    }),
+  transferHost: (campaignId: string, playerId: string, targetPlayerId: string) =>
+    post<{ campaign?: Campaign; error?: string }>("/api/party", {
+      campaignId,
+      action: "transferHost",
+      playerId,
+      targetPlayerId
+    }),
   generate: (body: Record<string, unknown>) => post<{ result: Record<string, any> }>("/api/generate", body),
   generateSceneImage: (campaignId: string, prompt: string) =>
     post<{ campaign: Campaign }>("/api/image", { campaignId, prompt }),

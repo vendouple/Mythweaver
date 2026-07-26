@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { getCampaign, getCampaignLock, saveCampaign, safePushDisplayEvent, ensureLocations, getFocusedLocation, getPlayerLocation, reconcilePresence, playerLastSeen, DEPARTURE_WEAVE_GRACE_MS, claimHostSession } from "@/lib/campaign/store";
+import { getCampaign, getCampaignLock, saveCampaign, safePushDisplayEvent, ensureLocations, getFocusedLocation, getPlayerLocation, reconcilePresence, playerLastSeen, DEPARTURE_WEAVE_GRACE_MS, claimHostSession, logCampaignEvent } from "@/lib/campaign/store";
+import { listChatTargets, DEFAULT_CHAT_TARGET_ID } from "@/lib/aqua/client";
 import { runDungeonMaster, repaintBackdrop, resolveExplorationRound, advanceCombatAndRunEnemies, rotateSpotlight, waitForDmIdle, buildAbsenceBriefing, serverLog, serverError } from "@/lib/aqua/chat";
 import { turnMode, deadlinePassed, syncFocusedMirror, getActiveLocation, isPartySplit } from "@/lib/campaign/turns";
 
@@ -411,6 +412,90 @@ export async function POST(request: Request) {
         if (body.showNpcInventories !== undefined) campaign.showNpcInventories = !!body.showNpcInventories;
         if (body.showNpcAbilities !== undefined) campaign.showNpcAbilities = !!body.showNpcAbilities;
         await saveCampaign(campaign);
+        return NextResponse.json({ campaign });
+      }
+
+      if (action === "listChatTargets") {
+        // Read-only: populate the Director's Drawer model selector. Returns
+        // alias + label + model only — never base URLs or API keys. The
+        // campaign's current selection is included so the UI can mark it.
+        const campaign = await getCampaign(campaignId);
+        const targets = listChatTargets();
+        return NextResponse.json({ targets, selectedChatTargetId: campaign.selectedChatTargetId || DEFAULT_CHAT_TARGET_ID });
+      }
+
+      if (action === "switchModel") {
+        // Manual narration target switch after a provider failure. MANUAL ONLY
+        // — never auto-failed-over. Only the current party leader may switch.
+        // The request must carry the actor's playerId so we can authorize.
+        const campaign = await getCampaign(campaignId);
+        const playerId = String(body.playerId || "");
+        if (!campaign.partyLeaderId || campaign.partyLeaderId !== playerId) {
+          return NextResponse.json({ error: "Only the party leader can switch the narration model" }, { status: 403 });
+        }
+        const targetId = String(body.targetId || "").trim();
+        const targets = listChatTargets();
+        const valid = targets.some((t) => t.id === targetId);
+        if (!valid) {
+          return NextResponse.json({ error: "Unknown narration target" }, { status: 400 });
+        }
+        const previousTargetId = campaign.selectedChatTargetId || DEFAULT_CHAT_TARGET_ID;
+        if (previousTargetId === targetId) {
+          return NextResponse.json({ campaign });
+        }
+        campaign.selectedChatTargetId = targetId === DEFAULT_CHAT_TARGET_ID ? undefined : targetId;
+        await saveCampaign(campaign);
+        const target = targets.find((t) => t.id === targetId);
+        serverLog("API party", `Host ${playerId} switched narration target ${previousTargetId} → ${targetId} for campaign: ${campaignId}`);
+        void logCampaignEvent(campaignId, "INFO", "Provider", "Narration target switched", {
+          actorPlayerId: playerId,
+          from: previousTargetId,
+          to: targetId,
+          toLabel: target?.label,
+          toModel: target?.model
+        });
+        return NextResponse.json({ campaign });
+      }
+
+      if (action === "transferHost") {
+        // Transfer the SINGLE player-host/party-leader role to another joined
+        // player. Exclusive transfer — the current host loses authority
+        // immediately. Only the current party leader may transfer. The live-TV
+        // hostToken system is separate and unaffected.
+        const campaign = await getCampaign(campaignId);
+        const playerId = String(body.playerId || "");
+        if (!campaign.partyLeaderId || campaign.partyLeaderId !== playerId) {
+          return NextResponse.json({ error: "Only the party leader can transfer the host role" }, { status: 403 });
+        }
+        const targetPlayerId = String(body.targetPlayerId || "").trim();
+        if (!targetPlayerId) {
+          return NextResponse.json({ error: "targetPlayerId is required" }, { status: 400 });
+        }
+        if (targetPlayerId === playerId) {
+          return NextResponse.json({ error: "You are already the host" }, { status: 400 });
+        }
+        const target = campaign.players.find((p) => p.id === targetPlayerId);
+        if (!target) {
+          return NextResponse.json({ error: "Target player is not in this campaign" }, { status: 400 });
+        }
+        if (target.away) {
+          return NextResponse.json({ error: "Target player is currently away — pick an active player" }, { status: 400 });
+        }
+        const previousLeaderId = campaign.partyLeaderId;
+        campaign.partyLeaderId = targetPlayerId;
+        safePushDisplayEvent(campaign, {
+          type: "system",
+          speaker: "SYSTEM",
+          content: `The host role passes to ${target.characterName || target.name}.`
+        });
+        await saveCampaign(campaign);
+        serverLog("API party", `Host role transferred ${previousLeaderId} → ${targetPlayerId} for campaign: ${campaignId}`);
+        void logCampaignEvent(campaignId, "INFO", "Host", "Host role transferred", {
+          actorPlayerId: playerId,
+          fromPlayerId: previousLeaderId,
+          toPlayerId: targetPlayerId,
+          toName: target.characterName || target.name
+        });
         return NextResponse.json({ campaign });
       }
 

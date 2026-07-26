@@ -907,13 +907,47 @@ function galleonProp(visual: ThemeVisual): BuiltProp {
   ship.add(wake);
   disposables.push(wakeGeometry, wakeMaterial);
 
+  // Bow spray: motes thrown up and forward each time she buries her nose.
+  const SPRAY = 46;
+  const sprayVel = new Float32Array(SPRAY * 3);
+  const sprayLife = new Float32Array(SPRAY);
+  const sprayGeometry = new THREE.BufferGeometry();
+  sprayGeometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(SPRAY * 3).fill(-100), 3));
+  const sprayMaterial = new THREE.PointsMaterial({
+    color: new THREE.Color("#eaf4ff"),
+    size: 0.075,
+    transparent: true,
+    opacity: 0.75,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    sizeAttenuation: true
+  });
+  const spray = new THREE.Points(sprayGeometry, sprayMaterial);
+  ship.add(spray);
+  disposables.push(sprayGeometry, sprayMaterial);
+  const sprayAttr = sprayGeometry.getAttribute("position") as THREE.BufferAttribute;
+  let sprayNext = 0;
+
+  // Storm light: the sails and the sea get lit from above by distant lightning
+  // at irregular intervals — the single cheapest thing that makes a seascape
+  // feel like weather rather than a screensaver.
+  const stormLight = new THREE.PointLight(new THREE.Color("#cfe3ff"), 0, 14, 2);
+  stormLight.position.set(0, 4.5, 1.5);
+  content.add(stormLight);
+  let boltAt = 3.5;
+  let boltT = 99;
+
   const seaAttr = seaWire.getAttribute("position") as THREE.BufferAttribute;
   const foamAttr = foamGeometry.getAttribute("position") as THREE.BufferAttribute;
 
-  // Two wave trains, matched between the sea mesh and the ship's motion so the
-  // hull sits IN the water rather than hovering over a moving texture.
+  // THREE wave trains at different scales, matched between the sea mesh and the
+  // ship's motion so the hull sits IN the water rather than hovering over a
+  // moving texture. The long swell carries her; the chop crosses it; a fine
+  // ripple keeps the lattice from looking like a rubber sheet.
   const waveAt = (x: number, z: number, t: number) =>
-    Math.sin(x * 1.15 - t * 1.35) * 0.17 + Math.sin(z * 0.87 + t * 0.95) * 0.12;
+    Math.sin(x * 0.62 - t * 0.78) * 0.24
+    + Math.sin(z * 0.87 + t * 0.95) * 0.12
+    + Math.sin((x + z) * 1.9 - t * 2.4) * 0.035;
 
   return {
     group,
@@ -943,10 +977,54 @@ function galleonProp(visual: ThemeVisual): BuiltProp {
       const port = waveAt(0, 0.5, t) * heave;
       const starboard = waveAt(0, -0.5, t) * heave;
       ship.position.y = -1.5 + centre + 0.1;
-      ship.rotation.z = Math.atan2(fore - aft, 1.8);
+      const pitch = Math.atan2(fore - aft, 1.8);
+      ship.rotation.z = pitch;
       ship.rotation.x = Math.atan2(port - starboard, 1.0) * 0.7;
       // A slow yaw so she's working across the swell, not locked to camera.
       ship.rotation.y = Math.sin(t * 0.13) * 0.28;
+
+      // Bow spray: when the bow drops through the water she throws water. The
+      // trigger is the pitch RATE going nose-down past a threshold, so the
+      // spray genuinely coincides with her burying it.
+      const bowDrop = -(fore - aft);
+      if (bowDrop > 0.16) {
+        for (let n = 0; n < 3; n += 1) {
+          const i = sprayNext % SPRAY;
+          sprayNext += 1;
+          sprayLife[i] = 1;
+          sprayAttr.setXYZ(i, 1.25, 0.1, (Math.random() - 0.5) * 0.3);
+          sprayVel[i * 3] = 0.7 + Math.random() * 0.9;
+          sprayVel[i * 3 + 1] = 1.1 + Math.random() * 1.0;
+          sprayVel[i * 3 + 2] = (Math.random() - 0.5) * 0.7;
+        }
+      }
+      let sprayAlive = 0;
+      for (let i = 0; i < SPRAY; i += 1) {
+        if (sprayLife[i] <= 0) continue;
+        sprayLife[i] -= dt * 1.5;
+        sprayVel[i * 3 + 1] -= dt * 3.4; // gravity
+        sprayAttr.setXYZ(
+          i,
+          sprayAttr.getX(i) + sprayVel[i * 3] * dt,
+          sprayAttr.getY(i) + sprayVel[i * 3 + 1] * dt,
+          sprayAttr.getZ(i) + sprayVel[i * 3 + 2] * dt
+        );
+        if (sprayLife[i] <= 0) sprayAttr.setXYZ(i, 0, -100, 0);
+        else sprayAlive = Math.max(sprayAlive, sprayLife[i]);
+      }
+      sprayAttr.needsUpdate = true;
+      sprayMaterial.opacity = sprayAlive * 0.7;
+
+      // Distant lightning on an irregular clock: a hard double flash, then
+      // dark for anywhere from four to twelve seconds.
+      boltT += dt;
+      if (boltT > boltAt) {
+        boltT = 0;
+        boltAt = 4 + Math.random() * 8;
+      }
+      // Two spikes 90ms apart, then gone — reads as a strike, not a pulse.
+      const strike = Math.exp(-boltT * 22) + Math.exp(-Math.max(0, boltT - 0.09) * 16) * 0.7;
+      stormLight.intensity = Math.min(1, strike) * 9;
 
       // Sails belly and luff: a travelling wave across each sheet.
       for (const sail of sails) {
@@ -965,11 +1043,13 @@ function galleonProp(visual: ThemeVisual): BuiltProp {
         }
         attr.needsUpdate = true;
       }
-      sailMaterial.opacity = 0.11 + Math.sin(t * 0.9) * 0.03 + drive * 0.05;
+      // The lightning catches the canvas — the sails are the biggest surface
+      // she has, so they're what sells the flash.
+      sailMaterial.opacity = 0.11 + Math.sin(t * 0.9) * 0.03 + drive * 0.05 + Math.min(1, strike) * 0.3;
 
       lanternMaterial.opacity = 0.5 + Math.sin(t * 2.3) * 0.16;
       auraMaterial.opacity = 0.1 + Math.sin(t * 0.7) * 0.04;
-      seaMaterial.opacity = 0.24 + drive * 0.12 + Math.sin(t * 0.6) * 0.04;
+      seaMaterial.opacity = 0.24 + drive * 0.12 + Math.sin(t * 0.6) * 0.04 + Math.min(1, strike) * 0.22;
       wakeMaterial.opacity = 0.07 + drive * 0.05;
       wake.scale.set(1 + Math.sin(t * 1.1) * 0.06, 1, 1);
     },

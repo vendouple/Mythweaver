@@ -70,6 +70,112 @@ export function fastModelTarget(): { model: string; options: AquaFetchOptions } 
   return { model: config.chatModel, options: {} };
 }
 
+/**
+ * A named narration target the host can manually switch to after a provider
+ * failure. Each target is resolved SERVER-SIDE from environment variables —
+ * the campaign JSON stores only the alias id, never credentials. The default
+ * target ("default") is the legacy CHAT_MODEL/BASE_URL/API_KEY triple.
+ *
+ * Additional targets are declared with a numbered prefix, e.g.:
+ *   CHAT_TARGET_1_ALIAS=gemini
+ *   CHAT_TARGET_1_MODEL=gemini-3.6
+ *   CHAT_TARGET_1_BASE_URL=https://...
+ *   CHAT_TARGET_1_API_KEY=...
+ *   CHAT_TARGET_1_LABEL=Gemini 3.6
+ *
+ * Targets are validated at resolution time: a target whose model is empty is
+ * skipped. The UI receives alias + label + whether it's the current selection;
+ * it never sees base URLs or keys.
+ */
+export type ChatTargetSummary = {
+  id: string;
+  alias: string;
+  label: string;
+  model: string;
+};
+
+export type ChatTarget = {
+  id: string;
+  alias: string;
+  label: string;
+  model: string;
+  baseUrl: string;
+  apiKey: string;
+};
+
+/** The default target id — always resolves to CHAT_MODEL/BASE_URL/API_KEY. */
+export const DEFAULT_CHAT_TARGET_ID = "default";
+
+/**
+ * Resolve a single chat target by id (alias). Falls back to the default
+ * (CHAT_MODEL/BASE_URL/API_KEY) when the id is unknown or the named target
+ * is misconfigured. Never throws — an unknown target returns the default so
+ * a stale campaign.json selection can never brick narration.
+ */
+export function resolveChatTarget(targetId?: string): ChatTarget {
+  const config = aquaConfig();
+  const defaultTarget: ChatTarget = {
+    id: DEFAULT_CHAT_TARGET_ID,
+    alias: "default",
+    label: process.env.CHAT_TARGET_DEFAULT_LABEL || config.chatModel || "Default",
+    model: config.chatModel,
+    baseUrl: config.baseUrl,
+    apiKey: config.apiKey
+  };
+  if (!targetId || targetId === DEFAULT_CHAT_TARGET_ID) return defaultTarget;
+
+  const target = findChatTarget(targetId);
+  return target || defaultTarget;
+}
+
+/**
+ * List all configured chat targets for the host selector UI. The default
+ * target is always first. Returns alias + label + model only — never base
+ * URLs or API keys. Used by the party API to populate the Director's Drawer.
+ */
+export function listChatTargets(): ChatTargetSummary[] {
+  const config = aquaConfig();
+  const summaries: ChatTargetSummary[] = [{
+    id: DEFAULT_CHAT_TARGET_ID,
+    alias: "default",
+    label: process.env.CHAT_TARGET_DEFAULT_LABEL || config.chatModel || "Default",
+    model: config.chatModel
+  }];
+  for (const t of readNamedChatTargets()) {
+    summaries.push({ id: t.id, alias: t.alias, label: t.label, model: t.model });
+  }
+  return summaries;
+}
+
+/** Internal: read all CHAT_TARGET_N_* groups from env, in index order. */
+function readNamedChatTargets(): ChatTarget[] {
+  const targets: ChatTarget[] = [];
+  const config = aquaConfig();
+  // Scan indices 1..20 — more than enough for any deployment, and bounded so
+  // a typo can't spin a huge loop.
+  for (let i = 1; i <= 20; i += 1) {
+    const alias = (process.env[`CHAT_TARGET_${i}_ALIAS`] || "").trim();
+    if (!alias) continue;
+    const model = (process.env[`CHAT_TARGET_${i}_MODEL`] || "").trim();
+    if (!model) continue; // a target with no model is unusable; skip it
+    const baseUrl = (process.env[`CHAT_TARGET_${i}_BASE_URL`] || config.baseUrl).trim();
+    const apiKey = (process.env[`CHAT_TARGET_${i}_API_KEY`] || config.apiKey).trim();
+    const label = (process.env[`CHAT_TARGET_${i}_LABEL`] || alias).trim();
+    targets.push({ id: alias, alias, label, model, baseUrl, apiKey });
+  }
+  return targets;
+}
+
+/** Internal: find a named target by alias (case-insensitive). */
+function findChatTarget(targetId: string): ChatTarget | null {
+  const needle = targetId.trim().toLowerCase();
+  if (!needle) return null;
+  for (const t of readNamedChatTargets()) {
+    if (t.alias.toLowerCase() === needle) return t;
+  }
+  return null;
+}
+
 /** Progress info reported just before a retry, so callers can surface it. */
 export type AquaRetryInfo = { attempt: number; retries: number; status?: number; error?: unknown };
 
@@ -94,6 +200,13 @@ export type AquaFetchOptions = {
   apiKey?: string;
 };
 
+/**
+ * Hard ceiling on per-request retries. Prevents a misconfigured env value
+ * (e.g. INTERACTIVE_RETRIES=1000) from trapping a turn on one dead provider
+ * for an hour. The observed "attempt 1/1000" log proves this clamp is needed.
+ */
+const MAX_RETRIES_HARD_CAP = 10;
+
 /** Parse RETRY_BACKOFF: 0/false/off/no → false; anything else truthy → true. Default false (fixed delay). */
 function envRetryBackoff(): boolean {
   const v = String(process.env.RETRY_BACKOFF ?? "0").toLowerCase().trim();
@@ -105,11 +218,80 @@ function retryDelayForAttempt(attempt: number, delayMs: number, backoff: boolean
   return backoff ? attempt * base : base;
 }
 
+/**
+ * A deliberate abort signal: when the host manually switches the narration
+ * provider mid-request, the in-flight fetch is aborted so the turn can be
+ * re-issued on the new target. This must NOT be treated as a timeout retry —
+ * it's an intentional cancellation. Throw an instance of this class so the
+ * retry loop can distinguish it from a network/timeout abort.
+ */
+export class AquaAbortError extends Error {
+  constructor(message = "Request aborted by host action") {
+    super(message);
+    this.name = "AquaAbortError";
+  }
+}
+
+/**
+ * Classify a failure to decide whether the retry loop should attempt again.
+ *
+ * Retryable (transient): network errors, timeouts/aborts caused by the
+ *   timeout, HTTP 408, 429, and 5xx.
+ * Non-retryable (permanent): other 4xx — including unsupported tools/model
+ *   capability errors (400 "does not support tools"), invalid model, invalid
+ *   request/schema, and authentication/authorization failures (401/403).
+ *
+ * A deliberate host abort (AquaAbortError) is never retried.
+ */
+export function isRetryableError(error: unknown, status?: number): boolean {
+  if (error instanceof AquaAbortError) return false;
+  if (typeof status === "number") {
+    if (status === 408 || status === 429) return true;
+    if (status >= 500 && status < 600) return true;
+    return false; // other 4xx are permanent
+  }
+  // No HTTP status → network/timeout error. AbortError from a timeout
+  // controller is retryable; AquaAbortError (host switch) is not (handled above).
+  if (error instanceof Error) {
+    const name = error.name;
+    if (name === "AbortError") return true; // timeout-induced abort
+    if (name === "TypeError") return true; // fetch network failure
+    if (name === "FetchError") return true;
+  }
+  return true; // unknown error: be conservative and retry once
+}
+
+/**
+ * Extract a stable error code/summary from a failed response body for logging.
+ * Returns undefined when the body held no recognizable code.
+ */
+export function classifyHttpError(status: number, body: unknown): { code?: string; message: string } {
+  const text = typeof body === "string" ? body : JSON.stringify(body);
+  // Common OpenAI-compatible capability/shape errors.
+  const lower = text.toLowerCase();
+  if (lower.includes("does not support tools") || lower.includes("tool calls are not supported")) {
+    return { code: "unsupported_tools", message: text.slice(0, 200) };
+  }
+  if (lower.includes("does not support") || lower.includes("not supported")) {
+    return { code: "unsupported_feature", message: text.slice(0, 200) };
+  }
+  if (lower.includes("invalid model") || lower.includes("model not found") || lower.includes("does not exist")) {
+    return { code: "invalid_model", message: text.slice(0, 200) };
+  }
+  if (status === 401 || status === 403) {
+    return { code: "auth", message: text.slice(0, 200) };
+  }
+  return { message: text.slice(0, 200) };
+}
+
 export async function aquaFetch(path: string, init: RequestInit, options: AquaFetchOptions | number = {}) {
   const config = aquaConfig();
   // Back-compat: a bare number used to mean `retries`.
   const opts: AquaFetchOptions = typeof options === "number" ? { retries: options } : options;
-  const retries = Math.max(1, opts.retries ?? 6);
+  // Clamp retries to a hard ceiling so a misconfigured env value (e.g. 1000)
+  // can never trap a turn on one dead provider. The observed "attempt 1/1000"
+  // log proves this clamp is required.
+  const retries = Math.min(Math.max(1, opts.retries ?? 6), MAX_RETRIES_HARD_CAP);
   const timeoutMs = opts.timeoutMs ?? 60000;
   const retryDelayMs = opts.retryDelayMs ?? (Number(process.env.RETRY_DELAY_MS) || 1000);
   const retryBackoff = opts.retryBackoff ?? envRetryBackoff();
@@ -139,20 +321,32 @@ export async function aquaFetch(path: string, init: RequestInit, options: AquaFe
       }
 
       if (!response.ok) {
-        if ((response.status >= 500 || response.status === 429) && attempt < retries) {
+        // Classify before retrying: permanent 4xx (capability/auth/schema)
+        // errors must NOT be retried — they cannot recover. Only 408/429/5xx
+        // are transient. This stops the observed six-retry loop on a
+        // "does not support tools" 400 response.
+        if (attempt < retries && isRetryableError(null, response.status)) {
           const delay = retryDelayForAttempt(attempt, retryDelayMs, retryBackoff);
           console.warn(`API error ${response.status} on attempt ${attempt}/${retries}. Retrying in ${delay / 1000}s...`);
           opts.onRetry?.({ attempt: attempt + 1, retries, status: response.status });
           if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
           continue;
         }
-        throw new Error(`API ${response.status}: ${typeof data === "string" ? data : JSON.stringify(data)}`);
+        const classified = classifyHttpError(response.status, data);
+        const err = new Error(`API ${response.status}: ${typeof data === "string" ? data : JSON.stringify(data)}`);
+        // Attach classification so callers (and logs) can surface the reason.
+        (err as any).status = response.status;
+        (err as any).code = classified.code;
+        throw err;
       }
 
       return data;
     } catch (error) {
       clearTimeout(timeoutId);
-      if (attempt < retries) {
+      // A deliberate host abort is never retried — propagate immediately so
+      // the turn can be re-issued on the newly selected provider.
+      if (error instanceof AquaAbortError) throw error;
+      if (attempt < retries && isRetryableError(error)) {
         const delay = retryDelayForAttempt(attempt, retryDelayMs, retryBackoff);
         console.warn(`Fetch failed on attempt ${attempt}/${retries}: ${error}. Retrying in ${delay / 1000}s...`);
         opts.onRetry?.({ attempt: attempt + 1, retries, error });

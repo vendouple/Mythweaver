@@ -1,4 +1,4 @@
-﻿import { getCampaign, readCampaignTextFile, saveCampaign, writeCampaignTextFile, downloadAndSaveImage, logCampaignDebug, safePushDisplayEvent, isValidImageUrl, pushStageSfx, endCampaign, ensureLocations, getFocusedLocation, applyFocus } from "@/lib/campaign/store";
+﻿import { getCampaign, getCampaignLock, readCampaignTextFile, saveCampaign, writeCampaignTextFile, downloadAndSaveImage, logCampaignDebug, logCampaignEvent, safePushDisplayEvent, isValidImageUrl, pushStageSfx, endCampaign, ensureLocations, getFocusedLocation, applyFocus } from "@/lib/campaign/store";
 import { createId } from "@/lib/utils/ids";
 import { generateImage } from "@/lib/aqua/images";
 import { getCurrentDate } from "./date";
@@ -467,6 +467,101 @@ export const toolDefinitions: AquaToolDefinition[] = [
   }
 ];
 
+function queueImageGeneration(campaignId: string, args: Record<string, unknown>) {
+  const prompt = String(args.prompt || "").trim();
+  const kind = args.kind === "portrait" ? "portrait" : "scene";
+  const playerIdArg = String(args.playerId || "");
+  const npcName = typeof args.npcName === "string" ? args.npcName.trim() : "";
+
+  void logCampaignEvent(campaignId, "INFO", "Image", "Image job queued", {
+    kind,
+    target: kind === "portrait" ? (playerIdArg || npcName || "unknown") : "scene",
+    promptChars: prompt.length
+  });
+
+  const startedAt = Date.now();
+  void (async () => {
+    try {
+      const image = await generateImage(prompt);
+      void logCampaignEvent(campaignId, "INFO", "Image", "Image generated", {
+        kind,
+        durationMs: Date.now() - startedAt,
+        promptChars: prompt.length
+      });
+      const release = await getCampaignLock(campaignId).acquire();
+      try {
+        const campaign = await getCampaign(campaignId);
+        if (kind === "portrait") {
+          const player =
+            campaign.players.find((item) => item.id === playerIdArg) ||
+            campaign.players.find((item) => (item.characterName || item.name).toLowerCase() === playerIdArg.toLowerCase());
+          if (player) {
+            const localUrl = await downloadAndSaveImage(campaignId, image.url, "players", player.id);
+            player.portraitUrl = localUrl;
+            player.portraitPrompt = image.prompt;
+            if (!campaign.portraits) campaign.portraits = [];
+            campaign.portraits.push({
+              id: createId("portrait"),
+              url: localUrl,
+              prompt: image.prompt,
+              characterName: player.characterName || player.name,
+              createdAt: new Date().toISOString()
+            });
+            await saveCampaign(campaign);
+            return;
+          }
+
+          let npc = campaign.storyCharacters.find((character) => character.name.toLowerCase() === npcName.toLowerCase());
+          if (!npc) {
+            ensureLocations(campaign);
+            npc = {
+              id: createId("character"),
+              name: npcName,
+              description: "",
+              locationId: getFocusedLocation(campaign).id,
+              inventory: [],
+              abilities: [],
+              stats: []
+            };
+            campaign.storyCharacters.push(npc);
+          }
+          const localUrl = await downloadAndSaveImage(campaignId, image.url, "npcs", npc.id);
+          npc.portraitUrl = localUrl;
+          if (!campaign.portraits) campaign.portraits = [];
+          campaign.portraits.push({
+            id: createId("portrait"),
+            url: localUrl,
+            prompt: image.prompt,
+            characterName: npc.name,
+            createdAt: new Date().toISOString()
+          });
+          await saveCampaign(campaign);
+          return;
+        }
+
+        const localUrl = await downloadAndSaveImage(campaignId, image.url, "backgrounds");
+        const entry = { id: createId("image"), url: localUrl, prompt: image.prompt, createdAt: new Date().toISOString() };
+        campaign.images.push(entry);
+        campaign.currentImageUrl = entry.url;
+        safePushDisplayEvent(campaign, { type: "scene", speaker: "Scene", content: "The TV scene background shifts." });
+        await saveCampaign(campaign);
+      } finally {
+        release();
+      }
+    } catch (err) {
+      console.error(`[Tool Error] Image generation failed for ${campaignId}:`, err);
+      const errMsg = err instanceof Error ? err.message : String(err);
+      await logCampaignDebug(campaignId, `[Image] Generation failed after configured retries; skipped: ${errMsg}`);
+      void logCampaignEvent(campaignId, "ERROR", "Image", "Image generation failed", {
+        kind,
+        durationMs: Date.now() - startedAt,
+        error: errMsg,
+        errorName: err instanceof Error ? err.name : undefined
+      });
+    }
+  })();
+}
+
 export async function runTool(campaignId: string, name: string, args: Record<string, unknown>) {
   try {
     if (name === "roll_dice") {
@@ -633,7 +728,6 @@ export async function runTool(campaignId: string, name: string, args: Record<str
           (pl) => pl.id === tok || (pl.characterName || pl.name).toLowerCase() === tok.toLowerCase()
         );
         if (!p) continue;
-        // Drop any stale lock-in from their previous location before moving.
         for (const other of campaign.locations!) {
           if (other.id !== loc.id && other.pendingActions) delete other.pendingActions[p.id];
         }
@@ -913,77 +1007,14 @@ export async function runTool(campaignId: string, name: string, args: Record<str
     }
 
     if (name === "generate_image") {
-      const image = await generateImage(String(args.prompt));
-      const campaign = await getCampaign(campaignId);
-      if (args.kind === "portrait") {
-        const playerIdArg = String(args.playerId || "");
-        const player =
-          campaign.players.find((item) => item.id === playerIdArg) ||
-          campaign.players.find((item) => (item.characterName || item.name).toLowerCase() === playerIdArg.toLowerCase());
-        const npcName = typeof args.npcName === "string" ? args.npcName.trim() : "";
-
-        if (player) {
-          const localUrl = await downloadAndSaveImage(campaignId, image.url, "players", player.id);
-          player.portraitUrl = localUrl;
-          player.portraitPrompt = image.prompt;
-
-          if (!campaign.portraits) campaign.portraits = [];
-          campaign.portraits.push({
-            id: createId("portrait"),
-            url: localUrl,
-            prompt: image.prompt,
-            characterName: player.characterName || player.name,
-            createdAt: new Date().toISOString()
-          });
-
-          await saveCampaign(campaign);
-          return { playerId: player.id, url: localUrl, prompt: image.prompt };
-        }
-
-        if (npcName) {
-          let npc = campaign.storyCharacters.find((c) => c.name.toLowerCase() === npcName.toLowerCase());
-          if (!npc) {
-            // Portraits are painted BEFORE the NPC is introduced (per the DM
-            // rules), so this is often the character's very first record —
-            // anchor it to the party's location like every other new NPC.
-            ensureLocations(campaign);
-            npc = {
-              id: createId("character"),
-              name: npcName,
-              description: "",
-              locationId: getFocusedLocation(campaign).id,
-              inventory: [],
-              abilities: [],
-              stats: []
-            };
-            campaign.storyCharacters.push(npc);
-          }
-          const localUrl = await downloadAndSaveImage(campaignId, image.url, "npcs", npc.id);
-          npc.portraitUrl = localUrl;
-
-          if (!campaign.portraits) campaign.portraits = [];
-          campaign.portraits.push({
-            id: createId("portrait"),
-            url: localUrl,
-            prompt: image.prompt,
-            characterName: npc.name,
-            createdAt: new Date().toISOString()
-          });
-
-          await saveCampaign(campaign);
-          return { npcId: npc.id, npcName: npc.name, url: localUrl, prompt: image.prompt };
-        }
-
-        throw new Error("Portraits need a target: pass playerId for a player, or npcName for an NPC/monster.");
+      const prompt = String(args.prompt || "").trim();
+      const kind = args.kind === "portrait" ? "portrait" : "scene";
+      if (!prompt) return { error: "Image generation needs a prompt." };
+      if (kind === "portrait" && !String(args.playerId || "") && !String(args.npcName || "")) {
+        return { error: "Portraits need a target: pass playerId for a player, or npcName for an NPC/monster." };
       }
-
-      const localUrl = await downloadAndSaveImage(campaignId, image.url, "backgrounds");
-      const entry = { id: createId("image"), url: localUrl, prompt: image.prompt, createdAt: new Date().toISOString() };
-      campaign.images.push(entry);
-      campaign.currentImageUrl = entry.url;
-      safePushDisplayEvent(campaign, { type: "scene", speaker: "Scene", content: "The TV scene background shifts." });
-      await saveCampaign(campaign);
-      return entry;
+      queueImageGeneration(campaignId, args);
+      return { queued: true, kind, prompt };
     }
 
     throw new Error(`Unknown tool: ${name}`);
