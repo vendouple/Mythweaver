@@ -1,7 +1,7 @@
 import { buildCampaignContext } from "@/lib/campaign/context";
-import { getCampaign, getCampaignLock, saveCampaign, downloadAndSaveImage, logCampaignDebug, logCampaignEvent, safePushDisplayEvent, isValidImageUrl, startCampaignDraft, finishCampaignDraft, reconcilePresence, normalizeBeatEffect, ensureLocations, getFocusedLocation, persistFocusedLocation, applyFocus } from "@/lib/campaign/store";
+import { getCampaign, getCampaignLock, saveCampaign, downloadAndSaveImage, logCampaignDebug, logCampaignEvent, scrubLogText, safePushDisplayEvent, isValidImageUrl, startCampaignDraft, finishCampaignDraft, reconcilePresence, normalizeBeatEffect, ensureLocations, getFocusedLocation, persistFocusedLocation, applyFocus, type CampaignLogCategory } from "@/lib/campaign/store";
 import { createId } from "@/lib/utils/ids";
-import { aquaConfig, aquaFetch, fastModelTarget, resolveChatTarget, AquaFetchOptions, AquaMessage, AquaToolCall, AquaToolDefinition } from "./client";
+import { aquaConfig, aquaFetch, fastModelTarget, resolveChatTarget, DEFAULT_CHAT_TARGET_ID, AquaFetchOptions, AquaMessage, AquaToolCall, AquaToolDefinition } from "./client";
 import { runTool, toolDefinitions, applyNpcGroupFields, applyConditionFields } from "@/lib/tools/registry";
 import { generateImage } from "@/lib/aqua/images";
 import { AmbienceMood, Campaign, DisplayEvent, Player, PlayerStat, StoryCharacter } from "@/lib/campaign/types";
@@ -82,6 +82,25 @@ const INTERACTIVE_FETCH: Pick<AquaFetchOptions, "retries" | "timeoutMs"> = {
   timeoutMs: Math.max(5000, Number(process.env.INTERACTIVE_TIMEOUT_MS) || 45000)
 };
 
+/**
+ * An `onRetry` handler that records provider retries durably in the campaign's
+ * debug.log. Every campaign-scoped provider call should pass one: retries used
+ * to be console-only for every call except the main narration request, so an
+ * ancillary model quietly burning its attempts left no trace anyone could find
+ * after the session.
+ */
+function retryLogger(campaignId: string, category: CampaignLogCategory, phase: string): AquaFetchOptions["onRetry"] {
+  return ({ attempt, retries, status, error }) => {
+    void logCampaignEvent(campaignId, "WARN", category, "Provider retry", {
+      phase,
+      attempt,
+      retries,
+      status,
+      error: error instanceof Error ? error.message : error ? String(error) : undefined
+    });
+  };
+}
+
 const systemPrompt = `You are the Dungeon Master for a couch RPG. TV shows cinematic story; phones are player controllers.
 
 Prevent context collapse:
@@ -112,6 +131,11 @@ Roll Mode (how often to call for dice):
 - heavy: most contested or uncertain actions
 - all: nearly every uncertain action gets a check
 
+When NOT to roll (this matters as much as when to roll):
+- A specialist doing their own established job, with the right tool, no time pressure and nothing meaningful left uncertain, simply SUCCEEDS. Narrate it and move on. A demolitions expert with her kit opening a maintenance valve does not need a check; a locksmith picking an ordinary lock in an empty corridor does not need a check.
+- Never re-roll the same uncertainty. If a check already settled whether this character can do this kind of thing here, the next identical action inherits that answer — a corridor of four near-identical valves is ONE check (or none), not four. Roll again only when something material changed: new danger, a worse tool, a harder specimen, a deadline, injury.
+- A failure must MOVE the story: change the route, spend a resource, cost time the enemy uses, break the tool, raise an alarm, or reveal something worse. Never answer a failure by inviting the same attempt again — "try the valve again" is not a consequence. If you cannot name what the failure changes, don't call for the roll.
+
 Difficulty (tone of challenge — applies to EVERY contested action):
 Campaign difficulty shifts ALL DCs (attacks to hit, damage thresholds when used, escape/flee, stealth, persuasion, locks, saves). Server also applies the bias if you pass a base DC.
 Base ladder BEFORE difficulty bias: Easy 10, Medium 15, Hard 20, Very Hard 25.
@@ -134,6 +158,7 @@ Continuity & assets:
 - New NPC/monster on stage: call generate_image with kind "portrait" and npcName BEFORE introducing them.
 - When the party moves somewhere visually new, update the TV backdrop (reuse currentImageUrl or generate_image kind "scene").
 - Campaign files, each with a distinct job: quest_log.md = ONLY the current active player-facing objective and immediate tasks; storyline.md = your private structured arc (chapters/ending/current position); notes.md (and memory/*.md) = free-form durable worldbuilding — lore, NPC relationships, secrets, foreshadowing too long for the memory line. Keep hidden plans out of quest_log.md.
+- Campaign files are PROSE, never a second copy of the numbers. Every authoritative quantity — HP, wounds, blood, ammo, charge, inventory counts, how many of a swarm still stand, timers — lives ONLY in structured state (playerUpdates / npcUpdates / update_location). Do not write those values into quest_log.md, storyline.md, or notes.md: the moment a file names a number, it starts contradicting the sheet the TV is showing. Write "the reactor is failing", not "reactor at 40%". When a file and the structured state disagree, the structured state is the truth — correct the file, never the sheet.
 - Seed every foe with HP via npcUpdates the moment it enters the scene, so the TV shows an enemy HP bar and hits have something to subtract.
 - Group handling: a NAMED or role foe (leader, lieutenant, champion — anyone who speaks or matters) is ALWAYS its own npcUpdates entry with its own HP. Only faceless rank-and-file (e.g. "Iron Warrens Thugs") are pooled into ONE entry with isGroup:true, count (how many stand), and maxCount. Decrement count as they drop; don't flood the UI with a card per mook.
 - Reuse the SAME NPC entry (its id, or its exact existing name) across turns — do not re-introduce an already-tracked character under a new descriptive title (e.g. giving "Mara" a fuller name like "Mara — The Drowned Light" later) or you'll spawn a duplicate card. If a character's title genuinely evolves, use renameFrom to relabel the EXISTING entry rather than creating a new one.
@@ -166,6 +191,8 @@ Campaign endings (win/loss/draw/cliffhanger — can end EARLY):
 - Include 3-6 stats for the outro's stats board: mix real tallies (battles survived, NPCs befriended, gold earned) with flavorful ones (lies told, curses ignored). Values may be numbers or short witty phrases.
 - ALSO fill the per-player 'cast' (one entry per player): a short epithet/title they earned, a 1-2 sentence 'fate' of what they did across the saga and how they ended, and optionally 1-3 personal 'stats' (their own tallies — kills, lies, wounds taken). This makes the outro read like end credits with each hero's own line. Invent flavorful deeds from the transcript when exact numbers are unknown.
 - Early endings are valid and preferred over dragging a dead campaign. After end_campaign, write a short final story[] epilogue and stop offering player choices (empty playerActions).
+- TIMING — end_campaign closes the show, it does not interrupt it. Call it only once the scene has actually finished: the last blow landed, the final words said, the door closed. If the closing moment still has beats owed to it — a dying NPC's last line, the party's reaction, the reveal that makes the ending land — play those beats in THIS turn's story[] and call end_campaign in the SAME turn, after you have decided them. Never end the saga a turn early and leave the closing dialogue unspoken: the credits will roll over it.
+- Settle the state as you close: anything killed or disabled in the finale gets canAct:false with matching conditions via playerUpdates/npcUpdates, and quest_log.md is rewritten so nothing is left standing as an active objective — mark what was achieved, what failed, and what was abandoned.
 - end_campaign sets status completed, plays the cinematic outro on the TV, and switches ambience to outro.
 
 Story delivery (one channel only):
@@ -184,6 +211,8 @@ Turns & combat flow (the table has two modes — honor the one in the context):
 - COMBAT (sequential): call start_combat when a fight begins, passing enemyIds for the hostile NPCs in THIS fight so they're placed at the fight's location (otherwise they may not show up on the TV/roster where the fight is happening). Then you resolve ONE actor per turn — only the active player's action (named in the context), never the others. After the last player, you get the enemies' turn: resolve every foe's action (attack roll → damage → apply HP). Call end_combat when the fight is over. Narrate initiative naturally ("Engu, you're up").
 - Don't switch modes needlessly; stay in exploration for talk/travel/investigation, combat only for actual fights.
 - The moment your narration has a fight ACTUALLY breaking out — an ambush springs, someone opens fire, a monster lunges — you MUST call start_combat that same turn (and set_ambience battle or boss). Narrating an attack while leaving the table in exploration is an error.
+- Combat requires an identified HOSTILE making contact: it attacks, fires, lunges, springs, or grapples. Tension is not combat. Stay in EXPLORATION for a boss/dread mood, an alarm, a ticking countdown, enemies approaching or closing in, being spotted or hunted, a standoff, a threat spoken but not acted on, and for attacking an environmental target or hazard that happens to carry HP (a reactor, a vessel, a door). Enemies who are killed, disabled, destabilized, or otherwise made unable to act (canAct:false) never enter initiative — do not start a fight with them, and do not roll for them.
+- Ambience and combat mode are INDEPENDENT. set_ambience boss/battle is a music choice; it neither starts nor implies combat. Never call start_combat merely because the scene sounds like a fight is coming.
 
 Conditions & lifecycle (ENFORCED — not just flavor):
 - When a character is stunned, incapacitated, knocked out, or dead, set canAct:false on their playerUpdates/npcUpdates entry (and a matching conditions list, e.g. ["stunned"] or ["dead"], plus a status line). Their controller hard-locks — they truly cannot act that turn.
@@ -393,6 +422,7 @@ function isPartyWiped(campaign: Campaign): boolean {
 export async function runDungeonMaster(campaignId: string, playerName: string, action: string, options: { hiddenUserMessage?: boolean; playerId?: string; displayAction?: string; actionId?: string; isAutoEnding?: boolean } = {}) {
   await logCampaignDebug(campaignId, `[runDungeonMaster] Called by: ${playerName}. Action: "${action}". Options: ${JSON.stringify(options)}`);
   serverLog("DM START", `Running DM for campaign: ${campaignId} | Player: ${playerName} | Action: "${action}"`);
+  const turnStartedAt = Date.now();
   const campaign = await getCampaign(campaignId);
   // Backdrop the party sees BEFORE this turn's tools run, so afterward we can
   // tell whether the DM repainted it itself or left it stale.
@@ -459,6 +489,7 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
     // The narration target is the host's manual selection for this campaign;
     // resolveChatTarget() falls back to the default when unset/unknown.
     const selectedChatTargetId = campaign.selectedChatTargetId;
+    const narrationModel = resolveChatTarget(selectedChatTargetId).model;
     const interactiveFetch: AquaFetchOptions = {
       ...INTERACTIVE_FETCH,
       onRetry: ({ attempt, retries, status, error }) => {
@@ -467,7 +498,8 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
           attempt,
           retries,
           status,
-          target: selectedChatTargetId || "default",
+          target: selectedChatTargetId || DEFAULT_CHAT_TARGET_ID,
+          model: narrationModel,
           error: error instanceof Error ? error.message : error ? String(error) : undefined
         });
       }
@@ -479,8 +511,9 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
     const maxSteps = isInitialStart ? Math.max(MAX_DM_STEPS, 24) : MAX_DM_STEPS;
 
     for (let step = 0; step < maxSteps; step += 1) {
-      await logCampaignDebug(campaignId, `[AI Step ${step + 1}] Requesting completion...`);
+      await logCampaignDebug(campaignId, `[AI Step ${step + 1}] Requesting completion on ${selectedChatTargetId || DEFAULT_CHAT_TARGET_ID} (${narrationModel})...`);
       serverLog("DM AI Step", `Step ${step + 1}/${maxSteps}: Requesting completion...`);
+      const stepStartedAt = Date.now();
       let response: ChatCompletionResponse;
       try {
         response = await complete(messages, "auto", [...toolsForTurn({ musicTheme: themeChosen ? "set" : undefined }), narrateTurnTool], interactiveFetch, selectedChatTargetId);
@@ -491,11 +524,15 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
         const code = (err as any)?.code;
         void logCampaignEvent(campaignId, "ERROR", "Narration", "Provider request failed", {
           step: step + 1,
+          target: selectedChatTargetId || DEFAULT_CHAT_TARGET_ID,
           status,
           code,
           error: err instanceof Error ? err.message : String(err),
           errorName: err instanceof Error ? err.name : undefined
         });
+        // Carry how far the turn got out to the outer catch, which records the
+        // host-facing failure and has no other way to know the step.
+        (err as { dmStep?: number }).dmStep = step + 1;
         throw err;
       }
       const message = response.choices?.[0]?.message || response.message;
@@ -504,6 +541,17 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
 
       const toolCalls = normalizeToolCalls(message);
       serverLog("DM AI Step", `Step ${step + 1}/${maxSteps}: Received response. Tool calls found: ${toolCalls.length}`);
+      // One durable line per step naming the target and model that answered.
+      // Without it debug.log could not tell you which provider narrated a
+      // SUCCESSFUL turn — only the failures identified themselves.
+      void logCampaignEvent(campaignId, "INFO", "Narration", "Provider responded", {
+        step: step + 1,
+        target: selectedChatTargetId || DEFAULT_CHAT_TARGET_ID,
+        model: narrationModel,
+        durationMs: Date.now() - stepStartedAt,
+        toolCalls: toolCalls.length,
+        tools: toolCalls.map((call) => call.function.name).slice(0, 8)
+      });
       if (!toolCalls.length) {
         finalMessage = message;
         break;
@@ -689,10 +737,24 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
       const parseRetryFlag = String(process.env.PARSE_RETRY_USE_FAST_MODEL ?? "1").toLowerCase().trim();
       const parseRetryDisabled = ["0", "false", "off", "no"].includes(parseRetryFlag);
       const useFastModelForRetry = !parseRetryDisabled && !!aquaConfig().fastModel;
+      if (useFastModelForRetry) {
+        // The one deliberate cross-provider hop in the narration path, and it is
+        // reformatting only — never new creative content. Recorded so a
+        // debug.log reader never has to wonder which model produced a turn.
+        void logCampaignEvent(campaignId, "INFO", "Narration", "Parse repair routed to the fast model", {
+          from: selectedChatTargetId || DEFAULT_CHAT_TARGET_ID,
+          to: fastModelTarget().model,
+          reason: "PARSE_RETRY_USE_FAST_MODEL"
+        });
+      }
       for (let attempt = 1; attempt <= maxParseRetries && !parsedJson; attempt += 1) {
+        // When NOT using the fast model this must stay on the host's SELECTED
+        // target. It previously used the bare chat model with no endpoint
+        // override, so parse repairs silently ran on the default provider even
+        // after the host had switched away from it.
         const { model: retryModel, options: retryModelOptions } = useFastModelForRetry
           ? fastModelTarget()
-          : { model: aquaConfig().chatModel, options: {} as AquaFetchOptions };
+          : campaignChatTarget(campaign);
         await logCampaignDebug(campaignId, `[AI Retry] Parse failed — forcing narrate_turn on the ${useFastModelForRetry ? "small" : "large"} model (attempt ${attempt}/${maxParseRetries}).`);
         if (useFastModelForRetry) {
           serverLogSmall("DM Parser", `Repackaging turn ${attempt}/${maxParseRetries} into narrate_turn args (no new content, reformat only).`);
@@ -718,7 +780,7 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
               tools: [narrateTurnTool],
               tool_choice: { type: "function", function: { name: "narrate_turn" } }
             })
-          }, { ...INTERACTIVE_FETCH, ...retryModelOptions })) as ChatCompletionResponse;
+          }, { ...INTERACTIVE_FETCH, ...retryModelOptions, onRetry: retryLogger(campaignId, "Narration", "parse-repair") })) as ChatCompletionResponse;
           const retryMessage = retryResponse.choices?.[0]?.message || retryResponse.message;
           const retryCall = retryMessage ? normalizeToolCalls(retryMessage).find((c) => c.function.name === "narrate_turn") : undefined;
           if (retryCall) {
@@ -1046,6 +1108,10 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
           }
         } catch (err) {
           serverError("Backdrop", "Scene-director reconcile failed (non-fatal)", err);
+          void logCampaignEvent(campaignId, "ERROR", "Image", "Scene-director reconcile failed", {
+            error: err instanceof Error ? err.message : String(err),
+            errorName: err instanceof Error ? err.name : undefined
+          });
         }
       };
 
@@ -1063,6 +1129,10 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
         await reconcileStageDirection(latestCampaign, turnBeats, { modelSetAmbience, modelTouchedCombat });
       } catch (err) {
         serverError("StageDirector", "Stage-direction reconcile failed (non-fatal)", err);
+        void logCampaignEvent(campaignId, "ERROR", "Narration", "Stage-direction reconcile failed", {
+          error: err instanceof Error ? err.message : String(err),
+          errorName: err instanceof Error ? err.name : undefined
+        });
       }
     }
 
@@ -1072,6 +1142,9 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
 
     latestCampaign.dmStatus = undefined; // Clear DM status
     latestCampaign.dmPhase = undefined;
+    // A turn got through, so whatever the host was being asked to recover from
+    // is resolved — drop the failure banner and the preserved retry payload.
+    latestCampaign.narrationFailure = undefined;
 
     // Save this turn's backdrop/ambience into the focused location so cutting
     // back to it later restores instantly, and keep the focused mirror in sync.
@@ -1108,11 +1181,30 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
     }
 
     serverLog("DM END", `DM finished successfully for campaign: ${campaignId}`);
+    void logCampaignEvent(campaignId, "INFO", "Narration", "Turn completed", {
+      target: selectedChatTargetId || DEFAULT_CHAT_TARGET_ID,
+      model: resolveChatTarget(selectedChatTargetId).model,
+      durationMs: Date.now() - turnStartedAt,
+      messageCount: latestCampaign.messages.length,
+      status: latestCampaign.status
+    });
     return { campaign: latestCampaign, toolEvents };
   } catch (error) {
     serverError("Dungeon Master", `DM failed with error for campaign: ${campaignId}`, error);
     const errorMsg = error instanceof Error ? error.stack : String(error);
     await logCampaignDebug(campaignId, `[ERROR] Dungeon Master error: ${errorMsg}`);
+    const failureStatus = typeof (error as { status?: unknown })?.status === "number" ? (error as { status: number }).status : undefined;
+    const failureCode = typeof (error as { code?: unknown })?.code === "string" ? (error as { code: string }).code : undefined;
+    const failureStep = typeof (error as { dmStep?: unknown })?.dmStep === "number" ? (error as { dmStep: number }).dmStep : undefined;
+    void logCampaignEvent(campaignId, "ERROR", "Narration", "Turn failed", {
+      target: campaign.selectedChatTargetId || DEFAULT_CHAT_TARGET_ID,
+      step: failureStep,
+      status: failureStatus,
+      code: failureCode,
+      durationMs: Date.now() - turnStartedAt,
+      error: error instanceof Error ? error.message : String(error),
+      errorName: error instanceof Error ? error.name : undefined
+    });
     try {
       finishCampaignDraft(campaignId);
       const currentCampaign = await getCampaign(campaignId);
@@ -1124,6 +1216,23 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
       currentCampaign.playerActions = preTurnPlayerActions;
       currentCampaign.partyActions = preTurnPartyActions;
       currentCampaign.suggestedActions = preTurnSuggestedActions;
+      // Leave the failure ON campaign state. Switching provider is MANUAL by
+      // design, so the host has to be able to see what broke and on which
+      // target — and to replay this exact turn once they've switched. The
+      // composed action string can't be reconstructed from the restored
+      // choices (an exploration round folds every lock-in into one prompt),
+      // so it is preserved here and nowhere else. Auto-ending turns are
+      // excluded: their prompt is machine-generated and replaying it by hand
+      // isn't a thing a host should be offered.
+      currentCampaign.narrationFailure = {
+        at: new Date().toISOString(),
+        targetId: currentCampaign.selectedChatTargetId || DEFAULT_CHAT_TARGET_ID,
+        status: failureStatus,
+        code: failureCode,
+        message: scrubLogText(error instanceof Error ? error.message : String(error), 400),
+        step: failureStep,
+        payload: options.isAutoEnding ? undefined : { playerName, action }
+      };
       await saveCampaign(currentCampaign);
     } catch (dbErr) {
       serverError("Dungeon Master", "Failed to clear dmStatus on error", dbErr);
@@ -1172,54 +1281,133 @@ function queuePostTurnMaintenance(campaign: Campaign, preTurnImageUrl?: string) 
         }
       } catch (err) {
         serverError("Backdrop", "Background reconcile failed and was skipped (non-fatal)", err);
+        void logCampaignEvent(campaign.id, "ERROR", "Image", "Detached backdrop reconcile failed", {
+          error: err instanceof Error ? err.message : String(err),
+          errorName: err instanceof Error ? err.name : undefined
+        });
       }
     })() : Promise.resolve(),
     campaign.status === "active" ? (async () => {
-      const beforePortraitIds = new Set((portraitSnapshot.portraits || []).map((portrait) => portrait.id));
-      await reconcileNpcPortraits(portraitSnapshot);
-      const additions = (portraitSnapshot.portraits || []).filter((portrait) => !beforePortraitIds.has(portrait.id));
-      if (!additions.length) return;
-      const release = await getCampaignLock(campaign.id).acquire();
       try {
-        const fresh = await getCampaign(campaign.id);
-        if (!fresh.portraits) fresh.portraits = [];
-        for (const portrait of additions) {
-          if (!fresh.portraits.some((existing) => existing.id === portrait.id)) fresh.portraits.push(portrait);
-          const sourceNpc = portraitSnapshot.storyCharacters.find((npc) => npc.name === portrait.characterName);
-          const freshNpc = sourceNpc && fresh.storyCharacters.find((npc) => npc.id === sourceNpc.id);
-          if (freshNpc && !freshNpc.portraitUrl) freshNpc.portraitUrl = sourceNpc.portraitUrl;
+        const beforePortraitIds = new Set((portraitSnapshot.portraits || []).map((portrait) => portrait.id));
+        await reconcileNpcPortraits(portraitSnapshot);
+        const additions = (portraitSnapshot.portraits || []).filter((portrait) => !beforePortraitIds.has(portrait.id));
+        if (!additions.length) return;
+        const release = await getCampaignLock(campaign.id).acquire();
+        try {
+          const fresh = await getCampaign(campaign.id);
+          if (!fresh.portraits) fresh.portraits = [];
+          for (const portrait of additions) {
+            if (!fresh.portraits.some((existing) => existing.id === portrait.id)) fresh.portraits.push(portrait);
+            const sourceNpc = portraitSnapshot.storyCharacters.find((npc) => npc.name === portrait.characterName);
+            const freshNpc = sourceNpc && fresh.storyCharacters.find((npc) => npc.id === sourceNpc.id);
+            if (freshNpc && !freshNpc.portraitUrl) freshNpc.portraitUrl = sourceNpc.portraitUrl;
+          }
+          await saveCampaign(fresh);
+        } finally {
+          release();
         }
-        await saveCampaign(fresh);
-      } finally {
-        release();
+      } catch (err) {
+        // This runs detached, after the HTTP request and the DM turn are both
+        // gone. Without its own catch the rejection dies inside allSettled and
+        // the campaign's own log shows nothing at all.
+        serverError("Portraits", "Portrait backfill merge failed (non-fatal)", err);
+        void logCampaignEvent(campaign.id, "ERROR", "Image", "Portrait backfill task failed", {
+          error: err instanceof Error ? err.message : String(err),
+          errorName: err instanceof Error ? err.name : undefined
+        });
       }
     })() : Promise.resolve(),
-    (async () => {
-      const originalMessageIds = new Set(housekeepingSnapshot.messages.map((message) => message.id));
-      const originalNpcIds = new Set(housekeepingSnapshot.storyCharacters.map((npc) => npc.id));
-      const beforeSummary = housekeepingSnapshot.storySummary;
-      const beforeMemory = housekeepingSnapshot.memory;
-      await runHousekeeping(housekeepingSnapshot);
-      const changed = housekeepingSnapshot.storySummary !== beforeSummary ||
-        housekeepingSnapshot.memory !== beforeMemory ||
-        housekeepingSnapshot.messages.length !== originalMessageIds.size ||
-        housekeepingSnapshot.storyCharacters.length !== originalNpcIds.size;
-      if (!changed) return;
-      const keptMessageIds = new Set(housekeepingSnapshot.messages.map((message) => message.id));
-      const keptNpcIds = new Set(housekeepingSnapshot.storyCharacters.map((npc) => npc.id));
-      const release = await getCampaignLock(campaign.id).acquire();
-      try {
-        const fresh = await getCampaign(campaign.id);
-        fresh.storySummary = housekeepingSnapshot.storySummary;
-        fresh.memory = housekeepingSnapshot.memory;
-        fresh.messages = fresh.messages.filter((message) => !originalMessageIds.has(message.id) || keptMessageIds.has(message.id));
-        fresh.storyCharacters = fresh.storyCharacters.filter((npc) => !originalNpcIds.has(npc.id) || keptNpcIds.has(npc.id));
-        await saveCampaign(fresh);
-      } finally {
-        release();
-      }
-    })()
-  ]);
+    sweepAndMergeHousekeeping(campaign.id, housekeepingSnapshot)
+  ]).then((results) => {
+    // Belt and braces. Each branch above catches its own failures, but a
+    // rejection that escapes one of them must still land somewhere: this runs
+    // after the HTTP request and the DM turn are both gone, so an unobserved
+    // promise here is a silent loss that looks exactly like "it never ran".
+    const labels = ["backdrop", "portraits", "housekeeping"];
+    results.forEach((result, index) => {
+      if (result.status !== "rejected") return;
+      const task = labels[index] || String(index);
+      serverError("PostTurn", `Detached ${task} task rejected (non-fatal)`, result.reason);
+      void logCampaignEvent(campaign.id, "ERROR", "System", "Detached maintenance task rejected", {
+        task,
+        error: result.reason instanceof Error ? result.reason.message : String(result.reason),
+        errorName: result.reason instanceof Error ? result.reason.name : undefined
+      });
+    });
+  });
+}
+
+/**
+ * Run one housekeeping sweep off a snapshot and merge the result back under the
+ * campaign lock.
+ *
+ * The provider call deliberately happens with NO lock held — on a bad day it
+ * runs for minutes, and holding the campaign mutex through it freezes every
+ * chat turn, presence sweep and party action at the table. Only the merge takes
+ * the lock, and it preserves messages and NPCs created after the snapshot.
+ *
+ * Never throws: this is best-effort background work by contract, and its
+ * failures have to be visible in the campaign's own debug.log rather than dying
+ * in an unobserved promise. The merge is what actually persists the summary and
+ * the trim, so a silent loss here is indistinguishable from "housekeeping never
+ * ran" — exactly the ambiguity this phase exists to remove.
+ */
+async function sweepAndMergeHousekeeping(campaignId: string, snapshot: Campaign): Promise<void> {
+  // One sweep per campaign at a time. Two concurrent sweeps work from separate
+  // snapshots of the same transcript and then merge in sequence, so the second
+  // one's summary — computed without the first one's trim — silently wins.
+  // Reachable from the manual retry button, which the host can click repeatedly.
+  if (housekeepingInFlight.has(campaignId)) {
+    void logCampaignEvent(campaignId, "INFO", "Housekeeping", "Sweep skipped", { reason: "already_running" });
+    return;
+  }
+  housekeepingInFlight.add(campaignId);
+  try {
+    const originalMessageIds = new Set(snapshot.messages.map((message) => message.id));
+    const originalNpcIds = new Set(snapshot.storyCharacters.map((npc) => npc.id));
+    const beforeSummary = snapshot.storySummary;
+    const beforeMemory = snapshot.memory;
+    const beforeHk = JSON.stringify(snapshot.housekeeping || null);
+    await runHousekeeping(snapshot);
+    const summaryChanged = snapshot.storySummary !== beforeSummary;
+    const memoryChanged = snapshot.memory !== beforeMemory;
+    const changed = summaryChanged ||
+      memoryChanged ||
+      snapshot.messages.length !== originalMessageIds.size ||
+      snapshot.storyCharacters.length !== originalNpcIds.size ||
+      JSON.stringify(snapshot.housekeeping || null) !== beforeHk;
+    if (!changed) return;
+    const keptMessageIds = new Set(snapshot.messages.map((message) => message.id));
+    const keptNpcIds = new Set(snapshot.storyCharacters.map((npc) => npc.id));
+    const release = await getCampaignLock(campaignId).acquire();
+    try {
+      const fresh = await getCampaign(campaignId);
+      // Write back ONLY what this sweep actually produced. The provider call runs
+      // for up to a couple of minutes with no lock held, and a whole turn can
+      // land in that window and legitimately rewrite memory (update_campaign_state
+      // does exactly that) — so assigning the snapshot's copies unconditionally
+      // reverts the newer turn's work. A failed sweep still reaches this merge,
+      // because its own bookkeeping counts as a change; without these guards a
+      // failure would quietly roll memory back to a two-minute-old value.
+      if (summaryChanged) fresh.storySummary = snapshot.storySummary;
+      if (memoryChanged) fresh.memory = snapshot.memory;
+      fresh.housekeeping = snapshot.housekeeping;
+      fresh.messages = fresh.messages.filter((message) => !originalMessageIds.has(message.id) || keptMessageIds.has(message.id));
+      fresh.storyCharacters = fresh.storyCharacters.filter((npc) => !originalNpcIds.has(npc.id) || keptNpcIds.has(npc.id));
+      await saveCampaign(fresh);
+    } finally {
+      release();
+    }
+  } catch (err) {
+    serverError("Housekeeping", "Housekeeping sweep/merge failed (non-fatal)", err);
+    void logCampaignEvent(campaignId, "ERROR", "Housekeeping", "Merge failed", {
+      error: err instanceof Error ? err.message : String(err),
+      errorName: err instanceof Error ? err.name : undefined
+    });
+  } finally {
+    housekeepingInFlight.delete(campaignId);
+  }
 }
 
 /**
@@ -1555,7 +1743,11 @@ async function reconcileNpcPortraits(campaign: Campaign): Promise<void> {
       const prompt = visual.length >= 20
         ? `Close-up character portrait: ${visual}. Cinematic lighting, detailed face, dramatic atmosphere.`
         : `Close-up character portrait of a mysterious figure from a ${campaign.musicTheme || "dark adventure"} tale${campaign.currentScene ? `, seen at ${campaign.currentScene}` : ""}. Cinematic lighting, detailed face, dramatic atmosphere.`;
-      const image = await generateImage(prompt);
+      const portraitStartedAt = Date.now();
+      const image = await generateImage(prompt, {
+        aspect: "9:16",
+        onRetry: retryLogger(campaign.id, "Image", "portrait-backfill")
+      });
       const localUrl = await downloadAndSaveImage(campaign.id, image.url, "npcs", npc.id);
       npc.portraitUrl = localUrl;
       if (!campaign.portraits) campaign.portraits = [];
@@ -1568,8 +1760,20 @@ async function reconcileNpcPortraits(campaign: Campaign): Promise<void> {
       });
       serverLog("Portraits", `Backfilled missing portrait for NPC "${npc.name}"`);
       await logCampaignDebug(campaign.id, `[Portraits] Backfilled missing portrait for NPC "${npc.name}".`);
+      void logCampaignEvent(campaign.id, "INFO", "Image", "NPC portrait backfilled", {
+        kind: "portrait",
+        target: npc.name,
+        durationMs: Date.now() - portraitStartedAt
+      });
     } catch (err) {
       serverError("Portraits", `Portrait backfill failed for NPC "${npc.name}" (non-fatal)`, err);
+      void logCampaignEvent(campaign.id, "ERROR", "Image", "NPC portrait backfill failed", {
+        kind: "portrait",
+        target: npc.name,
+        error: err instanceof Error ? err.message : String(err),
+        status: (err as { status?: unknown })?.status,
+        code: (err as { code?: unknown })?.code
+      });
     }
   }
 }
@@ -1618,13 +1822,13 @@ async function reconcileStageDirection(
           mood: {
             type: "string",
             enum: ["keep", ...DIRECTABLE_MOODS],
-            description: "'keep' if the mood already playing still fits; otherwise the register the scene has ACTUALLY moved to (a fight = battle, a climactic showdown = boss, a chase = adrenaline, victory = triumph)."
+            description: "'keep' if the mood already playing still fits; otherwise the register the scene has ACTUALLY moved to (a fight = battle, a climactic showdown or dreadful confrontation = boss, a chase = adrenaline, victory = triumph). Mood is about the MUSIC only — choosing 'boss' or 'battle' says nothing about whether the table is in combat, and never decide 'combat' from the mood you picked."
           },
           intensity: { type: "number", description: "0.0-1.0 for a changed mood. Default 0.6." },
           combat: {
             type: "string",
             enum: ["keep", "start", "end"],
-            description: "'start' when these beats show a fight ACTUALLY breaking out (an ambush springs, someone opens fire, a monster lunges) and the table is not in combat yet; 'end' when the fight is clearly over (foes dead, fled, or surrendered); otherwise 'keep'."
+            description: "'start' ONLY when these beats show an identified hostile actually engaging: it attacks, opens fire, springs an ambush, lunges, or lays hands on someone. 'end' when the fight is clearly over (foes dead, fled, or surrendered). 'keep' for everything else — and everything else includes: dread, a boss mood, an alarm, a countdown, enemies approaching or closing in, being seen or hunted, a standoff, a threat spoken, and damaging an environmental object or hazard that has HP. Nothing in the scene being scary or dangerous starts combat; only a hostile creature making contact does. When in doubt, 'keep'."
           }
         }
       }
@@ -1635,25 +1839,26 @@ async function reconcileStageDirection(
   const user = [
     `Mood currently playing: ${campaign.ambience ? `${campaign.ambience.mood} (intensity ${campaign.ambience.intensity})` : "none yet (calm default)"}`,
     `Turn mode: ${mode}${mode === "combat" ? ` (round ${loc.turnState?.round || 1})` : ""}`,
-    `Living NPCs with HP in this scene: ${combatants.length ? combatants.map((c) => c.name).join(", ") : "none tracked"}`,
+    `Everything alive with HP in this scene (allies, neutrals and environmental targets included — this is NOT a list of enemies): ${combatants.length ? combatants.map((c) => c.name).join(", ") : "none tracked"}`,
     `Story beats that just played:\n${beatText}`
   ].join("\n\n");
 
+  const stageTarget = campaignChatTarget(campaign);
   const response = (await aquaFetch("/chat/completions", {
     method: "POST",
     body: JSON.stringify({
-      model: aquaConfig().chatModel,
+      model: stageTarget.model,
       messages: [
         {
           role: "system",
-          content: "You are the stage director for a couch RPG TV. Decide whether the mood/music register or the combat mode must change to match what just played on screen. Be decisive: a fight breaking out means combat 'start' and a battle or boss mood; a finished fight means 'end'. A scene whose register genuinely shifted deserves a new mood — do not let one mood drone through an entire act. Call direct_stage exactly once."
+          content: "You are the stage director for a couch RPG TV. Decide whether the mood/music register or the combat mode must change to match what just played on screen. Judge the two INDEPENDENTLY: mood is what the scene sounds like, combat is whether blows are actually being exchanged, and a tense or dreadful scene is very often not a fight. Be decisive about mood — a scene whose register genuinely shifted deserves a new one, do not let one mood drone through an entire act — and conservative about combat: switch it on only when an identified hostile has actually engaged, off only when the fight is plainly over. The NPC list you are given is everything alive with HP in the scene, which includes neutrals, allies, and environmental targets; presence in that list is not hostility. Call direct_stage exactly once."
         },
         { role: "user", content: user }
       ],
       tools: [tool],
       tool_choice: { type: "function", function: { name: "direct_stage" } }
     })
-  }, INTERACTIVE_FETCH)) as ChatCompletionResponse;
+  }, { ...INTERACTIVE_FETCH, ...stageTarget.options, onRetry: retryLogger(campaign.id, "Narration", "stage-director") })) as ChatCompletionResponse;
   const message = response.choices?.[0]?.message || response.message;
   const call = Array.isArray(message?.tool_calls) ? message?.tool_calls?.[0] : null;
   if (!call?.function?.arguments) return;
@@ -1748,16 +1953,19 @@ async function chooseBackdrop(campaign: Campaign, force: boolean): Promise<Backd
     `Existing backgrounds you may reuse: ${JSON.stringify(backgrounds)}`
   ].filter(Boolean).join("\n");
 
+  const backdropTarget = campaignChatTarget(campaign);
   try {
     const response = (await aquaFetch("/chat/completions", {
       method: "POST",
       body: JSON.stringify({
-        model: aquaConfig().chatModel,
+        model: backdropTarget.model,
         messages: [{ role: "system", content: system }, { role: "user", content: user }],
         tools: [tool],
         tool_choice: { type: "function", function: { name: "set_backdrop" } }
       })
-    })) as ChatCompletionResponse;
+      // Bounded like every other ancillary call — this had no options at all,
+      // so it inherited aquaFetch's 6-attempt default against a dead endpoint.
+    }, { ...INTERACTIVE_FETCH, ...backdropTarget.options, onRetry: retryLogger(campaign.id, "Narration", "scene-director") })) as ChatCompletionResponse;
     const message = response.choices?.[0]?.message || response.message;
     const call = Array.isArray(message?.tool_calls) ? message?.tool_calls?.[0] : null;
     if (!call?.function?.arguments) return null;
@@ -1771,17 +1979,49 @@ async function chooseBackdrop(campaign: Campaign, force: boolean): Promise<Backd
     };
   } catch (err) {
     serverError("Backdrop", "chooseBackdrop tool call failed", err);
+    void logCampaignEvent(campaign.id, "ERROR", "Image", "Scene-director call failed", {
+      error: err instanceof Error ? err.message : String(err),
+      status: (err as { status?: unknown })?.status,
+      code: (err as { code?: unknown })?.code
+    });
     return null;
   }
 }
 
 /** Paint a fresh backdrop from a prompt and make it the live TV background. */
 async function paintNewBackdrop(campaign: Campaign, prompt: string) {
-  const image = await generateImage(prompt);
-  const localUrl = await downloadAndSaveImage(campaign.id, image.url, "backgrounds");
-  campaign.images.push({ id: createId("image"), url: localUrl, prompt: image.prompt, createdAt: new Date().toISOString() });
-  campaign.currentImageUrl = localUrl;
-  safePushDisplayEvent(campaign, { type: "scene", speaker: "Scene", content: "The TV scene background shifts." });
+  const startedAt = Date.now();
+  void logCampaignEvent(campaign.id, "INFO", "Image", "Backdrop paint starting", {
+    kind: "scene",
+    target: "backdrop",
+    promptChars: prompt.length
+  });
+  try {
+    const image = await generateImage(prompt, {
+      aspect: "16:9",
+      onRetry: retryLogger(campaign.id, "Image", "backdrop-paint")
+    });
+    const localUrl = await downloadAndSaveImage(campaign.id, image.url, "backgrounds");
+    campaign.images.push({ id: createId("image"), url: localUrl, prompt: image.prompt, createdAt: new Date().toISOString() });
+    campaign.currentImageUrl = localUrl;
+    safePushDisplayEvent(campaign, { type: "scene", speaker: "Scene", content: "The TV scene background shifts." });
+    void logCampaignEvent(campaign.id, "INFO", "Image", "Backdrop painted", {
+      kind: "scene",
+      durationMs: Date.now() - startedAt
+    });
+  } catch (err) {
+    // Rethrown for the caller's own non-fatal handling; logged here because
+    // this is the path that paints the LIVE backdrop and it previously wrote
+    // nothing at all to the campaign's log.
+    void logCampaignEvent(campaign.id, "ERROR", "Image", "Backdrop paint failed", {
+      kind: "scene",
+      durationMs: Date.now() - startedAt,
+      error: err instanceof Error ? err.message : String(err),
+      status: (err as { status?: unknown })?.status,
+      code: (err as { code?: unknown })?.code
+    });
+    throw err;
+  }
 }
 
 /** Apply a scene-director decision to the campaign, recording the scene it now depicts. */
@@ -2013,8 +2253,28 @@ async function aiPickTheme(campaign: Campaign): Promise<MusicTheme | null> {
     }
   } catch (err) {
     serverError("Theme", "aiPickTheme model call failed", err);
+    void logCampaignEvent(campaign.id, "ERROR", "Narration", "Theme selection call failed", {
+      error: err instanceof Error ? err.message : String(err),
+      status: (err as { status?: unknown })?.status,
+      code: (err as { code?: unknown })?.code
+    });
   }
   return null;
+}
+
+/**
+ * Model + endpoint for ancillary CHAT work (scene director, stage director,
+ * forced-narrate_turn repackaging) on the campaign's own narration target.
+ *
+ * These used to hardcode `aquaConfig().chatModel` with no base URL/key override,
+ * which meant they always hit the DEFAULT provider. That silently defeats the
+ * whole point of a manual switch: the host moves the campaign off a dead
+ * provider and every ancillary call keeps hammering the dead one. Housekeeping
+ * and image work stay on their own separate targets (see fastModelTarget).
+ */
+function campaignChatTarget(campaign: Campaign): { model: string; options: AquaFetchOptions } {
+  const target = resolveChatTarget(campaign.selectedChatTargetId);
+  return { model: target.model, options: { baseUrl: target.baseUrl, apiKey: target.apiKey } };
 }
 
 // Housekeeping thresholds: a sweep only runs once there's genuinely stale
@@ -2044,10 +2304,20 @@ function housekeepingReasons(campaign: Campaign): { reasons: string[]; fingerpri
   if ((campaign.memory || "").length > HOUSEKEEPING_MEMORY_CHARS_TRIGGER) reasons.push(`memory=${(campaign.memory || "").length}`);
   if (campaign.storyCharacters.length > HOUSEKEEPING_NPC_TRIGGER) reasons.push(`npcs=${campaign.storyCharacters.length}`);
   if (!reasons.length) return null;
-  // A coarse fingerprint of the input that triggered this sweep. Two sweeps
-  // on the same fingerprint are "the same input" — a failed one shouldn't
-  // retry until it changes (new messages, more memory, more NPCs).
-  const fingerprint = `${campaign.messages.length}:${(campaign.memory || "").length}:${campaign.storyCharacters.length}`;
+  // Fingerprint of the input that triggered this sweep. It must express
+  // "MATERIALLY different input", not "any different input": an exact
+  // messages:memory:npcs triple changes on literally every turn, so a failed
+  // sweep looked like a brand-new job one turn later and neither the cooldown
+  // nor the failure budget could ever hold — that is precisely the observed
+  // retry-every-turn loop (sweeps at 19, 23, 27, 31, 35 stale messages). So
+  // bucket it: whole keep-recent windows of transcript, kilobytes of memory,
+  // groups of NPCs. Crossing a bucket is a genuinely different job and earns a
+  // fresh attempt; one more message does not.
+  const fingerprint = [
+    Math.floor(campaign.messages.length / HOUSEKEEPING_KEEP_RECENT),
+    Math.floor((campaign.memory || "").length / 1_000),
+    Math.floor(campaign.storyCharacters.length / 4)
+  ].join(":");
   return { reasons, fingerprint };
 }
 
@@ -2062,20 +2332,24 @@ function shouldRunHousekeeping(campaign: Campaign): { run: boolean; reason?: str
   const hk = campaign.housekeeping;
   if (!hk) return { run: true }; // never run before — go
 
-  // Failure budget: too many consecutive failures on the SAME input → stop
-  // until the input changes. A changed input (different fingerprint) resets
-  // the suppression and lets it try again.
-  const sameInput = hk.lastFailedFingerprint === needs.fingerprint;
+  // Has the input changed materially since the sweep that failed? With the
+  // bucketed fingerprint above this is true only after a real accumulation of
+  // new transcript/memory/NPCs, which is a genuinely different job and worth
+  // one more attempt. Until then BOTH the budget and the cooldown hold.
+  const materiallyChanged = !!hk.lastFailedFingerprint && hk.lastFailedFingerprint !== needs.fingerprint;
+  if (materiallyChanged) return { run: true };
+
+  // Failure budget: a provider that cannot do this job at all (no tool support,
+  // wrong model, bad key) fails identically however much history has piled up.
   const failures = hk.consecutiveFailures || 0;
-  if (sameInput && failures >= HOUSEKEEPING_MAX_CONSECUTIVE_FAILURES) {
+  if (failures >= HOUSEKEEPING_MAX_CONSECUTIVE_FAILURES) {
     return { run: false, reason: "failure_budget", until: hk.cooldownUntil };
   }
 
-  // Cooldown: after ANY failure, wait before retrying the SAME input. A
-  // changed input overrides the cooldown and tries immediately.
-  if (sameInput && hk.cooldownUntil) {
+  // Cooldown: after ANY failure, wait out the wall clock before trying again.
+  if (hk.cooldownUntil) {
     const until = new Date(hk.cooldownUntil).getTime();
-    if (Date.now() < until) {
+    if (Number.isFinite(until) && Date.now() < until) {
       return { run: false, reason: "cooldown", until: hk.cooldownUntil };
     }
   }
@@ -2083,11 +2357,30 @@ function shouldRunHousekeeping(campaign: Campaign): { run: boolean; reason?: str
   return { run: true };
 }
 
-function needsHousekeeping(campaign: Campaign): boolean {
-  if (campaign.messages.length > HOUSEKEEPING_MESSAGE_TRIGGER) return true;
-  if ((campaign.memory || "").length > HOUSEKEEPING_MEMORY_CHARS_TRIGGER) return true;
-  if (campaign.storyCharacters.length > HOUSEKEEPING_NPC_TRIGGER) return true;
-  return false;
+/**
+ * Provider error codes (from classifyHttpError) that housekeeping can never
+ * recover from by trying again: the model cannot do tool calling at all. One
+ * attempt is the correct number of attempts — the observed `gemini-3.6 does not
+ * support tools` 400 should cost one failed sweep, not six, and should not come
+ * back next turn.
+ *
+ * Deliberately narrow. `invalid_model` and `auth` look permanent but recover
+ * without a code change (a provider re-adding a model, a rotated key, a gateway
+ * misreporting 401 during an outage), so they take the ordinary +1 increment and
+ * spend the budget the slow way.
+ */
+const HOUSEKEEPING_PERMANENT_CODES = ["unsupported_tools", "unsupported_feature"];
+
+/**
+ * Campaigns with a sweep in flight. The provider call runs unlocked for up to a
+ * couple of minutes, so without this a host tapping "Retry housekeeping" twice
+ * starts two sweeps over the same transcript whose merges overwrite each other.
+ */
+const housekeepingInFlight = new Set<string>();
+
+/** Whether a sweep is currently running for this campaign. */
+export function isHousekeepingRunning(campaignId: string): boolean {
+  return housekeepingInFlight.has(campaignId);
 }
 
 /**
@@ -2115,7 +2408,30 @@ function sanitizeHousekeepingText(text: string): string {
 async function runHousekeeping(campaign: Campaign): Promise<void> {
   const config = aquaConfig();
   if (!config.fastModel) return;
-  if (!needsHousekeeping(campaign)) return;
+  const gate = shouldRunHousekeeping(campaign);
+  if (!gate.run) {
+    // Log every skip reason except "no_trigger" — that's the normal idle case
+    // and would just spam the log every turn. Cooldown/budget skips are worth
+    // recording so a stuck sweep is explainable after the fact.
+    if (gate.reason && gate.reason !== "no_trigger") {
+      void logCampaignEvent(campaign.id, "INFO", "Housekeeping", "Sweep skipped", {
+        reason: gate.reason,
+        until: gate.until,
+        consecutiveFailures: campaign.housekeeping?.consecutiveFailures
+      });
+    }
+    return;
+  }
+
+  // From here on a sweep is genuinely attempting — record the attempt so the
+  // failure budget/cooldown have something to act on even if it crashes.
+  const now = new Date().toISOString();
+  if (!campaign.housekeeping) campaign.housekeeping = { consecutiveFailures: 0 };
+  campaign.housekeeping.lastAttemptAt = now;
+  // Which thresholds actually triggered this sweep, recorded on the campaign so
+  // the Director's Drawer can say *why* a sweep is due rather than just that
+  // one is (Phase 6 step 1: eligibility reasons are part of the metadata).
+  const gateReasons = housekeepingReasons(campaign)?.reasons || [];
 
   const staleCount = Math.max(0, campaign.messages.length - HOUSEKEEPING_KEEP_RECENT);
   const staleMessages = staleCount > 0 ? campaign.messages.slice(0, staleCount) : [];
@@ -2185,16 +2501,17 @@ async function runHousekeeping(campaign: Campaign): Promise<void> {
     }, {
       ...options,
       retries: Math.max(1, Number(process.env.HOUSEKEEPING_RETRIES) || 3),
-      timeoutMs: Math.max(5000, Number(process.env.HOUSEKEEPING_TIMEOUT_MS) || 45000)
+      timeoutMs: Math.max(5000, Number(process.env.HOUSEKEEPING_TIMEOUT_MS) || 45000),
+      onRetry: retryLogger(campaign.id, "Housekeeping", "sweep")
     })) as ChatCompletionResponse;
     const message = response.choices?.[0]?.message || response.message;
     const call = Array.isArray(message?.tool_calls) ? message?.tool_calls?.[0] : null;
     if (!call?.function?.arguments) {
-      void logCampaignEvent(campaign.id, "WARN", "Housekeeping", "Sweep produced no tool call", {
-        model,
-        durationMs: Date.now() - sweepStartedAt
-      });
-      return;
+      // A target that ignores a forced tool_choice cannot do this job. Treat it
+      // as a genuine failure so it consumes the budget and starts a cooldown —
+      // the old bare `return` left no outcome recorded at all, so such a target
+      // was silently re-attempted on every single turn forever.
+      throw new Error("Housekeeping model returned no apply_housekeeping tool call (a forced tool_choice was ignored)");
     }
     const args = JSON.parse(call.function.arguments) as Record<string, any>;
 
@@ -2216,6 +2533,20 @@ async function runHousekeeping(campaign: Campaign): Promise<void> {
       }
     }
     serverLogSmall("Housekeeping", `Sweep applied for campaign ${campaign.id} (trimmed ${staleCount} messages)`);
+    // Success: clear the failure budget/cooldown so the next trigger runs freely.
+    campaign.housekeeping = {
+      ...campaign.housekeeping,
+      consecutiveFailures: 0,
+      lastSuccessAt: new Date().toISOString(),
+      cooldownUntil: undefined,
+      lastFailedFingerprint: undefined,
+      lastError: undefined,
+      lastErrorCode: undefined,
+      lastFailureAt: undefined,
+      lastReasons: gateReasons,
+      staleCount,
+      targetModel: model
+    };
     void logCampaignEvent(campaign.id, "INFO", "Housekeeping", "Sweep applied", {
       model,
       durationMs: Date.now() - sweepStartedAt,
@@ -2227,13 +2558,120 @@ async function runHousekeeping(campaign: Campaign): Promise<void> {
     });
   } catch (err) {
     serverError("Housekeeping [small model]", "Housekeeping sweep failed (non-fatal)", err);
+    // Failure: bump the consecutive-failure count and start a cooldown, keyed to
+    // the bucketed fingerprint of the input that just failed. A materially
+    // changed input lifts both and tries again.
+    const needs = housekeepingReasons(campaign);
+    const status = typeof (err as { status?: unknown })?.status === "number" ? (err as { status: number }).status : undefined;
+    const code = typeof (err as { code?: unknown })?.code === "string" ? (err as { code: string }).code : undefined;
+    // A permanent capability/credential error is worth exactly one attempt:
+    // exhaust the budget immediately rather than burning MAX sweeps discovering
+    // the same 400 five times over.
+    const permanent = !!code && HOUSEKEEPING_PERMANENT_CODES.includes(code);
+    const failures = permanent
+      ? HOUSEKEEPING_MAX_CONSECUTIVE_FAILURES
+      : (campaign.housekeeping?.consecutiveFailures || 0) + 1;
+    const failedAt = new Date().toISOString();
+    campaign.housekeeping = {
+      ...campaign.housekeeping,
+      consecutiveFailures: failures,
+      cooldownUntil: new Date(Date.now() + HOUSEKEEPING_FAILURE_COOLDOWN_MS).toISOString(),
+      lastFailedFingerprint: needs?.fingerprint,
+      // Scrubbed the same way debug.log metadata is, so a provider that echoes a
+      // key back inside its error body can't smuggle it into campaign.json (and
+      // from there into the housekeepingStatus response every player can read).
+      lastError: scrubLogText(err instanceof Error ? err.message : String(err)),
+      lastErrorCode: code,
+      lastFailureAt: failedAt,
+      lastReasons: gateReasons,
+      staleCount,
+      targetModel: model
+    };
     void logCampaignEvent(campaign.id, "ERROR", "Housekeeping", "Sweep failed", {
       model,
       durationMs: Date.now() - sweepStartedAt,
       error: err instanceof Error ? err.message : String(err),
-      errorName: err instanceof Error ? err.name : undefined
+      errorName: err instanceof Error ? err.name : undefined,
+      status,
+      code,
+      permanent,
+      consecutiveFailures: failures,
+      cooldownUntil: campaign.housekeeping.cooldownUntil
     });
   }
+}
+
+/**
+ * Read-only snapshot of the campaign's housekeeping state for the Director's
+ * Drawer. Purely derived — safe to call any time.
+ */
+export function getHousekeepingStatus(campaign: Campaign) {
+  const needs = housekeepingReasons(campaign);
+  const gate = shouldRunHousekeeping(campaign);
+  return {
+    configured: !!aquaConfig().fastModel,
+    pending: !!needs,
+    triggers: needs?.reasons || [],
+    running: gate.run,
+    // A sweep is physically in flight right now (the provider call is unlocked
+    // and slow, so this can be true for minutes).
+    sweeping: isHousekeepingRunning(campaign.id),
+    skipReason: gate.run ? undefined : gate.reason,
+    skipUntil: gate.until,
+    consecutiveFailures: campaign.housekeeping?.consecutiveFailures || 0,
+    lastAttemptAt: campaign.housekeeping?.lastAttemptAt,
+    lastSuccessAt: campaign.housekeeping?.lastSuccessAt,
+    cooldownUntil: campaign.housekeeping?.cooldownUntil,
+    lastError: campaign.housekeeping?.lastError
+  };
+}
+
+/**
+ * Manual housekeeping retry (party leader only, via the party route). Clears the
+ * failure cooldown/budget so the gate can't short-circuit the attempt, then
+ * STARTS one sweep detached and returns immediately with the pre-sweep status.
+ *
+ * Non-blocking by contract: a manual retry must never hold up the table. The
+ * sweep can run for minutes on a broken provider, and awaiting it inside the
+ * party route — which holds the campaign lock for the whole request — froze
+ * every chat turn, presence sweep and party action for that entire time.
+ *
+ * `ran` reports whether a sweep actually started: false when no fast model is
+ * configured, or when there is genuinely nothing to sweep.
+ *
+ * IMPORTANT: does NOT acquire the campaign lock for its own bookkeeping save —
+ * the caller (party route) already holds it and the mutex is non-reentrant. The
+ * detached sweep acquires the lock itself, for the merge only.
+ */
+export async function retryHousekeepingNow(campaignId: string): Promise<{ ran: boolean; status: ReturnType<typeof getHousekeepingStatus> }> {
+  const campaign = await getCampaign(campaignId);
+  if (!aquaConfig().fastModel) {
+    return { ran: false, status: getHousekeepingStatus(campaign) };
+  }
+  // Clear suppression so shouldRunHousekeeping can't short-circuit this run.
+  campaign.housekeeping = {
+    ...campaign.housekeeping,
+    consecutiveFailures: 0,
+    cooldownUntil: undefined,
+    lastFailedFingerprint: undefined
+  };
+  // Already sweeping: don't stack a second one. The in-flight sweep is the
+  // retry the host is asking for.
+  if (isHousekeepingRunning(campaignId)) {
+    return { ran: false, status: getHousekeepingStatus(campaign) };
+  }
+  const gate = shouldRunHousekeeping(campaign);
+  void logCampaignEvent(campaignId, "INFO", "Housekeeping", "Manual retry requested", {
+    starting: gate.run,
+    skipReason: gate.run ? undefined : gate.reason,
+    previousLastError: campaign.housekeeping.lastError
+  });
+  await saveCampaign(campaign);
+  if (!gate.run) return { ran: false, status: getHousekeepingStatus(campaign) };
+  // Snapshot + detach, exactly like the post-turn path, so the provider call is
+  // outside the lock and the merge preserves anything added meanwhile.
+  void sweepAndMergeHousekeeping(campaignId, cloneCampaign(campaign));
+  return { ran: true, status: getHousekeepingStatus(campaign) };
 }
 
 /**

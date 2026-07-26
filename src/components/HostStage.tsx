@@ -16,7 +16,7 @@ import type {
   StageEffectKind,
   StoryCharacter
 } from "@/lib/campaign/types";
-import { api, accentColor } from "@/lib/client/api";
+import { api, accentColor, getTvToken, type ChatTargetOption, type HousekeepingStatus, type NarrationFailure } from "@/lib/client/api";
 import { bgmDuck, bgmIsMuted, bgmSetContext, bgmSetTheme, subscribeBgm, type BgmContext } from "@/lib/client/audio";
 import { ambienceSetScene, ambienceStop, ambienceAccent } from "@/lib/client/ambience";
 import { playSfx } from "@/lib/client/sfx";
@@ -81,6 +81,14 @@ const DEBUG_AMBIENCE: AmbienceSound[] = [
 const DEBUG_ACOUSTICS: AmbienceAcoustic[] = ["outdoors", "indoors", "small-room", "large-hall", "cave", "distant", "muffled", "underwater"];
 const DEBUG_BEATS = ["narration", "dialogue", "playerAction", "system"] as const;
 type DebugScene = "cosmos" | "loom" | "forge-lobby";
+
+/**
+ * How recently an ending has to have landed for the outro to wait on the
+ * turn's closing beats. A saga that just closed in front of the table gets its
+ * final dialogue and epilogue first; reopening the TV on a long-finished
+ * campaign still cuts straight to the credits.
+ */
+const FRESH_ENDING_MS = 5 * 60_000;
 
 /** Sample endings so every finale can be inspected without playing a saga to its close. */
 const DEBUG_ENDING_SAMPLES: Record<EndingKind, Pick<CampaignEnding, "title" | "summary" | "highlights" | "stats">> = {
@@ -273,6 +281,11 @@ export default function HostStage({
   theme?: ThemeKey | string | null;
   debugMode?: boolean;
 }) {
+  // This tab's TV identity. Every privileged party action the stage performs
+  // (stage controls, playback telemetry) carries it so the server can tell a
+  // host screen from an arbitrary caller — same per-tab token the poll and the
+  // takeover prompt already use, so nothing new is stored.
+  const tvToken = useMemo(() => getTvToken(), []);
   const [debugOpen, setDebugOpen] = useState(debugMode);
   const [debugTheme, setDebugTheme] = useState<ThemeKey | null>(null);
   const [debugMood, setDebugMood] = useState<DebugMoodKey | null>(null);
@@ -331,7 +344,9 @@ export default function HostStage({
   useEffect(() => {
     if (!seenRef.current) {
       seenRef.current = new Set(campaign.displayEvents.map((event) => event.id));
-      const recap = [...campaign.displayEvents].reverse().find(
+      // A finished saga has nothing to catch up on — go straight to the credits
+      // instead of replaying its last line first.
+      const recap = campaign.status === "completed" ? undefined : [...campaign.displayEvents].reverse().find(
         (event) => event.type === "narration" || event.type === "dialogue"
       );
       if (recap) {
@@ -352,7 +367,9 @@ export default function HostStage({
       added = true;
     }
     if (added) setPump((n) => n + 1);
-  }, [campaign.displayEvents]);
+    // campaign.status only steers the one-time recap decision above; re-running
+    // on a status change is a no-op once every event is already seen.
+  }, [campaign.displayEvents, campaign.status]);
 
   const playersById = useMemo(() => {
     const map = new Map<string, Player>();
@@ -438,8 +455,8 @@ export default function HostStage({
     const isPresenting = !!currentBeat || queueRef.current.length > 0;
     if (!isPresenting && presentingSentRef.current === false) return;
     presentingSentRef.current = isPresenting;
-    api.party({ campaignId: campaign.id, action: "presenting", active: isPresenting }).catch(() => undefined);
-  }, [campaign.id, currentBeat, pump]);
+    api.party({ campaignId: campaign.id, action: "presenting", active: isPresenting, hostToken: tvToken }).catch(() => undefined);
+  }, [campaign.id, currentBeat, pump, tvToken]);
 
   // Host fast-forward: flush the ENTIRE queue right now (not just the current
   // beat) and immediately tell the server playback is done, so a long turn
@@ -455,8 +472,8 @@ export default function HostStage({
     setHoldMs(0);
     setShownChars(0);
     presentingSentRef.current = false;
-    api.party({ campaignId: campaign.id, action: "presenting", active: false }).catch(() => undefined);
-  }, [campaign.id]);
+    api.party({ campaignId: campaign.id, action: "presenting", active: false, hostToken: tvToken }).catch(() => undefined);
+  }, [campaign.id, tvToken]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -613,7 +630,7 @@ export default function HostStage({
     if (!sway.trim()) return;
     setSwayBusy(true);
     try {
-      await api.party({ campaignId: campaign.id, action: "sway", guidance: sway.trim() });
+      await api.party({ campaignId: campaign.id, action: "sway", guidance: sway.trim(), hostToken: tvToken });
       setSway("");
     } catch {
       // The drawer shows dmStatus; a failed sway simply leaves the text in place.
@@ -639,7 +656,7 @@ export default function HostStage({
   const resetStuckTurn = async () => {
     setResetBusy(true);
     try {
-      await api.party({ campaignId: campaign.id, action: "resetTurn" });
+      await api.party({ campaignId: campaign.id, action: "resetTurn", hostToken: tvToken });
     } catch {
       // ignore; host can retry
     } finally {
@@ -653,7 +670,7 @@ export default function HostStage({
     try {
       // Ask the Weaver to repaint the backdrop to match the CURRENT scene
       // (a visual refresh — it does not advance the plot or touch choices).
-      await api.party({ campaignId: campaign.id, action: "nudge" });
+      await api.party({ campaignId: campaign.id, action: "nudge", hostToken: tvToken });
     } catch {
       // ignore; host can retry
     } finally {
@@ -662,15 +679,19 @@ export default function HostStage({
   };
 
   const toggleSetting = (key: string, value: boolean) => {
-    api.party({ campaignId: campaign.id, action: "updateSettings", [key]: value }).catch(() => undefined);
+    api.party({ campaignId: campaign.id, action: "updateSettings", [key]: value, hostToken: tvToken }).catch(() => undefined);
   };
 
   // Narration target status (read-only on the TV): show which model/provider
   // is currently selected, and who the party leader is (the one who can
   // switch it from their phone). The TV host isn't necessarily the party
   // leader, so switching is done on the leader's controller, not here.
-  const [chatTargets, setChatTargets] = useState<Array<{ id: string; alias: string; label: string; model: string }>>([]);
+  const [chatTargets, setChatTargets] = useState<ChatTargetOption[]>([]);
   const [selectedTargetId, setSelectedTargetId] = useState<string>("");
+  const [targetsLoaded, setTargetsLoaded] = useState(false);
+  const [targetConfigured, setTargetConfigured] = useState(true);
+  const [narrationFailure, setNarrationFailure] = useState<NarrationFailure | null>(null);
+  const [housekeeping, setHousekeeping] = useState<HousekeepingStatus | null>(null);
   useEffect(() => {
     if (!drawerOpen) return;
     let cancelled = false;
@@ -678,10 +699,24 @@ export default function HostStage({
       if (cancelled) return;
       setChatTargets(res.targets);
       setSelectedTargetId(res.selectedChatTargetId);
+      setTargetConfigured(res.selectedTargetConfigured !== false);
+      setNarrationFailure(res.narrationFailure || null);
+      setTargetsLoaded(true);
+    }).catch(() => {});
+    api.housekeepingStatus(campaign.id).then((res) => {
+      if (cancelled) return;
+      setHousekeeping(res.status);
     }).catch(() => {});
     return () => { cancelled = true; };
-  }, [drawerOpen, campaign.id]);
+    // Keyed on the IDLE BOOLEAN, not the dmStatus string: that string changes
+    // several times a turn (phase updates, "retrying (2/3)"), and each change
+    // would fire two more /api/party POSTs that queue behind the campaign lock
+    // the running turn is holding — a request pile-up that starves the TV's own
+    // poll of browser sockets.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drawerOpen, campaign.id, !campaign.dmStatus]);
   const currentTarget = chatTargets.find((t) => t.id === selectedTargetId);
+  const partyLeader = campaign.players.find((player) => player.id === campaign.partyLeaderId);
 
   const previewEffect = (kind: StageEffectKind) => {
     switch (kind) {
@@ -896,6 +931,48 @@ export default function HostStage({
     return stats.slice(0, 6);
   }, [campaign.displayEvents, campaign.images.length, campaign.players.length]);
 
+  // Is there still narration to perform? `end_campaign` is a mid-turn tool
+  // call, so a campaign flips to "completed" and saves BEFORE the turn's
+  // closing beats exist — and the epilogue beats that follow arrive in a later
+  // poll. Unseen events count as pending too: on the render right after a poll
+  // the ingest effect hasn't run yet, and without that the outro would mount
+  // for a frame before being torn down again.
+  //
+  // Only the ending gate consumes this, and the typewriter re-renders roughly
+  // 40x a second, so it stays behind a status check rather than scanning the
+  // whole chronicle on every keystroke of every beat.
+  const beatsPending =
+    campaign.status === "completed" &&
+    (!!currentBeat ||
+      !!activeDice ||
+      queueRef.current.length > 0 ||
+      // Unseen only counts once the ingest effect has run at least once.
+      // `seenRef.current` is null on the very first render, and treating that as
+      // "everything is unseen" made a reload of an already-finished saga wait on
+      // a beat before showing the credits.
+      (!!seenRef.current && campaign.displayEvents.some((event) => !seenRef.current?.has(event.id))));
+
+  // The saga's own painted scenes, for the finale to hold full-frame. Spread
+  // across the whole campaign rather than taking the last few, so the reel
+  // shows where the story began as well as where it ended — and the current
+  // backdrop is always last, because that is the frame the table is looking at
+  // when the credits strike.
+  const endingPlates = useMemo(() => {
+    const gallery = (campaign.images || []).map((image) => image.url).filter(Boolean);
+    if (!gallery.length) return [];
+    const wanted = Math.min(4, gallery.length);
+    const picked: string[] = [];
+    for (let i = 0; i < wanted; i += 1) {
+      const url = gallery[Math.round((i * (gallery.length - 1)) / Math.max(wanted - 1, 1))];
+      if (url && !picked.includes(url)) picked.push(url);
+    }
+    if (campaign.currentImageUrl) {
+      const rest = picked.filter((url) => url !== campaign.currentImageUrl);
+      return [...rest, campaign.currentImageUrl];
+    }
+    return picked;
+  }, [campaign.images, campaign.currentImageUrl]);
+
   // The outro plays for a truly completed saga, or for any finale picked in
   // the debug gallery (which never touches the stored campaign).
   const activeEnding = useMemo<CampaignEnding | null>(() => {
@@ -907,8 +984,14 @@ export default function HostStage({
       };
     }
     if (campaign.status !== "completed" || !campaign.ending) return null;
+    // Don't cut the ending's own scene off at the knees: while the Weaver is
+    // still writing the epilogue, or while beats are still playing out, hold
+    // the credits. Only for an ending that just happened.
+    const endedAt = new Date(campaign.ending.endedAt).getTime();
+    const fresh = Number.isFinite(endedAt) && Date.now() - endedAt < FRESH_ENDING_MS;
+    if (fresh && (beatsPending || !!campaign.dmStatus)) return null;
     return campaign.ending.stats?.length ? campaign.ending : { ...campaign.ending, stats: derivedStats };
-  }, [debugOutro, campaign.status, campaign.ending, derivedStats]);
+  }, [debugOutro, campaign.status, campaign.ending, campaign.dmStatus, beatsPending, derivedStats]);
 
   return (
     <div
@@ -930,7 +1013,13 @@ export default function HostStage({
         <div className="stage-grade" style={{ background: MOOD_GRADES[mood] || MOOD_GRADES.calm }} />
       </div>
 
-      <StageAtmosphere ref={atmosphereRef} mood={mood} intensity={intensity} theme={visual.key} />
+      {/* Unmounted under the finale: the reel covers the stage completely, so
+          leaving this up ran a second WebGL context rendering weather nobody
+          can see — on a smart TV that is the difference between a smooth
+          finale and a stuttering one. */}
+      {activeEnding ? null : (
+        <StageAtmosphere ref={atmosphereRef} mood={mood} intensity={intensity} theme={visual.key} />
+      )}
 
       <div className="stage-grain" aria-hidden />
       <div className={`stage-darkness ${dark ? "on" : ""}`} aria-hidden />
@@ -1090,6 +1179,7 @@ export default function HostStage({
           players={campaign.players}
           campaignTitle={campaign.title}
           theme={visual.key}
+          plates={endingPlates}
           onExit={debugOutro ? undefined : onExit}
         />
       ) : null}
@@ -1331,7 +1421,7 @@ export default function HostStage({
                     key={image.id}
                     className={`gallery-thumb ${campaign.currentImageUrl === image.url ? "current" : ""}`}
                     title={image.prompt}
-                    onClick={() => api.party({ campaignId: campaign.id, action: "setBackground", url: image.url }).catch(() => undefined)}
+                    onClick={() => api.party({ campaignId: campaign.id, action: "setBackground", url: image.url, hostToken: tvToken }).catch(() => undefined)}
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={image.url} alt={image.prompt.slice(0, 60)} />
@@ -1371,9 +1461,64 @@ export default function HostStage({
 
           <label className="director-label">Narration model</label>
           <p className="panel-hint small">
-            Current: {currentTarget ? `${currentTarget.label} (${currentTarget.model})` : "Loading…"}
+            Current: {currentTarget
+              ? `${currentTarget.label} · ${currentTarget.alias} (${currentTarget.model})`
+              : !targetsLoaded
+                ? "Loading…"
+                : `${selectedTargetId || "default"} — not configured on the server, running on the default target`}
+            {targetsLoaded && !targetConfigured && currentTarget ? (
+              <><br />⚠ Pinned to <strong>{selectedTargetId}</strong>, which is no longer configured — narration is running on the default target.</>
+            ) : null}
             <br />
-            The party leader switches the model from their phone after a failure.
+            {partyLeader
+              ? <>The party leader — <strong>{partyLeader.characterName || partyLeader.name}</strong> ♛ — switches the model from their phone after a failure.</>
+              : <>The party leader switches the model from their phone after a failure.</>}
+          </p>
+
+          {narrationFailure ? (
+            <>
+              <label className="director-label">Narration failed</label>
+              <p className="panel-hint small">
+                Stalled on <strong>{narrationFailure.targetId}</strong>
+                {narrationFailure.step ? ` at step ${narrationFailure.step}` : ""}
+                {narrationFailure.status ? ` — HTTP ${narrationFailure.status}` : ""}
+                {narrationFailure.code ? ` (${narrationFailure.code})` : ""}
+                {" "}at {new Date(narrationFailure.at).toLocaleTimeString()}.
+                <br />
+                {narrationFailure.message}
+                <br />
+                Nothing failed over on its own. The table is waiting for the party leader to switch the
+                model or retry the turn{narrationFailure.canRetry ? "" : " (this turn can't be replayed — the party can simply act again)"}.
+              </p>
+            </>
+          ) : null}
+
+          <label className="director-label">Memory housekeeping</label>
+          <p className="panel-hint small">
+            {!housekeeping ? "Loading…" : !housekeeping.configured ? (
+              <>No fast model configured — housekeeping is off.</>
+            ) : (
+              <>
+                {housekeeping.pending
+                  ? housekeeping.running
+                    ? "A summary sweep is due and will run after this turn."
+                    : housekeeping.skipReason === "cooldown"
+                      ? `Sweep paused (cooldown until ${housekeeping.skipUntil ? new Date(housekeeping.skipUntil).toLocaleTimeString() : "later"}).`
+                      : housekeeping.skipReason === "failure_budget"
+                        ? `Sweep paused after ${housekeeping.consecutiveFailures} consecutive failures.`
+                        : "A summary sweep is due."
+                  : "Nothing to sweep right now."}
+                {housekeeping.lastSuccessAt ? (
+                  <><br />Last sweep: {new Date(housekeeping.lastSuccessAt).toLocaleString()}</>
+                ) : null}
+                {housekeeping.lastError ? (
+                  <><br />Last error: {housekeeping.lastError}</>
+                ) : null}
+                {housekeeping.pending && !housekeeping.running ? (
+                  <><br />The party leader can force a retry from their phone.</>
+                ) : null}
+              </>
+            )}
           </p>
 
           <button className="ghost-button leave" onClick={onExit}>Leave the table (keeps the saga)</button>

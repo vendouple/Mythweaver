@@ -5,6 +5,54 @@ import type { Campaign, CampaignSummary, Player, SuggestedAction } from "@/lib/c
 
 export type { Campaign, CampaignSummary, Player, SuggestedAction };
 
+/** Read-only snapshot of the campaign housekeeping sweep state. Mirrors
+ *  getHousekeepingStatus() in aqua/chat.ts — keep the two in sync. */
+export type HousekeepingStatus = {
+  configured: boolean;
+  pending: boolean;
+  triggers: string[];
+  running: boolean;
+  /** A sweep is physically in flight right now (can be true for minutes). */
+  sweeping?: boolean;
+  skipReason?: string;
+  skipUntil?: string;
+  consecutiveFailures: number;
+  lastAttemptAt?: string;
+  lastSuccessAt?: string;
+  cooldownUntil?: string;
+  lastError?: string;
+};
+
+/** The outstanding narration failure the host is being asked to recover from. */
+export type NarrationFailure = {
+  at: string;
+  targetId: string;
+  status?: number;
+  code?: string;
+  message: string;
+  step?: number;
+  /** True when the exact failed turn can be replayed right now. */
+  canRetry?: boolean;
+};
+
+/** A narration target as the host selector sees it — never any credentials. */
+export type ChatTargetOption = {
+  id: string;
+  alias: string;
+  label: string;
+  model: string;
+  /** Narration is tool-driven; a target without tool calling cannot be used. */
+  supportsTools?: boolean;
+};
+
+export type ChatTargetsResult = {
+  targets: ChatTargetOption[];
+  selectedChatTargetId: string;
+  /** False when the pinned alias no longer exists in the server config. */
+  selectedTargetConfigured?: boolean;
+  narrationFailure?: NarrationFailure;
+};
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init);
   const data = await response.json().catch(() => ({}));
@@ -48,16 +96,23 @@ export const api = {
   chat: (body: Record<string, unknown>) => post<{ campaign?: Campaign; error?: string }>("/api/chat", body),
   party: (body: Record<string, unknown>) => post<{ campaign?: Campaign; error?: string }>("/api/party", body),
   listChatTargets: (campaignId: string) =>
-    post<{ targets: { id: string; alias: string; label: string; model: string }[]; selectedChatTargetId: string }>("/api/party", {
+    post<ChatTargetsResult>("/api/party", {
       campaignId,
       action: "listChatTargets"
     }),
-  switchModel: (campaignId: string, playerId: string, targetId: string) =>
+  switchModel: (campaignId: string, playerId: string, targetId: string, reason?: string) =>
     post<{ campaign?: Campaign; error?: string }>("/api/party", {
       campaignId,
       action: "switchModel",
       playerId,
-      targetId
+      targetId,
+      reason
+    }),
+  retryFailedTurn: (campaignId: string, playerId: string) =>
+    post<{ retrying: boolean; target: string }>("/api/party", {
+      campaignId,
+      action: "retryFailedTurn",
+      playerId
     }),
   transferHost: (campaignId: string, playerId: string, targetPlayerId: string) =>
     post<{ campaign?: Campaign; error?: string }>("/api/party", {
@@ -65,6 +120,17 @@ export const api = {
       action: "transferHost",
       playerId,
       targetPlayerId
+    }),
+  housekeepingStatus: (campaignId: string) =>
+    post<{ status: HousekeepingStatus }>("/api/party", {
+      campaignId,
+      action: "housekeepingStatus"
+    }),
+  retryHousekeeping: (campaignId: string, playerId: string) =>
+    post<{ ran: boolean; status: HousekeepingStatus; error?: string }>("/api/party", {
+      campaignId,
+      action: "retryHousekeeping",
+      playerId
     }),
   generate: (body: Record<string, unknown>) => post<{ result: Record<string, any> }>("/api/generate", body),
   generateSceneImage: (campaignId: string, prompt: string) =>

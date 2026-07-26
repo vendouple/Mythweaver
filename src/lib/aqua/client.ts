@@ -92,6 +92,16 @@ export type ChatTargetSummary = {
   alias: string;
   label: string;
   model: string;
+  /**
+   * Whether this target can do tool/function calling. Narration REQUIRES it —
+   * the DM ends every turn through the narrate_turn tool and does all state
+   * changes through tools — so a target without it fails every single turn.
+   * Declared per target with CHAT_TARGET_N_TOOLS=0 (default: assumed true,
+   * because most OpenAI-compatible endpoints support it). Declaring it lets a
+   * bad switch be refused up front instead of being discovered as a 400
+   * "does not support tools" mid-turn.
+   */
+  supportsTools: boolean;
 };
 
 export type ChatTarget = {
@@ -101,6 +111,7 @@ export type ChatTarget = {
   model: string;
   baseUrl: string;
   apiKey: string;
+  supportsTools: boolean;
 };
 
 /** The default target id — always resolves to CHAT_MODEL/BASE_URL/API_KEY. */
@@ -120,12 +131,27 @@ export function resolveChatTarget(targetId?: string): ChatTarget {
     label: process.env.CHAT_TARGET_DEFAULT_LABEL || config.chatModel || "Default",
     model: config.chatModel,
     baseUrl: config.baseUrl,
-    apiKey: config.apiKey
+    apiKey: config.apiKey,
+    supportsTools: envSupportsTools(process.env.CHAT_TARGET_DEFAULT_TOOLS)
   };
   if (!targetId || targetId === DEFAULT_CHAT_TARGET_ID) return defaultTarget;
 
   const target = findChatTarget(targetId);
+  if (!target) {
+    // Falling back keeps a stale campaign.json selection from bricking
+    // narration, but doing it silently is how a host ends up staring at a
+    // selector that says one thing while another provider does the work. This
+    // only happens after an .env edit renamed/removed the alias (or emptied its
+    // MODEL, which readNamedChatTargets skips) — switchModel validates ids.
+    console.warn(`[Aqua] Narration target "${targetId}" is not configured — falling back to the default target.`);
+  }
   return target || defaultTarget;
+}
+
+/** Whether a target id currently resolves to a real configured target. */
+export function isChatTargetConfigured(targetId?: string): boolean {
+  if (!targetId || targetId === DEFAULT_CHAT_TARGET_ID) return true;
+  return !!findChatTarget(targetId);
 }
 
 /**
@@ -139,10 +165,11 @@ export function listChatTargets(): ChatTargetSummary[] {
     id: DEFAULT_CHAT_TARGET_ID,
     alias: "default",
     label: process.env.CHAT_TARGET_DEFAULT_LABEL || config.chatModel || "Default",
-    model: config.chatModel
+    model: config.chatModel,
+    supportsTools: envSupportsTools(process.env.CHAT_TARGET_DEFAULT_TOOLS)
   }];
   for (const t of readNamedChatTargets()) {
-    summaries.push({ id: t.id, alias: t.alias, label: t.label, model: t.model });
+    summaries.push({ id: t.id, alias: t.alias, label: t.label, model: t.model, supportsTools: t.supportsTools });
   }
   return summaries;
 }
@@ -161,9 +188,21 @@ function readNamedChatTargets(): ChatTarget[] {
     const baseUrl = (process.env[`CHAT_TARGET_${i}_BASE_URL`] || config.baseUrl).trim();
     const apiKey = (process.env[`CHAT_TARGET_${i}_API_KEY`] || config.apiKey).trim();
     const label = (process.env[`CHAT_TARGET_${i}_LABEL`] || alias).trim();
-    targets.push({ id: alias, alias, label, model, baseUrl, apiKey });
+    const supportsTools = envSupportsTools(process.env[`CHAT_TARGET_${i}_TOOLS`]);
+    targets.push({ id: alias, alias, label, model, baseUrl, apiKey, supportsTools });
   }
   return targets;
+}
+
+/**
+ * Internal: parse a per-target TOOLS declaration. Absent means "assume yes" —
+ * most OpenAI-compatible endpoints do support tool calling, and defaulting to
+ * no would refuse every target nobody had bothered to annotate.
+ */
+function envSupportsTools(raw: string | undefined): boolean {
+  const v = String(raw ?? "").toLowerCase().trim();
+  if (!v) return true;
+  return !["0", "false", "no", "off", "none"].includes(v);
 }
 
 /** Internal: find a named target by alias (case-insensitive). */
@@ -206,6 +245,16 @@ export type AquaFetchOptions = {
  * for an hour. The observed "attempt 1/1000" log proves this clamp is needed.
  */
 const MAX_RETRIES_HARD_CAP = 10;
+
+/**
+ * Hard ceiling on the per-attempt abort timeout. A retry clamp alone doesn't
+ * bound a turn: one attempt with INTERACTIVE_TIMEOUT_MS=10000000 hangs for
+ * ~2.8 hours before the abort controller fires. Ten minutes is well past any
+ * legitimate provider latency (slow image models included) while still
+ * guaranteeing a wedged socket eventually surfaces as a failure the host can
+ * act on. Documented in .env.example alongside the retry cap.
+ */
+const MAX_TIMEOUT_HARD_CAP_MS = 600_000;
 
 /** Parse RETRY_BACKOFF: 0/false/off/no → false; anything else truthy → true. Default false (fixed delay). */
 function envRetryBackoff(): boolean {
@@ -292,7 +341,7 @@ export async function aquaFetch(path: string, init: RequestInit, options: AquaFe
   // can never trap a turn on one dead provider. The observed "attempt 1/1000"
   // log proves this clamp is required.
   const retries = Math.min(Math.max(1, opts.retries ?? 6), MAX_RETRIES_HARD_CAP);
-  const timeoutMs = opts.timeoutMs ?? 60000;
+  const timeoutMs = Math.min(Math.max(1000, opts.timeoutMs ?? 60000), MAX_TIMEOUT_HARD_CAP_MS);
   const retryDelayMs = opts.retryDelayMs ?? (Number(process.env.RETRY_DELAY_MS) || 1000);
   const retryBackoff = opts.retryBackoff ?? envRetryBackoff();
   const baseUrl = opts.baseUrl || config.baseUrl;
@@ -346,7 +395,16 @@ export async function aquaFetch(path: string, init: RequestInit, options: AquaFe
       // A deliberate host abort is never retried — propagate immediately so
       // the turn can be re-issued on the newly selected provider.
       if (error instanceof AquaAbortError) throw error;
-      if (attempt < retries && isRetryableError(error)) {
+      // A classified HTTP failure thrown by the block above lands here too
+      // (it's thrown inside this try), and it carries its status. Feed that
+      // status back through the classifier — otherwise it looks like a bare
+      // network error and the "unknown error: retry once" fallback burns every
+      // remaining attempt on a permanently broken request. This is what let a
+      // 400 "does not support tools" retry six times.
+      const status = typeof (error as { status?: unknown })?.status === "number"
+        ? (error as { status: number }).status
+        : undefined;
+      if (attempt < retries && isRetryableError(error, status)) {
         const delay = retryDelayForAttempt(attempt, retryDelayMs, retryBackoff);
         console.warn(`Fetch failed on attempt ${attempt}/${retries}: ${error}. Retrying in ${delay / 1000}s...`);
         opts.onRetry?.({ attempt: attempt + 1, retries, error });

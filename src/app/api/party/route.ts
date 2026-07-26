@@ -1,10 +1,64 @@
 import { NextResponse } from "next/server";
-import { getCampaign, getCampaignLock, saveCampaign, safePushDisplayEvent, ensureLocations, getFocusedLocation, getPlayerLocation, reconcilePresence, playerLastSeen, DEPARTURE_WEAVE_GRACE_MS, claimHostSession, logCampaignEvent } from "@/lib/campaign/store";
-import { listChatTargets, DEFAULT_CHAT_TARGET_ID } from "@/lib/aqua/client";
-import { runDungeonMaster, repaintBackdrop, resolveExplorationRound, advanceCombatAndRunEnemies, rotateSpotlight, waitForDmIdle, buildAbsenceBriefing, serverLog, serverError } from "@/lib/aqua/chat";
+import { getCampaign, getCampaignLock, saveCampaign, safePushDisplayEvent, ensureLocations, getFocusedLocation, getPlayerLocation, reconcilePresence, playerLastSeen, DEPARTURE_WEAVE_GRACE_MS, claimHostSession, isHostSessionToken, logCampaignEvent } from "@/lib/campaign/store";
+import { listChatTargets, DEFAULT_CHAT_TARGET_ID, isChatTargetConfigured } from "@/lib/aqua/client";
+import { runDungeonMaster, repaintBackdrop, resolveExplorationRound, advanceCombatAndRunEnemies, rotateSpotlight, waitForDmIdle, buildAbsenceBriefing, serverLog, serverError, getHousekeepingStatus, retryHousekeepingNow } from "@/lib/aqua/chat";
 import { turnMode, deadlinePassed, syncFocusedMirror, getActiveLocation, isPartySplit } from "@/lib/campaign/turns";
 
 export const dynamic = "force-dynamic";
+
+/**
+ * Who may perform each party action.
+ *
+ *   leader — only the current party leader (the single player host). When no
+ *            leader is set yet, any joined player qualifies: an unowned
+ *            campaign has no host role to protect, and this preserves the
+ *            original `start` semantics exactly.
+ *   host   — the player host OR the live TV screen. The TV owns the stage
+ *            controls in the Director's Drawer; the leader has the same powers
+ *            from their phone.
+ *   tv     — the TV screen only (its own telemetry and deadline backstops).
+ *   player — any joined player, acting for themselves.
+ *   open   — read-only, or self-gating (claimHost sits behind a user prompt).
+ *
+ * Declared as ONE table on purpose. With the check written inline per handler,
+ * force-resolve, skip-turn, nudge, settings, reset-turn, set-background and
+ * message editing all shipped with no check at all — anyone who could reach the
+ * LAN and guess a campaign id could drive another table's session. An action
+ * missing from this table falls through to `leader`, so a newly added action
+ * fails closed instead of shipping open.
+ */
+type PartyAuthority = "leader" | "host" | "tv" | "player" | "open";
+
+const ACTION_AUTHORITY: Record<string, PartyAuthority> = {
+  start: "leader",
+  switchModel: "leader",
+  transferHost: "leader",
+  retryHousekeeping: "leader",
+  retryFailedTurn: "leader",
+  sway: "host",
+  nudge: "host",
+  resolveRound: "host",
+  skipTurn: "host",
+  resetTurn: "host",
+  setBackground: "host",
+  updateSettings: "host",
+  editMessage: "host",
+  editEvent: "host",
+  presenting: "tv",
+  sweepPresence: "tv",
+  leave: "player",
+  claimHost: "open",
+  listChatTargets: "open",
+  housekeepingStatus: "open"
+};
+
+const AUTHORITY_MESSAGE: Record<PartyAuthority, string> = {
+  leader: "Only the party leader can do that",
+  host: "Only the host screen or the party leader can do that",
+  tv: "Only the host screen can do that",
+  player: "You must be seated at this table to do that",
+  open: "Not permitted"
+};
 
 export async function POST(request: Request) {
   let campaignId = "";
@@ -16,6 +70,34 @@ export async function POST(request: Request) {
     serverLog("API party", `Incoming POST request | Campaign: ${campaignId} | Action: ${action}`);
     if (!campaignId || !action) return NextResponse.json({ error: "campaignId and action are required" }, { status: 400 });
 
+    // Read-only projections are served WITHOUT taking the campaign lock. Both
+    // are polled by the Director's Drawer, and a running turn holds the lock for
+    // its whole duration — so queueing these behind it made the drawer's own
+    // status requests hang for as long as the turn took, which is precisely
+    // when a host most wants to read them.
+    if (action === "listChatTargets" || action === "housekeepingStatus") {
+      const campaign = await getCampaign(campaignId);
+      if (action === "housekeepingStatus") {
+        return NextResponse.json({ status: getHousekeepingStatus(campaign) });
+      }
+      // alias + label + model only — never base URLs or API keys. The current
+      // selection is included so the UI can mark it, along with the outstanding
+      // narration failure so both surfaces can show WHY the host is being asked
+      // to pick, and offer the retry.
+      const targets = listChatTargets();
+      return NextResponse.json({
+        targets,
+        selectedChatTargetId: campaign.selectedChatTargetId || DEFAULT_CHAT_TARGET_ID,
+        // False when an .env edit removed the alias this campaign is pinned to:
+        // narration silently runs on the default, and the UI should say so
+        // rather than showing a selector stuck on a target that is gone.
+        selectedTargetConfigured: isChatTargetConfigured(campaign.selectedChatTargetId),
+        narrationFailure: campaign.narrationFailure
+          ? { ...campaign.narrationFailure, canRetry: !!campaign.narrationFailure.payload && !campaign.dmStatus }
+          : undefined
+      });
+    }
+
     let isReleased = false;
     const release = await getCampaignLock(campaignId).acquire();
     const safeRelease = () => {
@@ -26,11 +108,37 @@ export async function POST(request: Request) {
     };
 
     try {
+      // Single authorization gate for every action (see ACTION_AUTHORITY).
+      const authority: PartyAuthority = ACTION_AUTHORITY[action] ?? "leader";
+      if (authority !== "open") {
+        const actorId = String(body.playerId || "");
+        const hostToken = String(body.hostToken || "").trim();
+        const subject = await getCampaign(campaignId);
+        const isJoinedPlayer = !!actorId && subject.players.some((player) => player.id === actorId);
+        // No leader claimed yet → any seated player counts as the host.
+        const isLeader = subject.partyLeaderId ? subject.partyLeaderId === actorId : isJoinedPlayer;
+        const isTv = !!hostToken && isHostSessionToken(campaignId, hostToken);
+        const allowed =
+          authority === "leader" ? isLeader
+            : authority === "host" ? (isLeader || isTv)
+              : authority === "tv" ? isTv
+                : isJoinedPlayer;
+        if (!allowed) {
+          serverLog("API party", `Rejected unauthorized '${action}' on campaign ${campaignId} (needs ${authority})`);
+          void logCampaignEvent(campaignId, "WARN", "Host", "Unauthorized party action rejected", {
+            action,
+            requiredAuthority: authority,
+            actorPlayerId: actorId || undefined,
+            actorIsJoined: isJoinedPlayer,
+            hadHostToken: !!hostToken
+          });
+          return NextResponse.json({ error: AUTHORITY_MESSAGE[authority] }, { status: 403 });
+        }
+      }
+
       if (action === "start") {
         const campaign = await getCampaign(campaignId);
-        const playerId = String(body.playerId || "");
-        if (campaign.partyLeaderId && campaign.partyLeaderId !== playerId) return NextResponse.json({ error: "Only the party leader can start the game" }, { status: 403 });
-        
+
         // Duplicate start guard: if campaign is already active, return immediately
         if (campaign.status === "active") {
           serverLog("API party", `Campaign ${campaignId} is already active, skipping start initialization.`);
@@ -415,29 +523,28 @@ export async function POST(request: Request) {
         return NextResponse.json({ campaign });
       }
 
-      if (action === "listChatTargets") {
-        // Read-only: populate the Director's Drawer model selector. Returns
-        // alias + label + model only — never base URLs or API keys. The
-        // campaign's current selection is included so the UI can mark it.
-        const campaign = await getCampaign(campaignId);
-        const targets = listChatTargets();
-        return NextResponse.json({ targets, selectedChatTargetId: campaign.selectedChatTargetId || DEFAULT_CHAT_TARGET_ID });
-      }
-
       if (action === "switchModel") {
         // Manual narration target switch after a provider failure. MANUAL ONLY
-        // — never auto-failed-over. Only the current party leader may switch.
-        // The request must carry the actor's playerId so we can authorize.
+        // — never auto-failed-over. Party-leader authority is enforced by the
+        // gate at the top of this handler.
         const campaign = await getCampaign(campaignId);
         const playerId = String(body.playerId || "");
-        if (!campaign.partyLeaderId || campaign.partyLeaderId !== playerId) {
-          return NextResponse.json({ error: "Only the party leader can switch the narration model" }, { status: 403 });
-        }
         const targetId = String(body.targetId || "").trim();
         const targets = listChatTargets();
-        const valid = targets.some((t) => t.id === targetId);
-        if (!valid) {
+        const candidate = targets.find((t) => t.id === targetId);
+        if (!candidate) {
           return NextResponse.json({ error: "Unknown narration target" }, { status: 400 });
+        }
+        // Narration is entirely tool-driven (narrate_turn ends every turn and
+        // all state changes go through tools), so a target declared without tool
+        // support cannot narrate at all. Refuse it here rather than letting the
+        // host switch onto it and discover a 400 "does not support tools" on
+        // their next turn — which is exactly how this went wrong before.
+        if (!candidate.supportsTools) {
+          return NextResponse.json(
+            { error: `${candidate.label} is configured as not supporting tool calling, which narration requires — pick another target` },
+            { status: 400 }
+          );
         }
         const previousTargetId = campaign.selectedChatTargetId || DEFAULT_CHAT_TARGET_ID;
         if (previousTargetId === targetId) {
@@ -452,7 +559,13 @@ export async function POST(request: Request) {
           from: previousTargetId,
           to: targetId,
           toLabel: target?.label,
-          toModel: target?.model
+          toModel: target?.model,
+          // Why the host switched. Falls back to the failure that prompted it,
+          // so the log explains the change even when the UI sent no reason.
+          reason: String(body.reason || "").trim().slice(0, 200) ||
+            (campaign.narrationFailure
+              ? `after ${campaign.narrationFailure.code || campaign.narrationFailure.status || "a failure"} on ${campaign.narrationFailure.targetId}`
+              : "host switch")
         });
         return NextResponse.json({ campaign });
       }
@@ -460,13 +573,11 @@ export async function POST(request: Request) {
       if (action === "transferHost") {
         // Transfer the SINGLE player-host/party-leader role to another joined
         // player. Exclusive transfer — the current host loses authority
-        // immediately. Only the current party leader may transfer. The live-TV
-        // hostToken system is separate and unaffected.
+        // immediately. Party-leader authority is enforced by the gate at the top
+        // of this handler. The live-TV hostToken system is separate and
+        // unaffected.
         const campaign = await getCampaign(campaignId);
         const playerId = String(body.playerId || "");
-        if (!campaign.partyLeaderId || campaign.partyLeaderId !== playerId) {
-          return NextResponse.json({ error: "Only the party leader can transfer the host role" }, { status: 403 });
-        }
         const targetPlayerId = String(body.targetPlayerId || "").trim();
         if (!targetPlayerId) {
           return NextResponse.json({ error: "targetPlayerId is required" }, { status: 400 });
@@ -497,6 +608,77 @@ export async function POST(request: Request) {
           toName: target.characterName || target.name
         });
         return NextResponse.json({ campaign });
+      }
+
+      if (action === "retryHousekeeping") {
+        // Manual housekeeping retry: clears the failure cooldown/budget and
+        // STARTS one sweep. Party-leader authority comes from the gate above.
+        // The sweep runs detached — it must never hold up the table — so this
+        // returns the pre-sweep status and the host refreshes to see the result.
+        const playerId = String(body.playerId || "");
+        const result = await retryHousekeepingNow(campaignId);
+        serverLog("API party", `Host ${playerId} manually retried housekeeping for campaign: ${campaignId} (started=${result.ran})`);
+        return NextResponse.json(result);
+      }
+
+      if (action === "retryFailedTurn") {
+        // Replay the exact turn that exhausted its retries, on whatever target
+        // is selected NOW. This is the other half of manual recovery: switching
+        // the model alone doesn't un-stick a turn the table already lost, and
+        // the composed action string can't be rebuilt from the restored choices
+        // (an exploration round folds every lock-in into one prompt), so it was
+        // preserved on campaign.narrationFailure.payload when the turn died.
+        //
+        // Never replays automatically and never re-runs a turn that succeeded:
+        // narrationFailure is cleared by any successful turn.
+        const campaign = await getCampaign(campaignId);
+        const playerId = String(body.playerId || "");
+        const failure = campaign.narrationFailure;
+        if (!failure?.payload) {
+          return NextResponse.json({ error: "There is no failed turn to retry" }, { status: 400 });
+        }
+        if (campaign.dmStatus) {
+          return NextResponse.json({ error: "The Weaver is already working — wait for this turn to finish" }, { status: 409 });
+        }
+        const { playerName, action: failedAction } = failure.payload;
+        const targetId = campaign.selectedChatTargetId || DEFAULT_CHAT_TARGET_ID;
+        serverLog("API party", `Host ${playerId} retrying the failed turn for campaign ${campaignId} on target ${targetId}`);
+        void logCampaignEvent(campaignId, "INFO", "Narration", "Failed turn retry requested", {
+          actorPlayerId: playerId,
+          target: targetId,
+          originalFailure: { at: failure.at, targetId: failure.targetId, code: failure.code, status: failure.status }
+        });
+        // Claim the retry while the lock is STILL HELD by dropping the payload.
+        // The turn itself runs detached (a slow provider must not time the HTTP
+        // request out), so without a claim two quick taps — or a phone and the
+        // TV together — would both pass the checks above and run the same turn
+        // twice. If this retry fails too, runDungeonMaster's catch writes a
+        // fresh failure with a fresh payload, so the host can try again.
+        campaign.narrationFailure = { ...failure, payload: undefined };
+        await saveCampaign(campaign);
+        // hiddenUserMessage: the player's message was already pushed to the
+        // transcript by the attempt that failed — pushing it again would
+        // duplicate the beat on the TV.
+        safeRelease();
+        (async () => {
+          const bgRelease = await getCampaignLock(campaignId).acquire();
+          try {
+            // The world may have moved while we waited for the lock: another
+            // turn may have started (or finished) in between. Re-check rather
+            // than talking over it.
+            const fresh = await getCampaign(campaignId);
+            if (fresh.dmStatus) {
+              serverLog("API party background", `Abandoned the failed-turn retry for ${campaignId} — another turn is already running`);
+              return;
+            }
+            await runDungeonMaster(campaignId, playerName, failedAction, { hiddenUserMessage: true });
+          } catch (err) {
+            serverError("API party background", `Retry of the failed turn also failed for campaign: ${campaignId}`, err);
+          } finally {
+            bgRelease();
+          }
+        })();
+        return NextResponse.json({ retrying: true, target: targetId });
       }
 
       return NextResponse.json({ error: "Unknown party action" }, { status: 400 });

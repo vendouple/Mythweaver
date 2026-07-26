@@ -160,11 +160,11 @@ export default function HostExperience({ campaignId, onExit }: { campaignId: str
       // With lock-ins pending the server resolves the round with whoever
       // committed; with none it rotates a split party's spotlight past the
       // idle group (and no-ops for an unsplit table).
-      api.party({ campaignId: campaign.id, action: "resolveRound", auto: true }).catch(() => {});
+      api.party({ campaignId: campaign.id, action: "resolveRound", auto: true, hostToken: tvToken }).catch(() => {});
     } else if (ts.mode === "combat") {
-      api.party({ campaignId: campaign.id, action: "skipTurn", auto: true }).catch(() => {});
+      api.party({ campaignId: campaign.id, action: "skipTurn", auto: true, hostToken: tvToken }).catch(() => {});
     }
-  }, [campaign, sessionState]);
+  }, [campaign, sessionState, tvToken]);
 
   // Presence backstop: only the TV polls unconditionally, so it periodically
   // asks the server to reconcile who's still connected — flipping timed-out
@@ -177,8 +177,8 @@ export default function HostExperience({ campaignId, onExit }: { campaignId: str
     const now = Date.now();
     if (now - sweepRef.current < 12000) return;
     sweepRef.current = now;
-    api.party({ campaignId: campaign.id, action: "sweepPresence" }).catch(() => {});
-  }, [campaign, storyStarted, sessionState]);
+    api.party({ campaignId: campaign.id, action: "sweepPresence", hostToken: tvToken }).catch(() => {});
+  }, [campaign, storyStarted, sessionState, tvToken]);
 
   // The Weaving's monotonic progress — phases ratchet, status changes nudge,
   // and the bar never regresses no matter how the raw dmPhase jumps around.

@@ -58,6 +58,24 @@ export function claimHostSession(campaignId: string, token: string) {
   if (token) hostSessions.set(campaignId, { token, lastSeenAt: Date.now() });
 }
 
+/**
+ * Whether this token may act as the campaign's TV/Host screen — used to
+ * authorize the stage controls and the TV's own telemetry on the party route.
+ *
+ * True when it IS the recorded session, when no session is recorded yet (a TV
+ * that just opened hasn't claimed one, and its first calls must not be
+ * rejected), and when the recorded rival has gone stale (a closed screen must
+ * not lock out the one now in the room). Deliberately permissive: this is a
+ * couch app on a LAN, and the point is that a party action carries *some* proof
+ * of which surface it came from, not that the token is a secret.
+ */
+export function isHostSessionToken(campaignId: string, token: string): boolean {
+  if (!token) return false;
+  const existing = hostSessions.get(campaignId);
+  if (!existing || existing.token === token) return true;
+  return Date.now() - existing.lastSeenAt >= HOST_SESSION_STALE_MS;
+}
+
 export function isHostHeartbeatActive(campaignId: string): boolean {
   const session = hostSessions.get(campaignId);
   return !!session && Date.now() - session.lastSeenAt < HOST_SESSION_STALE_MS;
@@ -524,15 +542,41 @@ function normalizeCampaign(raw: Partial<Campaign> & { suggestedActions?: unknown
     presenting: normalizePresenting((raw as any).presenting),
     storySummary: typeof raw.storySummary === "string" ? raw.storySummary.slice(0, 20_000) : undefined,
     housekeeping: (() => {
-      const h = raw.housekeeping as Partial<Campaign["housekeeping"]> | undefined;
+      const h = raw.housekeeping as Partial<NonNullable<Campaign["housekeeping"]>> | undefined;
       if (!h || typeof h !== "object") return undefined;
       return {
         consecutiveFailures: Math.max(0, Number(h.consecutiveFailures) || 0),
         lastAttemptAt: typeof h.lastAttemptAt === "string" ? h.lastAttemptAt : undefined,
         lastSuccessAt: typeof h.lastSuccessAt === "string" ? h.lastSuccessAt : undefined,
+        lastFailureAt: typeof h.lastFailureAt === "string" ? h.lastFailureAt : undefined,
         cooldownUntil: typeof h.cooldownUntil === "string" ? h.cooldownUntil : undefined,
         lastFailedFingerprint: typeof h.lastFailedFingerprint === "string" ? h.lastFailedFingerprint : undefined,
-        lastError: typeof h.lastError === "string" ? h.lastError.slice(0, 200) : undefined
+        lastReasons: Array.isArray(h.lastReasons) ? h.lastReasons.map(String).slice(0, 8) : undefined,
+        staleCount: Number.isFinite(Number(h.staleCount)) ? Math.max(0, Math.round(Number(h.staleCount))) : undefined,
+        targetModel: typeof h.targetModel === "string" ? h.targetModel.slice(0, 120) : undefined,
+        // Re-scrub on load: an error string persisted by an older build never
+        // went through the credential scrubber.
+        lastError: typeof h.lastError === "string" ? scrubLogText(h.lastError, 200) : undefined,
+        lastErrorCode: typeof h.lastErrorCode === "string" ? h.lastErrorCode.slice(0, 60) : undefined
+      };
+    })(),
+    narrationFailure: (() => {
+      const f = raw.narrationFailure as Partial<NonNullable<Campaign["narrationFailure"]>> | undefined;
+      if (!f || typeof f !== "object" || typeof f.message !== "string") return undefined;
+      const payload = f.payload && typeof f.payload === "object" ? f.payload : undefined;
+      return {
+        at: typeof f.at === "string" ? f.at : new Date().toISOString(),
+        targetId: typeof f.targetId === "string" && f.targetId.trim() ? f.targetId.trim() : "default",
+        status: Number.isFinite(Number(f.status)) ? Number(f.status) : undefined,
+        code: typeof f.code === "string" ? f.code.slice(0, 60) : undefined,
+        message: scrubLogText(f.message, 400),
+        step: Number.isFinite(Number(f.step)) ? Math.max(0, Math.round(Number(f.step))) : undefined,
+        payload: payload && typeof payload.action === "string" && payload.action.trim()
+          ? {
+              playerName: String(payload.playerName || "The Party"),
+              action: String(payload.action)
+            }
+          : undefined
       };
     })(),
     messages: Array.isArray(raw.messages) ? raw.messages : [],
@@ -779,6 +823,29 @@ export function endCampaign(
   campaign.pendingActions = {};
   for (const player of campaign.players) {
     campaign.playerActions[player.id] = [];
+  }
+  // Stand every location down. The campaign-level turnState cleared above is
+  // only the focused location's mirror, so without this a finished saga can
+  // still report "combat, round 4" at some other location — with a dead enemy
+  // holding the turn and lock-ins pending for a scene that no longer exists.
+  for (const location of campaign.locations || []) {
+    location.turnState = { mode: "exploration" };
+    location.pendingActions = {};
+  }
+  // Reconcile the NPC roster so the outro, the cast readout, and the saved
+  // campaign agree with each other. `canAct` is the enforced gate, `status` is
+  // free-text flavor, and mid-fight they drift apart: a foe drops to 0 HP (or a
+  // pooled group is wiped to zero) while its entry still reads as able. Nothing
+  // acts after the credits roll, so settle that here rather than leaving the
+  // final state self-contradictory.
+  for (const npc of campaign.storyCharacters) {
+    const hp = (npc.stats || []).find((stat) => stat.name.toUpperCase() === "HP");
+    const wipedGroup = npc.isGroup === true && npc.count === 0;
+    const downed = (hp !== undefined && hp.value <= 0) || wipedGroup;
+    if (!downed || npc.canAct === false) continue;
+    npc.canAct = false;
+    if (!npc.conditions?.length) npc.conditions = [wipedGroup ? "wiped out" : "dead"];
+    if (!npc.status) npc.status = wipedGroup ? "Wiped out" : "Dead";
   }
   safePushDisplayEvent(campaign, {
     type: "system",
@@ -1140,7 +1207,11 @@ export async function logCampaignDebug(campaignId: string, message: string) {
     await mkdir(dir, { recursive: true });
     const logPath = path.join(dir, "debug.log");
     const timestamp = new Date().toISOString();
-    await appendFile(logPath, `[${timestamp}] ${message}\n`, "utf8");
+    // Provider error bodies pass through here verbatim (e.g. "[ERROR] Dungeon
+    // Master error: API 401 {…}"), so this needs the same credential scrubbing
+    // as the structured log. Length is left alone — this IS the human-readable
+    // transcript and clamping it would gut its purpose.
+    await appendFile(logPath, `[${timestamp}] ${scrubLogText(message, Number.MAX_SAFE_INTEGER)}\n`, "utf8");
   } catch (err) {
     console.error("Failed to write campaign debug log:", err);
   }
@@ -1173,27 +1244,65 @@ export type CampaignLogCategory =
 const LOG_META_MAX_CHARS = 1200;
 const LOG_STRING_MAX_CHARS = 400;
 
+/**
+ * Credential-shaped substrings that must never reach debug.log or campaign.json.
+ * Key-NAME matching only protects values we hand over deliberately; providers
+ * routinely echo the offending request — headers and all — back inside an error
+ * message, so a failure string is a genuine exfiltration path and has to be
+ * scrubbed on its own contents.
+ */
+const SECRET_PATTERNS: RegExp[] = [
+  // Authorization: Bearer <token>
+  /\bbearer\s+[A-Za-z0-9._~+/=-]{8,}/gi,
+  // Provider-prefixed keys (sk-…, gsk_…, xai-…, hf_…)
+  /\b(?:sk|rk|gsk|xai|hf|pk|ak)[-_][A-Za-z0-9._-]{12,}\b/g,
+  // key: value / api_key=value / "authorization":"value".
+  // Only credential-SHAPED names: bare `secret` and `password` are deliberately
+  // absent, because narration is scrubbed through here too and "The secret: the
+  // Vault-of-Whispers lies below" is a story beat, not a leak. Values handed to
+  // the logger under a credential key name are still caught by name in
+  // redactLogValue; this pattern is for secrets embedded inside free text.
+  /\b(?:api[-_ ]?key|apikey|access[-_ ]?token|auth[-_ ]?token|authorization|client[-_ ]?secret|api[-_ ]?secret)\b["']?\s*[:=]\s*["']?[^\s"',}\]]{8,}/gi
+];
+
+/**
+ * Scrub credential-shaped text and clamp its length. Exported because provider
+ * error strings also land in campaign.json (campaign.housekeeping.lastError,
+ * the narration failure record) and are served to every controller from there —
+ * they must be scrubbed by exactly the same rules as debug.log, not by a second
+ * hand-rolled pass that will drift.
+ */
+export function scrubLogText(text: string, maxChars: number = LOG_STRING_MAX_CHARS): string {
+  let out = String(text ?? "");
+  for (const pattern of SECRET_PATTERNS) out = out.replace(pattern, "[redacted]");
+  // Any absolute URL inside the text loses its query string — that's where
+  // key-in-URL providers put the credential. The character class stops at JSON
+  // punctuation and quotes: `\S+` would run past the end of the URL and swallow
+  // the rest of a serialized object, and these lines are mostly JSON dumps.
+  out = out.replace(/https?:\/\/[^\s"'<>\\)\]},]+/gi, (match) => redactUrl(match));
+  return clampLogString(out, maxChars);
+}
+
+/** Clamp a single metadata string to the per-value budget. */
+function clampLogString(value: string, maxChars: number = LOG_STRING_MAX_CHARS): string {
+  return value.length > maxChars ? value.slice(0, maxChars) + `…(+${value.length - maxChars} chars)` : value;
+}
+
 function redactLogValue(value: unknown): unknown {
   if (value === null || value === undefined) return value;
-  if (typeof value === "string") {
-    const lower = value.toLowerCase();
-    if (lower.startsWith("bearer ") || lower.includes("api_key") || lower.includes("apikey")) {
-      return "[redacted]";
-    }
-    return value.length > LOG_STRING_MAX_CHARS
-      ? value.slice(0, LOG_STRING_MAX_CHARS) + `…(+${value.length - LOG_STRING_MAX_CHARS} chars)`
-      : value;
-  }
+  if (typeof value === "string") return scrubLogText(value);
   if (typeof value === "number" || typeof value === "boolean") return value;
   if (Array.isArray(value)) return value.map(redactLogValue);
   if (typeof value === "object") {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
       const keyLower = k.toLowerCase();
-      if (keyLower === "apikey" || keyLower === "api_key" || keyLower === "authorization" || keyLower === "token" || keyLower === "key" || keyLower === "secret") {
+      if (keyLower === "apikey" || keyLower === "api_key" || keyLower === "authorization" || keyLower === "token" || keyLower === "key" || keyLower === "secret" || keyLower === "password") {
         out[k] = "[redacted]";
       } else if (keyLower === "baseurl" || keyLower === "base_url" || keyLower === "url") {
-        out[k] = redactUrl(String(v ?? ""));
+        // Structured metadata IS clamped (unlike the free-form transcript), so
+        // put the length policy here rather than inside redactUrl.
+        out[k] = clampLogString(redactUrl(String(v ?? "")));
       } else {
         out[k] = redactLogValue(v);
       }
@@ -1203,13 +1312,28 @@ function redactLogValue(value: unknown): unknown {
   return value;
 }
 
+/**
+ * Strip credentials out of a URL: keep the origin and path (which is the useful
+ * diagnostic), replace every query-parameter value and any embedded userinfo.
+ * Providers that authenticate by `?key=` put the secret in exactly the part
+ * that used to be logged verbatim.
+ */
 function redactUrl(url: string): string {
+  const raw = String(url ?? "");
+  if (!raw) return raw;
   try {
-    if (!url) return url;
-    if (url.length > LOG_STRING_MAX_CHARS) return url.slice(0, LOG_STRING_MAX_CHARS) + "…";
-    return url;
+    const parsed = new URL(raw);
+    // Rebuilt by hand rather than via toString(): that percent-encodes the
+    // replacement markers (and anything else it dislikes), which turns a
+    // readable diagnostic line into noise. Length is the caller's business —
+    // logCampaignDebug deliberately does not clamp its transcript.
+    const user = parsed.username || parsed.password ? "redacted@" : "";
+    const query = Array.from(parsed.searchParams.keys()).map((key) => `${key}=[redacted]`).join("&");
+    return `${parsed.protocol}//${user}${parsed.host}${parsed.pathname}${query ? `?${query}` : ""}`;
   } catch {
-    return "[redacted]";
+    // Not an absolute URL (a bare path, or malformed). Drop any query string
+    // wholesale rather than guessing which parameter held the secret.
+    return raw.split("?")[0];
   }
 }
 
@@ -1228,10 +1352,26 @@ export async function logCampaignEvent(
     let metaStr = "";
     if (metadata && Object.keys(metadata).length) {
       try {
-        const redacted = redactLogValue(metadata);
+        const redacted = redactLogValue(metadata) as Record<string, unknown>;
         metaStr = " | " + JSON.stringify(redacted);
         if (metaStr.length > LOG_META_MAX_CHARS) {
-          metaStr = metaStr.slice(0, LOG_META_MAX_CHARS) + "…(truncated)";
+          // Slicing the serialized JSON leaves an unparseable tail and breaks
+          // the very format this log promises. Drop whole keys instead —
+          // cheapest first so the scalars that identify the event survive — and
+          // record which ones went.
+          const entries = Object.entries(redacted).sort(
+            (a, b) => (JSON.stringify(a[1]) || "").length - (JSON.stringify(b[1]) || "").length
+          );
+          const kept: Record<string, unknown> = {};
+          const dropped: string[] = [];
+          for (const [key, value] of entries) {
+            const candidate = { ...kept, [key]: value };
+            if ((" | " + JSON.stringify(candidate)).length <= LOG_META_MAX_CHARS) kept[key] = value;
+            else dropped.push(key);
+          }
+          if (dropped.length) kept._dropped = dropped.join(",");
+          const rebuilt = " | " + JSON.stringify(kept);
+          metaStr = rebuilt.length > LOG_META_MAX_CHARS ? ' | {"_truncated":true}' : rebuilt;
         }
       } catch {
         metaStr = " | [metadata serialize failed]";
