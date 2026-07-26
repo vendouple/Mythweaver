@@ -269,7 +269,7 @@ export const toolDefinitions: AquaToolDefinition[] = [
     type: "function",
     function: {
       name: "end_campaign",
-      description: "End the campaign NOW with a decisive result. Call when the story reaches a close — party dead, villain defeated, escape, stalemate, bittersweet resolution, or a deliberate cliffhanger. Can end EARLY (TPK, total failure, sudden victory). The MOMENT the whole party is down (every player at 0 HP / dead / dying / unconscious / incapacitated), you MUST call this the same turn — a downed party with no one able to act is a finished saga; do not keep narrating or wait for a prompt. Sets status to completed, plays the cinematic outro on the TV, and clears controller actions. After calling this, write a short final story[] epilogue then stop offering player choices.",
+      description: "End the campaign NOW with a decisive result. Call when the story reaches a close — party dead, villain defeated, escape, stalemate, bittersweet resolution, or a deliberate cliffhanger. Can end EARLY (TPK, total failure, sudden victory). The MOMENT the whole party is down (every player at 0 HP / dead / dying / unconscious / incapacitated), you MUST call this the same turn — a downed party with no one able to act is a finished saga; do not keep narrating or wait for a prompt. TIMING: this rolls the credits, so call it only once the closing scene is genuinely finished. Beats the ending still owes — a last line, the party's reaction, the reveal that makes it land — belong in THIS turn's story[], decided before you call this. Sets status to completed, plays the cinematic outro on the TV, and clears controller actions. After calling this, write a short final story[] epilogue then stop offering player choices.",
       parameters: {
         type: "object",
         required: ["kind", "title", "summary"],
@@ -323,7 +323,7 @@ export const toolDefinitions: AquaToolDefinition[] = [
     type: "function",
     function: {
       name: "start_combat",
-      description: "Enter SEQUENTIAL COMBAT: players act one at a time in initiative order, then the enemies act, then the round repeats. Call this when a fight begins. Outside combat the table is in free 'exploration' where everyone acts at once. Only the active player's controller is unlocked during combat.",
+      description: "Enter SEQUENTIAL COMBAT: players act one at a time in initiative order, then the enemies act, then the round repeats. Call this the moment a fight actually begins — an identified hostile attacks, fires, lunges, springs an ambush, or grapples someone. Do NOT call it for tension alone: a boss or dread mood, an alarm, a countdown, enemies approaching or hunting, a standoff, a spoken threat, or striking an environmental target that happens to have HP all stay in exploration. Enemies that are dead, disabled, or otherwise canAct:false never enter initiative. Outside combat the table is in free 'exploration' where everyone acts at once. Only the active player's controller is unlocked during combat.",
       parameters: {
         type: "object",
         properties: {
@@ -449,7 +449,7 @@ export const toolDefinitions: AquaToolDefinition[] = [
     type: "function",
     function: {
       name: "generate_image",
-      description: "Generate a cinematic scene background, a player portrait, or an NPC portrait. Scene images become the TV backdrop; portraits attach to the player (playerId) or NPC (npcName) they belong to.",
+      description: "Generate a cinematic scene background, a player portrait, or an NPC portrait. Scene images become the TV backdrop; portraits attach to the player (playerId) or NPC (npcName) they belong to. Framing is automatic: scenes are widescreen, portraits are tall. This returns IMMEDIATELY with {queued:true} and the picture arrives later on its own — never wait for it, and call it at most once per subject per turn (a repeat with the same prompt is ignored).",
       parameters: {
         type: "object",
         required: ["prompt"],
@@ -467,22 +467,98 @@ export const toolDefinitions: AquaToolDefinition[] = [
   }
 ];
 
-function queueImageGeneration(campaignId: string, args: Record<string, unknown>) {
+/**
+ * In-flight and recently-finished image jobs, keyed by campaign + kind +
+ * target + prompt fingerprint. The DM re-issues generate_image for the same
+ * subject more often than you'd think — a tool step retried, a turn re-run
+ * after a parse failure, or the model simply repeating itself — and each
+ * duplicate used to enqueue its own multi-minute provider job for a picture
+ * the table already has coming. A key stays here while its job runs and for a
+ * grace period after it succeeds, so an immediate repeat is answered from the
+ * map. Failed jobs drop their key straight away: asking again after a failure
+ * is legitimate.
+ */
+const IMAGE_JOB_DEDUP_TTL_MS = 5 * 60_000;
+const imageJobs = new Map<string, number>();
+
+/** Stable short hash of a prompt, insensitive to case and whitespace noise. */
+function imagePromptFingerprint(prompt: string): string {
+  const normalized = prompt.trim().toLowerCase().replace(/\s+/g, " ");
+  let hash = 0;
+  for (let i = 0; i < normalized.length; i += 1) {
+    hash = (hash * 31 + normalized.charCodeAt(i)) | 0;
+  }
+  return (hash >>> 0).toString(36);
+}
+
+/** Drop expired dedup keys. The map only ever holds a handful of entries. */
+function pruneImageJobs(now: number) {
+  for (const [key, at] of imageJobs) {
+    if (now - at > IMAGE_JOB_DEDUP_TTL_MS) imageJobs.delete(key);
+  }
+}
+
+function queueImageGeneration(campaignId: string, args: Record<string, unknown>): { queued: boolean; deduplicated: boolean } {
   const prompt = String(args.prompt || "").trim();
   const kind = args.kind === "portrait" ? "portrait" : "scene";
   const playerIdArg = String(args.playerId || "");
   const npcName = typeof args.npcName === "string" ? args.npcName.trim() : "";
+  const target = kind === "portrait" ? (playerIdArg || npcName || "unknown") : "scene";
+
+  const now = Date.now();
+  pruneImageJobs(now);
+  const jobKey = `${campaignId}|${kind}|${target.toLowerCase()}|${imagePromptFingerprint(prompt)}`;
+  if (imageJobs.has(jobKey)) {
+    void logCampaignEvent(campaignId, "INFO", "Image", "Image job deduplicated", {
+      kind,
+      target,
+      promptChars: prompt.length,
+      ageMs: now - (imageJobs.get(jobKey) || now)
+    });
+    return { queued: false, deduplicated: true };
+  }
+  imageJobs.set(jobKey, now);
 
   void logCampaignEvent(campaignId, "INFO", "Image", "Image job queued", {
     kind,
-    target: kind === "portrait" ? (playerIdArg || npcName || "unknown") : "scene",
+    target,
     promptChars: prompt.length
   });
 
   const startedAt = Date.now();
   void (async () => {
+    // Which backdrop the TV was showing when this job started. If something
+    // else has moved the backdrop on by the time this picture arrives, this one
+    // is late to a scene that has already been redressed.
+    //
+    // Deliberately NOT a turn count: housekeeping trims the transcript (so the
+    // count goes backwards), and combat's enemy phase, presence weaves and the
+    // TPK auto-end all add turns nobody asked for — counting them meant a scene
+    // image requested mid-combat could never reach the TV. Nor a scene-text
+    // comparison: narrate_turn sets currentScene at the END of the same turn
+    // that requested the image, so the text has always "changed" by then.
+    let backdropAtQueue: string | undefined;
     try {
-      const image = await generateImage(prompt);
+      backdropAtQueue = (await getCampaign(campaignId)).currentImageUrl;
+    } catch {
+      // Unreadable campaign here just means no staleness check — the apply
+      // path below re-reads it under the lock anyway.
+    }
+    try {
+      const image = await generateImage(prompt, {
+        // Scenes fill the TV; portraits fill tall phone/talisman frames.
+        aspect: kind === "portrait" ? "9:16" : "16:9",
+        onRetry: ({ attempt, retries, status, error }) => {
+          void logCampaignEvent(campaignId, "WARN", "Image", "Image provider retry", {
+            kind,
+            target,
+            attempt,
+            retries,
+            status,
+            error: error instanceof Error ? error.message : error ? String(error) : undefined
+          });
+        }
+      });
       void logCampaignEvent(campaignId, "INFO", "Image", "Image generated", {
         kind,
         durationMs: Date.now() - startedAt,
@@ -542,24 +618,50 @@ function queueImageGeneration(campaignId: string, args: Record<string, unknown>)
         const localUrl = await downloadAndSaveImage(campaignId, image.url, "backgrounds");
         const entry = { id: createId("image"), url: localUrl, prompt: image.prompt, createdAt: new Date().toISOString() };
         campaign.images.push(entry);
-        campaign.currentImageUrl = entry.url;
-        safePushDisplayEvent(campaign, { type: "scene", speaker: "Scene", content: "The TV scene background shifts." });
+        // A slow provider can hand back a backdrop minutes later (observed:
+        // 5-minute image jobs), by which time the scene director may already
+        // have dressed the stage for where the party actually is. Keep the
+        // picture in the gallery — the backdrop reconciler can still reuse it
+        // when the scene fits again — but don't yank the live TV back to a
+        // moment the table has left. Never suppressed when there's no backdrop
+        // yet: a first image always shows.
+        const stale = !!campaign.currentImageUrl && !!backdropAtQueue && campaign.currentImageUrl !== backdropAtQueue;
+        if (stale) {
+          void logCampaignEvent(campaignId, "WARN", "Image", "Scene image landed stale — kept in gallery only", {
+            durationMs: Date.now() - startedAt,
+            imageId: entry.id
+          });
+        } else {
+          campaign.currentImageUrl = entry.url;
+          safePushDisplayEvent(campaign, { type: "scene", speaker: "Scene", content: "The TV scene background shifts." });
+        }
         await saveCampaign(campaign);
       } finally {
         release();
       }
+      // Succeeded: restart the dedup grace period from completion, so an
+      // immediate repeat request is suppressed but a genuine re-ask later isn't.
+      imageJobs.set(jobKey, Date.now());
     } catch (err) {
       console.error(`[Tool Error] Image generation failed for ${campaignId}:`, err);
       const errMsg = err instanceof Error ? err.message : String(err);
       await logCampaignDebug(campaignId, `[Image] Generation failed after configured retries; skipped: ${errMsg}`);
       void logCampaignEvent(campaignId, "ERROR", "Image", "Image generation failed", {
         kind,
+        target,
         durationMs: Date.now() - startedAt,
         error: errMsg,
-        errorName: err instanceof Error ? err.name : undefined
+        errorName: err instanceof Error ? err.name : undefined,
+        status: (err as { status?: unknown })?.status,
+        code: (err as { code?: unknown })?.code
       });
+      // Failed: free the key so the model (or a later turn) may legitimately
+      // ask for this image again.
+      imageJobs.delete(jobKey);
     }
   })();
+
+  return { queued: true, deduplicated: false };
 }
 
 export async function runTool(campaignId: string, name: string, args: Record<string, unknown>) {
@@ -1013,7 +1115,16 @@ export async function runTool(campaignId: string, name: string, args: Record<str
       if (kind === "portrait" && !String(args.playerId || "") && !String(args.npcName || "")) {
         return { error: "Portraits need a target: pass playerId for a player, or npcName for an NPC/monster." };
       }
-      queueImageGeneration(campaignId, args);
+      const outcome = queueImageGeneration(campaignId, args);
+      if (outcome.deduplicated) {
+        return {
+          queued: true,
+          kind,
+          prompt,
+          deduplicated: true,
+          note: "An identical image for this subject is already generating. Do not request it again — continue the turn."
+        };
+      }
       return { queued: true, kind, prompt };
     }
 

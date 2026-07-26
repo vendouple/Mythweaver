@@ -547,12 +547,55 @@ export type Campaign = {
     lastAttemptAt?: string;
     /** ISO timestamp of the last successful sweep. */
     lastSuccessAt?: string;
+    /** ISO timestamp of the last FAILED sweep (lastAttemptAt alone can't tell a failure from a success). */
+    lastFailureAt?: string;
     /** ISO timestamp until which new sweeps are suppressed (cooldown). */
     cooldownUntil?: string;
-    /** Fingerprint of the input (message count, memory chars, NPC count) at the last failed attempt. */
+    /** Bucketed fingerprint of the input at the last failed attempt — see housekeepingReasons(). */
     lastFailedFingerprint?: string;
-    /** Redacted summary of the last failure (no secrets). */
+    /** Which thresholds triggered the last attempt, e.g. ["messages=61", "npcs=9"]. */
+    lastReasons?: string[];
+    /** How many stale messages the last attempt was going to fold into the summary. */
+    staleCount?: number;
+    /** The model the last attempt ran on (FAST_MODEL, or the chat model as fallback). */
+    targetModel?: string;
+    /** Scrubbed summary of the last failure (no secrets — see scrubLogText). */
     lastError?: string;
+    /** Classified provider error code for the last failure, e.g. "unsupported_tools". */
+    lastErrorCode?: string;
+  };
+  /**
+   * The last narration failure that exhausted its retries on the selected
+   * target, kept on campaign state so the host can SEE it and act on it — the
+   * table is deliberately left waiting for a manual model switch or retry
+   * rather than silently failing over to another provider. Cleared by the next
+   * successful turn. `payload` is what a "Retry failed turn" replays; it never
+   * contains provider credentials.
+   */
+  narrationFailure?: {
+    at: string;
+    /** The narration target alias the failure happened on ("default" when unset). */
+    targetId: string;
+    /** HTTP status, when the failure was an HTTP error. */
+    status?: number;
+    /** Classified code from classifyHttpError, e.g. "unsupported_tools". */
+    code?: string;
+    /** Scrubbed error summary safe to show the host. */
+    message: string;
+    /** How many DM tool-steps in the turn had got before it failed. */
+    step?: number;
+    /**
+     * Everything needed to re-issue the exact turn that failed. The player
+     * choices themselves are separately restored onto the campaign, but the
+     * composed action string is not recoverable from them (an exploration round
+     * folds every locked-in choice into one prompt), so it is preserved here.
+     * Absent for machine-generated turns (an auto-ending), which a host should
+     * not be offered a replay of.
+     */
+    payload?: {
+      playerName: string;
+      action: string;
+    };
   };
   messages: ChatMessage[];
   campaignType?: CampaignType;

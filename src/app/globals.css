@@ -1813,306 +1813,418 @@ button:disabled { cursor: default; opacity: 0.45; }
 }
 
 /* --------------------------------------------------------------------------
-   The Grand Outro — Three.js finale beneath a staged credits sequence
+   THE LAST REEL — the finale
+   --------------------------------------------------------------------------
+   Film grammar, not web grammar. The rules, and breaking any of them is how
+   this drifts back into looking like a settings screen:
+
+     · TWO VERBS ONLY — fade and cut. No blur-in, no slide-up, no scale-in.
+     · NO CARDS — no rounded corners, no backdrop-filter, no borders around
+       content. Film credits have hairlines and space, not boxes.
+     · NO GLOW ON TYPE — one text-shadow for legibility over picture, and that
+       is the whole budget.
+     · ONE TEXT BLOCK ON SCREEN AT A TIME, in one fixed slot that never
+       resizes. Nothing scrolls. Ever.
+     · NEVER TWO TYPE SIZES competing in one card.
    -------------------------------------------------------------------------- */
-.outro-theater {
+.reel {
   position: absolute;
   inset: 0;
   z-index: 40;
   overflow: hidden;
-  animation: outro-fade 2.4s ease both;
+  background: #000;
+  cursor: pointer;
+  /* --gate: aperture half-height as a fraction of the frame, driven per-frame
+     by the render loop so the matte can strike open and slam shut.
+     --jitter: horizontal gate jump, used only by the cliffhanger run-out. */
+  --gate: 0.42;
+  --jitter: 0;
 }
-@keyframes outro-fade {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-.outro-canvas {
+/* No opening CSS fade. The strike belongs to the picture — the gate opens and
+   the lamp hits the frame, both driven by the render loop — and wrapping that
+   in an `animation: … both` on the root meant anything that stopped the
+   animation from advancing (a backgrounded tab, a paused compositor) held the
+   entire finale at opacity 0 with no way back. */
+
+.reel-gate {
   position: absolute;
   inset: 0;
   pointer-events: none;
+  transform: translateX(calc(var(--jitter) * 1px));
 }
-.outro-canvas canvas {
+.reel-gate canvas {
   width: 100% !important;
   height: 100% !important;
   display: block;
 }
-.outro-scroll {
-  position: relative;
-  z-index: 2;
-  height: 100%;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  padding: clamp(1.5rem, 6vh, 3.5rem) 1.5rem;
-  scrollbar-width: thin;
+
+/* The aperture. Real mattes, driven by the render loop — they strike open on
+   the first beat and, for a defeat, shut the doorway down to a hairline. */
+.reel-matte {
+  position: absolute;
+  left: 0;
+  right: 0;
+  background: #000;
+  pointer-events: none;
+  z-index: 3;
+  height: calc((50% - var(--gate) * 100%));
 }
-.outro-content {
-  width: min(48rem, 94vw);
-  text-align: center;
+.reel-matte-top { top: 0; }
+.reel-matte-bottom { bottom: 0; }
+
+/* --------------------------------------------------------------------------
+   The band — every card lives in this ONE grid cell and cross-fades in place
+   -------------------------------------------------------------------------- */
+.reel-band {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc((50% - var(--gate) * 100%) + clamp(1.2rem, 4vh, 3rem));
+  z-index: 4;
+  display: grid;
+  place-items: end center;
+  min-height: min(34vh, 20rem);
+  padding: 0 clamp(1.25rem, 6vw, 5rem);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.45s linear;
+}
+.reel-band.is-lit { opacity: 1; }
+
+.reel-card {
+  grid-area: 1 / 1;
+  width: 100%;
+  max-width: 62rem;
   display: flex;
   flex-direction: column;
   align-items: center;
-  /* auto margins center short credits yet let tall ones scroll from the top,
-     instead of grid-centering clipping everything above the fold */
-  margin: auto;
-}
-.outro-rise {
+  text-align: center;
+  gap: 0.55rem;
   opacity: 0;
-  animation: outro-rise 1.5s cubic-bezier(0.2, 0.9, 0.3, 1) both;
+  visibility: hidden;
+  /* Fade only. The one concession to easing is a linear ramp, because a
+     projector's dissolve is linear. */
+  transition: opacity 0.5s linear, visibility 0s linear 0.5s;
 }
-@keyframes outro-rise {
-  from { opacity: 0; transform: translateY(28px); filter: blur(7px); }
-  to { opacity: 1; transform: translateY(0); filter: blur(0); }
+.reel-card.is-on {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 0.5s linear, visibility 0s linear 0s;
 }
-.outro-kicker {
+/* A defeat cuts. Nothing in a defeat is allowed to ease. */
+.reel-defeat .reel-card { transition: opacity 0s steps(1) 0s, visibility 0s linear 0s; }
+
+/* Small caps labels — the only thing allowed above a card. */
+.reel-label,
+.reel-kicker {
   font-family: var(--font-ui), system-ui, sans-serif;
-  font-size: 0.72rem;
-  letter-spacing: 0.34em;
+  font-size: clamp(0.6rem, 0.85vw, 0.72rem);
+  letter-spacing: 0.42em;
   text-transform: uppercase;
-  color: var(--faint);
-  margin-bottom: 0.9rem;
+  color: rgba(232, 220, 192, 0.42);
+  text-indent: 0.42em;
 }
-.outro-kind {
-  display: inline-block;
-  font-family: var(--font-ui), system-ui, sans-serif;
-  font-size: 0.76rem;
-  letter-spacing: 0.3em;
-  text-transform: uppercase;
-  color: var(--gold-bright);
-  border: 1px solid rgba(230, 195, 120, 0.4);
-  border-radius: 999px;
-  padding: 0.32rem 1rem;
-  margin-bottom: 1.1rem;
-  box-shadow: 0 0 24px rgba(230, 195, 120, 0.14);
-}
-.outro-defeat .outro-kind { color: #ff9a8c; border-color: rgba(255, 154, 140, 0.5); box-shadow: 0 0 24px rgba(255, 92, 60, 0.16); }
-.outro-escape .outro-kind { color: #9ee5ff; border-color: rgba(158, 229, 255, 0.5); box-shadow: 0 0 24px rgba(120, 210, 255, 0.16); }
-.outro-bittersweet .outro-kind { color: #e6d48a; border-color: rgba(230, 212, 138, 0.5); }
-.outro-draw .outro-kind { color: #d9dde6; border-color: rgba(217, 221, 230, 0.42); box-shadow: 0 0 24px rgba(217, 221, 230, 0.12); }
-.outro-cliffhanger .outro-kind { color: #d0a8ff; border-color: rgba(208, 168, 255, 0.5); box-shadow: 0 0 24px rgba(177, 140, 255, 0.2); }
-.outro-generic .outro-kind { color: #e8dcc0; border-color: rgba(232, 220, 192, 0.42); box-shadow: 0 0 24px rgba(232, 220, 192, 0.12); }
-.outro-title {
+
+.reel-kind {
   font-family: var(--font-display), serif;
-  font-size: clamp(2.2rem, 6.5vw, 4.2rem);
-  line-height: 1.08;
+  font-weight: 500;
+  font-size: clamp(1.1rem, 2.4vw, 1.9rem);
+  letter-spacing: 0.5em;
+  text-transform: uppercase;
+  text-indent: 0.5em;
+  color: var(--gold-bright);
+  text-shadow: 0 2px 20px rgba(0, 0, 0, 0.9);
+}
+
+/* --------------------------------------------------------------------------
+   The title — the one moment allowed to be enormous
+   -------------------------------------------------------------------------- */
+.reel-title {
+  font-family: var(--font-display), serif;
+  font-weight: 900;
+  text-transform: uppercase;
   color: var(--parchment);
-  margin: 0 0 1rem;
-  text-shadow: 0 0 42px rgba(230, 195, 120, 0.4), 0 2px 24px rgba(0, 0, 0, 0.8);
-}
-.outro-title.outro-rise { animation: outro-title-in 2.6s cubic-bezier(0.2, 0.85, 0.3, 1) both; }
-@keyframes outro-title-in {
-  from { opacity: 0; letter-spacing: 0.32em; filter: blur(10px); transform: scale(1.04); }
-  to { opacity: 1; letter-spacing: 0.02em; filter: blur(0); transform: scale(1); }
-}
-.outro-defeat .outro-title { text-shadow: 0 0 42px rgba(255, 92, 60, 0.35), 0 2px 24px rgba(0, 0, 0, 0.8); }
-.outro-escape .outro-title { text-shadow: 0 0 42px rgba(120, 210, 255, 0.35), 0 2px 24px rgba(0, 0, 0, 0.8); }
-.outro-draw .outro-title { text-shadow: 0 0 42px rgba(217, 221, 230, 0.3), 0 2px 24px rgba(0, 0, 0, 0.8); }
-.outro-cliffhanger .outro-title { text-shadow: 0 0 42px rgba(177, 140, 255, 0.45), 0 2px 24px rgba(0, 0, 0, 0.8); }
-.outro-summary {
-  font-family: var(--font-serif), serif;
-  font-style: italic;
-  font-size: clamp(1.02rem, 2vw, 1.28rem);
-  line-height: 1.7;
-  color: #e8dcc0;
-  margin: 0 auto 1.5rem;
-  max-width: 38rem;
-  text-shadow: 0 1px 14px rgba(0, 0, 0, 0.75);
-}
-.outro-highlights {
-  list-style: none;
-  margin: 0 auto 1.5rem;
-  padding: 0;
-  max-width: 32rem;
-  text-align: left;
-}
-.outro-highlights li {
-  position: relative;
-  padding: 0.35rem 0 0.35rem 1.25rem;
-  color: var(--mist);
-  font-size: 0.96rem;
-  line-height: 1.5;
-  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.8);
-}
-.outro-highlights li::before {
-  content: "⟡";
-  position: absolute;
-  left: 0;
-  color: var(--gold);
-  opacity: 0.75;
-}
-.outro-stats {
+  margin: 0;
+  line-height: 0.98;
+  letter-spacing: 0.01em;
+  text-wrap: balance;
+  text-shadow: 0 2px 28px rgba(0, 0, 0, 0.95);
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
-  gap: 0.65rem;
-  margin: 0 0 1.7rem;
-  max-width: 40rem;
+  gap: 0 0.28em;
 }
-.outro-stat {
-  min-width: 7.5rem;
-  padding: 0.7rem 1.05rem 0.6rem;
-  border: 1px solid rgba(232, 220, 192, 0.16);
-  border-radius: 12px;
-  background: rgba(6, 8, 14, 0.6);
-  backdrop-filter: blur(5px);
+/* Sized off a MEASURED word count, not off clamp() and hope. An AI-authored
+   twelve-word title is a certainty, not an edge case. */
+.reel-title[data-len="short"] { font-size: clamp(2.6rem, 8.4vw, 7rem); }
+.reel-title[data-len="mid"]   { font-size: clamp(2.1rem, 6.2vw, 5.2rem); }
+.reel-title[data-len="long"]  { font-size: clamp(1.5rem, 3.9vw, 3.2rem); letter-spacing: 0.03em; }
+
+/* Word-level reveal by opacity only — no blur, no translate. Those read as
+   web; a projector cannot do them. */
+.reel-word {
+  display: inline-block;
+  opacity: 0;
+}
+.reel-card-title.is-on .reel-word {
+  animation: reel-word-in 0.44s linear both;
+  animation-delay: calc(var(--i) * 0.085s + 0.12s);
+}
+@keyframes reel-word-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* --------------------------------------------------------------------------
+   Subtitles and intertitles — hard cut, never crossfade
+   -------------------------------------------------------------------------- */
+.reel-subtitle {
+  font-family: var(--font-serif), serif;
+  font-size: clamp(1.05rem, 2vw, 1.6rem);
+  line-height: 1.5;
+  color: #f0e8d6;
+  margin: 0;
+  max-width: 46rem;
+  text-wrap: pretty;
+  text-shadow: 0 2px 16px rgba(0, 0, 0, 0.95);
+}
+
+.reel-intertitle {
+  font-family: var(--font-serif), serif;
+  font-style: italic;
+  font-size: clamp(1.2rem, 2.6vw, 2.1rem);
+  line-height: 1.35;
+  color: var(--parchment);
+  margin: 0;
+  max-width: 42rem;
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.95);
+  animation: reel-cut-in 0.24s steps(2) both;
+}
+@keyframes reel-cut-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* --------------------------------------------------------------------------
+   The ledger — no cards. A hairline, a big number, a tiny label.
+   -------------------------------------------------------------------------- */
+.reel-ledger {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: clamp(1.1rem, 4vw, 3.2rem);
+}
+.reel-entry {
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
+  align-items: center;
+  gap: 0.28rem;
+  min-width: 6rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid rgba(232, 220, 192, 0.3);
+  opacity: 0;
+  animation: reel-word-in 0.4s linear both;
+  animation-delay: calc(var(--i) * 0.14s + 0.15s);
 }
-.outro-stat-value {
+.reel-entry-value {
   font-family: var(--font-display), serif;
-  font-size: 1.35rem;
-  line-height: 1.1;
+  font-weight: 700;
+  font-size: clamp(1.4rem, 3vw, 2.4rem);
+  line-height: 1;
   color: var(--gold-bright);
+  text-shadow: 0 2px 16px rgba(0, 0, 0, 0.9);
 }
-.outro-stat-label {
+.reel-entry-label {
   font-family: var(--font-ui), system-ui, sans-serif;
-  font-size: 0.62rem;
-  letter-spacing: 0.2em;
+  font-size: clamp(0.58rem, 0.8vw, 0.68rem);
+  letter-spacing: 0.24em;
   text-transform: uppercase;
-  color: var(--faint);
+  color: rgba(232, 220, 192, 0.5);
+  text-indent: 0.24em;
 }
-.outro-cast {
-  width: min(34rem, 92vw);
-  margin: 0 0 1.6rem;
+
+/* --------------------------------------------------------------------------
+   The cast — one hero holds the frame at a time
+   -------------------------------------------------------------------------- */
+.reel-cast {
   display: flex;
-  flex-direction: column;
-  gap: 0.7rem;
-}
-.outro-cast h3 {
-  font-family: var(--font-ui), system-ui, sans-serif;
-  font-size: 0.7rem;
-  letter-spacing: 0.26em;
-  text-transform: uppercase;
-  color: var(--faint);
-  margin: 0 0 0.2rem;
-  text-align: center;
-}
-/* One hero per credit card: portrait, name + player, epithet, fate, stat row. */
-.outro-cast-card {
-  display: flex;
-  gap: 0.85rem;
-  align-items: flex-start;
+  align-items: center;
+  gap: clamp(1rem, 2.5vw, 2rem);
   text-align: left;
-  padding: 0.7rem 0.85rem;
-  border: 1px solid rgba(232, 220, 192, 0.16);
-  border-radius: 14px;
-  background: rgba(6, 8, 14, 0.62);
-  backdrop-filter: blur(5px);
+  animation: reel-cut-in 0.3s steps(2) both;
 }
-.outro-cast-face {
+.reel-face {
   flex: 0 0 auto;
-  width: 3.1rem;
-  height: 3.1rem;
-  border-radius: 50%;
+  width: clamp(5rem, 9vw, 8rem);
+  height: clamp(5rem, 9vw, 8rem);
   overflow: hidden;
-  border: 2px solid rgba(232, 220, 192, 0.4);
   display: grid;
   place-items: center;
-  background: rgba(0, 0, 0, 0.4);
+  /* Backlit, not bordered: the seat colour is a rim of light behind the head,
+     which flatters a variable-quality AI portrait instead of framing it. */
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6), 0 0 38px -6px var(--seat);
+  background: #05060a;
 }
-.outro-cast-face img {
+.reel-face img {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  filter: contrast(1.08) saturate(0.82);
 }
-.outro-cast-glyph {
-  color: var(--gold);
-  opacity: 0.6;
-  font-size: 1.1rem;
+/* Composed as the design, not as a fallback: a struck blank with the hero's
+   initial over the campaign's own glyph. */
+.reel-face-blank {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  background: radial-gradient(circle at 50% 38%, rgba(232, 220, 192, 0.14), rgba(5, 6, 10, 0.9) 70%);
 }
-.outro-cast-body {
-  flex: 1 1 auto;
-  min-width: 0;
+.reel-face-initial {
+  font-family: var(--font-display), serif;
+  font-weight: 900;
+  font-size: clamp(1.8rem, 3.4vw, 3rem);
+  color: rgba(232, 220, 192, 0.85);
+  line-height: 1;
+}
+.reel-face-glyph {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: clamp(3.4rem, 6.4vw, 5.6rem);
+  color: var(--seat);
+  opacity: 0.2;
+}
+.reel-cast-lines {
   display: flex;
   flex-direction: column;
-  gap: 0.22rem;
+  gap: 0.2rem;
+  min-width: 0;
 }
-.outro-cast-heading {
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 0.55rem;
+.reel-cast-name {
+  font-family: var(--font-display), serif;
+  font-weight: 700;
+  font-size: clamp(1.3rem, 2.8vw, 2.2rem);
+  line-height: 1.1;
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.95);
 }
-.outro-cast-character {
-  font-family: var(--font-serif), serif;
-  font-size: 1.08rem;
-}
-.outro-cast-player {
-  color: var(--faint);
-  font-size: 0.8rem;
-}
-.outro-cast-epithet {
-  font-family: var(--font-ui), system-ui, sans-serif;
-  font-size: 0.66rem;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--gold);
-  opacity: 0.9;
-}
-.outro-cast-fate {
-  margin: 0.1rem 0 0;
+.reel-cast-epithet {
   font-family: var(--font-serif), serif;
   font-style: italic;
-  font-size: 0.9rem;
-  line-height: 1.5;
-  color: #d9d2c0;
+  font-size: clamp(0.95rem, 1.6vw, 1.25rem);
+  color: rgba(232, 220, 192, 0.78);
 }
-.outro-cast-stats {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem 0.9rem;
-  margin-top: 0.35rem;
-}
-.outro-cast-stat {
-  display: flex;
-  align-items: baseline;
-  gap: 0.35rem;
-}
-.outro-cast-stat-value {
-  font-family: var(--font-display), serif;
-  font-size: 0.95rem;
-  color: var(--gold-bright);
-}
-.outro-cast-stat-label {
+.reel-cast-player {
   font-family: var(--font-ui), system-ui, sans-serif;
-  font-size: 0.58rem;
-  letter-spacing: 0.16em;
+  font-size: clamp(0.58rem, 0.8vw, 0.68rem);
+  letter-spacing: 0.28em;
   text-transform: uppercase;
-  color: var(--faint);
+  color: rgba(232, 220, 192, 0.4);
+  text-indent: 0.28em;
+  margin-top: 0.15rem;
 }
-.outro-fin {
+.reel-cast-fate {
+  font-family: var(--font-serif), serif;
+  font-size: clamp(0.92rem, 1.5vw, 1.15rem);
+  line-height: 1.45;
+  color: rgba(232, 220, 192, 0.72);
+  margin: 0.3rem 0 0;
+  max-width: 34rem;
+}
+
+/* --------------------------------------------------------------------------
+   FIN
+   -------------------------------------------------------------------------- */
+.reel-fin {
   font-family: var(--font-display), serif;
-  font-size: 1.05rem;
-  letter-spacing: 0.36em;
-  text-indent: 0.36em;
-  color: var(--gold);
-  margin: 0.6rem 0 1.4rem;
+  font-weight: 500;
+  font-size: clamp(1.2rem, 2.6vw, 2.1rem);
+  letter-spacing: 0.62em;
+  text-indent: 0.62em;
+  text-transform: uppercase;
+  color: rgba(232, 220, 192, 0.9);
+  text-shadow: 0 2px 22px rgba(0, 0, 0, 0.95);
 }
-.outro-fin.outro-rise {
-  animation:
-    outro-rise 1.5s cubic-bezier(0.2, 0.9, 0.3, 1) both,
-    outro-fin-glow 3.8s ease-in-out infinite;
+/* The cliffhanger's card never quite settles — the lamp is already failing. */
+.reel-cliffhanger .reel-fin { animation: reel-gutter 5.2s steps(1) infinite; }
+@keyframes reel-gutter {
+  0%, 84%, 100% { opacity: 0.9; }
+  86% { opacity: 0.2; }
+  88% { opacity: 0.9; }
+  92% { opacity: 0.35; }
+  94% { opacity: 0.9; }
 }
-@keyframes outro-fin-glow {
-  0%, 100% { text-shadow: 0 0 12px rgba(230, 195, 120, 0.25); }
-  50% { text-shadow: 0 0 34px rgba(230, 195, 120, 0.7); }
+
+/* --------------------------------------------------------------------------
+   Controls — present, unobtrusive, never competing with the picture
+   -------------------------------------------------------------------------- */
+.reel-skip,
+.reel-leave {
+  position: absolute;
+  z-index: 6;
+  font-family: var(--font-ui), system-ui, sans-serif;
+  font-size: 0.66rem;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  text-indent: 0.28em;
+  color: rgba(232, 220, 192, 0.42);
+  background: none;
+  border: none;
+  padding: 0.6rem 0.9rem;
+  cursor: pointer;
+  transition: color 0.3s linear;
 }
-.outro-cliffhanger .outro-fin { color: #d0a8ff; }
-.outro-cliffhanger .outro-fin.outro-rise {
-  animation:
-    outro-rise 1.5s cubic-bezier(0.2, 0.9, 0.3, 1) both,
-    outro-cliff-flicker 4.6s steps(1) infinite;
+.reel-skip:hover,
+.reel-leave:hover { color: var(--parchment); }
+.reel-skip {
+  right: clamp(0.6rem, 2vw, 1.6rem);
+  bottom: clamp(0.6rem, 2vh, 1.4rem);
 }
-@keyframes outro-cliff-flicker {
-  0%, 100% { opacity: 1; }
-  87% { opacity: 1; }
-  89% { opacity: 0.25; }
-  91% { opacity: 1; }
-  94% { opacity: 0.4; }
-  96% { opacity: 1; }
+.reel-leave {
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: clamp(0.8rem, 3vh, 2rem);
+  animation: reel-word-in 1.2s linear both;
+  animation-delay: 1.4s;
 }
-.outro-leave { min-width: 12rem; }
+
+@media (max-width: 720px) {
+  .reel-band {
+    min-height: min(46vh, 22rem);
+    place-items: center center;
+    bottom: calc((50% - var(--gate) * 100%) + 0.8rem);
+  }
+  .reel-cast {
+    flex-direction: column;
+    text-align: center;
+    gap: 0.7rem;
+  }
+  .reel-cast-fate { text-align: center; }
+  .reel-title[data-len="short"] { font-size: clamp(2.2rem, 11vw, 3.4rem); }
+  .reel-title[data-len="mid"]   { font-size: clamp(1.8rem, 9vw, 2.8rem); }
+  .reel-title[data-len="long"]  { font-size: clamp(1.3rem, 6.4vw, 2rem); }
+}
+
+/* Reduced motion: the reel still cuts between cards, but nothing animates
+   within them and the picture is a single rendered still. */
+@media (prefers-reduced-motion: reduce) {
+  .reel,
+  .reel-card,
+  .reel-word,
+  .reel-entry,
+  .reel-intertitle,
+  .reel-cast,
+  .reel-leave,
+  .reel-cliffhanger .reel-fin {
+    animation: none !important;
+    transition: none !important;
+    opacity: 1;
+  }
+  .reel-card { visibility: hidden; opacity: 0; }
+  .reel-card.is-on { visibility: visible; opacity: 1; }
+}
 
 /* Debug-only full-screen Three.js scene previews */
 .debug-scene-overlay {

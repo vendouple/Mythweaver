@@ -122,6 +122,14 @@ export async function POST(request: Request) {
     }
   } catch (error) {
     serverError("API chat", `Error processing chat request for campaign: ${campaignId}`, error);
+    // Players get to see WHAT broke — never the provider's raw response body.
+    // A failed completion's message is `API 401: {…}`, and providers routinely
+    // echo the offending request back inside it, headers included; that string
+    // used to be written straight into a display event on the TV and every
+    // phone. The full text stays in the server console and debug.log.
+    const status = typeof (error as { status?: unknown })?.status === "number" ? (error as { status: number }).status : undefined;
+    const code = typeof (error as { code?: unknown })?.code === "string" ? (error as { code: string }).code : undefined;
+    const detail = [status ? `HTTP ${status}` : null, code].filter(Boolean).join(" ");
     if (campaignId) {
       try {
         const campaign = await getCampaign(campaignId);
@@ -133,13 +141,16 @@ export async function POST(request: Request) {
           type: "system",
           speaker: "DM Error",
           playerId: player?.id,
-          content: `${speaker}'s action couldn't be resolved (the storyteller stumbled). Your previous choices have been restored — try again. ${error instanceof Error ? error.message : "Unknown chat error"}`
+          content: `${speaker}'s action couldn't be resolved (the storyteller stumbled${detail ? ` — ${detail}` : ""}). Your previous choices have been restored. The party leader can switch the narration model or retry the turn from the Host tab.`
         });
         await saveCampaign(campaign);
       } catch (saveError) {
         serverError("API chat", `Failed to persist DM error event for campaign: ${campaignId}`, saveError);
       }
     }
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Unknown chat error" }, { status: 500 });
+    return NextResponse.json(
+      { error: `The storyteller stumbled${detail ? ` (${detail})` : ""} — your choices were restored. The host can switch models or retry from the Host tab.` },
+      { status: 500 }
+    );
   }
 }

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { DisplayEvent } from "@/lib/campaign/types";
-import { api, accentColor, clearSeat, createActionId, StoredSeat, useCampaignPoll } from "@/lib/client/api";
+import { api, accentColor, clearSeat, createActionId, StoredSeat, useCampaignPoll, type ChatTargetOption, type HousekeepingStatus, type NarrationFailure } from "@/lib/client/api";
 import { playSfx } from "@/lib/client/sfx";
 import { renderInline, renderMarkdown } from "@/lib/client/markup";
 import { ACCENT_THEMES, applyAccent, currentAccent, initAccent } from "@/lib/client/theme";
@@ -81,14 +81,20 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
   const [accent, setAccent] = useState("gold");
   const diceSeenRef = useRef<Set<string> | null>(null);
 
-  // Director (party-leader-only) controls: whisper, model switch, host transfer.
+  // Director (party-leader-only) controls: whisper, model switch, host transfer,
+  // housekeeping recovery.
   const [sway, setSway] = useState("");
   const [swayBusy, setSwayBusy] = useState(false);
-  const [chatTargets, setChatTargets] = useState<Array<{ id: string; alias: string; label: string; model: string }>>([]);
+  const [chatTargets, setChatTargets] = useState<ChatTargetOption[]>([]);
   const [selectedTargetId, setSelectedTargetId] = useState<string>("");
   const [switchBusy, setSwitchBusy] = useState(false);
   const [transferTargetId, setTransferTargetId] = useState<string>("");
   const [transferBusy, setTransferBusy] = useState(false);
+  const [housekeeping, setHousekeeping] = useState<HousekeepingStatus | null>(null);
+  const [housekeepingBusy, setHousekeepingBusy] = useState(false);
+  const [narrationFailure, setNarrationFailure] = useState<NarrationFailure | null>(null);
+  const [targetConfigured, setTargetConfigured] = useState(true);
+  const [retryTurnBusy, setRetryTurnBusy] = useState(false);
   const [directorMsg, setDirectorMsg] = useState<string | null>(null);
 
   useEffect(() => {
@@ -229,7 +235,7 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
     if (!campaign || sending) return;
     setSending(true);
     try {
-      await api.party({ campaignId: campaign.id, action: "resolveRound" });
+      await api.party({ campaignId: campaign.id, action: "resolveRound", playerId: seat.playerId });
       await refresh();
     } catch (err) {
       setSendError(err instanceof Error ? err.message : "Could not resolve the round.");
@@ -261,24 +267,39 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
     onLeave();
   };
 
-  // Director controls (party leader only) — load targets when the host tab opens.
+  // Director controls (party leader only) — load targets, the outstanding
+  // narration failure, and the housekeeping sweep state when the host tab
+  // opens. Re-read whenever the Weaver goes idle too: a turn that dies while
+  // the leader is sitting on this tab has to surface without them reopening it,
+  // since the whole design is that the table WAITS for a host decision.
+  const campaignId = campaign?.id;
   useEffect(() => {
-    if (!isLeader || tab !== "director" || !campaign) return;
+    if (!isLeader || tab !== "director" || !campaignId) return;
     let cancelled = false;
-    api.listChatTargets(campaign.id).then((res) => {
+    api.listChatTargets(campaignId).then((res) => {
       if (cancelled) return;
       setChatTargets(res.targets);
-      setSelectedTargetId(res.selectedChatTargetId);
+      // Seed the dropdown only while it's empty. This refetch also runs whenever
+      // the Weaver goes idle, and overwriting the value here would silently
+      // throw away a selection the leader had picked but not applied yet — then
+      // "Apply" would report success having changed nothing.
+      setSelectedTargetId((previous) => previous || res.selectedChatTargetId);
+      setTargetConfigured(res.selectedTargetConfigured !== false);
+      setNarrationFailure(res.narrationFailure || null);
+    }).catch(() => {});
+    api.housekeepingStatus(campaignId).then((res) => {
+      if (cancelled) return;
+      setHousekeeping(res.status);
     }).catch(() => {});
     return () => { cancelled = true; };
-  }, [isLeader, tab, campaign?.id]);
+  }, [isLeader, tab, campaignId, weaving]);
 
   const sendSway = async () => {
     if (!campaign || !sway.trim()) return;
     setSwayBusy(true);
     setDirectorMsg(null);
     try {
-      await api.party({ campaignId: campaign.id, action: "sway", guidance: sway.trim() });
+      await api.party({ campaignId: campaign.id, action: "sway", guidance: sway.trim(), playerId: seat.playerId });
       setSway("");
       setDirectorMsg("Whisper sent.");
     } catch (err) {
@@ -293,13 +314,40 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
     setSwitchBusy(true);
     setDirectorMsg(null);
     try {
-      await api.switchModel(campaign.id, seat.playerId, selectedTargetId);
+      await api.switchModel(
+        campaign.id,
+        seat.playerId,
+        selectedTargetId,
+        narrationFailure ? `host switch after ${narrationFailure.code || narrationFailure.status || "a failure"} on ${narrationFailure.targetId}` : "host switch"
+      );
       await refresh();
-      setDirectorMsg("Narration target updated.");
+      setDirectorMsg(
+        narrationFailure?.canRetry
+          ? "Narration target updated. Retry the failed turn to pick the story back up."
+          : "Narration target updated — the next turn uses it."
+      );
     } catch (err) {
       setDirectorMsg(err instanceof Error ? err.message : "Could not switch the narration target.");
     } finally {
       setSwitchBusy(false);
+    }
+  };
+
+  // Replay the exact turn that failed, on whatever target is selected now.
+  // Nothing retries on its own — the table deliberately waits for this.
+  const retryFailedTurn = async () => {
+    if (!campaign) return;
+    setRetryTurnBusy(true);
+    setDirectorMsg(null);
+    try {
+      const res = await api.retryFailedTurn(campaign.id, seat.playerId);
+      setNarrationFailure(null);
+      await refresh();
+      setDirectorMsg(`The Weaver is retrying the turn on ${res.target}…`);
+    } catch (err) {
+      setDirectorMsg(err instanceof Error ? err.message : "Could not retry the failed turn.");
+    } finally {
+      setRetryTurnBusy(false);
     }
   };
 
@@ -317,6 +365,33 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
       setDirectorMsg(err instanceof Error ? err.message : "Could not transfer the host role.");
     } finally {
       setTransferBusy(false);
+    }
+  };
+
+  // Manual memory-housekeeping retry: clears the failure cooldown/budget and
+  // STARTS one sweep. The sweep itself runs detached on the server — it must
+  // never hold up the table — so this returns as soon as it has kicked off and
+  // the result shows up the next time the status is read.
+  const retryHousekeeping = async () => {
+    if (!campaign) return;
+    setHousekeepingBusy(true);
+    setDirectorMsg(null);
+    try {
+      const res = await api.retryHousekeeping(campaign.id, seat.playerId);
+      setHousekeeping(res.status);
+      setDirectorMsg(
+        !res.status.configured
+          ? "Housekeeping is off — no fast model is configured."
+          : res.status.sweeping && !res.ran
+            ? "A sweep is already running — give it a moment."
+            : !res.ran
+              ? "Nothing to sweep right now."
+              : "Sweep started — it runs in the background. Reopen this tab to see the result."
+      );
+    } catch (err) {
+      setDirectorMsg(err instanceof Error ? err.message : "Could not start the memory sweep.");
+    } finally {
+      setHousekeepingBusy(false);
     }
   };
 
@@ -740,18 +815,48 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
               {swayBusy ? "Whispering…" : "✦ Whisper"}
             </button>
 
+            {narrationFailure ? (
+              <>
+                <span className="director-label">Narration failed</span>
+                <p className="panel-hint small">
+                  The tale stalled on <strong>{narrationFailure.targetId}</strong>
+                  {narrationFailure.step ? ` at step ${narrationFailure.step}` : ""}
+                  {narrationFailure.status ? ` — HTTP ${narrationFailure.status}` : ""}
+                  {narrationFailure.code ? ` (${narrationFailure.code})` : ""}.
+                  <br />
+                  {narrationFailure.message}
+                  <br />
+                  Nothing switched itself. {chatTargets.length > 1 ? "Pick another model below if this one is broken, then retry." : "Retry, or fix the provider."}
+                </p>
+                {narrationFailure.canRetry ? (
+                  <button className="oracle-button" disabled={retryTurnBusy || weaving} onClick={retryFailedTurn}>
+                    {retryTurnBusy ? "Retrying…" : "↻ Retry the failed turn"}
+                  </button>
+                ) : (
+                  <p className="panel-hint small">
+                    {weaving ? "The Weaver is working — wait for this turn to finish." : "This turn can't be replayed; the party can simply act again."}
+                  </p>
+                )}
+              </>
+            ) : null}
+
             {chatTargets.length > 1 ? (
               <>
                 <span className="director-label">Narration model</span>
-                <p className="panel-hint small">Switch after a provider failure. The next turn uses the selected target.</p>
+                <p className="panel-hint small">
+                  Switch after a provider failure. The next turn uses the selected target.
+                  {!targetConfigured ? (
+                    <><br />⚠ This campaign is pinned to <strong>{selectedTargetId}</strong>, which is no longer configured on the server — narration is running on the default target.</>
+                  ) : null}
+                </p>
                 <select
                   className="field"
                   value={selectedTargetId}
                   onChange={(event) => setSelectedTargetId(event.target.value)}
                 >
                   {chatTargets.map((target) => (
-                    <option key={target.id} value={target.id}>
-                      {target.label} ({target.model})
+                    <option key={target.id} value={target.id} disabled={target.supportsTools === false}>
+                      {target.label} · {target.alias} ({target.model}){target.supportsTools === false ? " — no tool calling" : ""}
                     </option>
                   ))}
                 </select>
@@ -760,6 +865,38 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
                 </button>
               </>
             ) : null}
+
+            <span className="director-label">Memory housekeeping</span>
+            <p className="panel-hint small">
+              {!housekeeping ? "Loading…" : !housekeeping.configured ? (
+                <>No fast model configured — housekeeping is off.</>
+              ) : (
+                <>
+                  {housekeeping.pending
+                    ? housekeeping.running
+                      ? "A summary sweep is due and will run after this turn."
+                      : housekeeping.skipReason === "cooldown"
+                        ? `Sweep paused (cooldown until ${housekeeping.skipUntil ? new Date(housekeeping.skipUntil).toLocaleTimeString() : "later"}).`
+                        : housekeeping.skipReason === "failure_budget"
+                          ? `Sweep paused after ${housekeeping.consecutiveFailures} consecutive failures.`
+                          : "A summary sweep is due."
+                    : "Nothing to sweep right now."}
+                  {housekeeping.lastSuccessAt ? (
+                    <><br />Last sweep: {new Date(housekeeping.lastSuccessAt).toLocaleString()}</>
+                  ) : null}
+                  {housekeeping.lastError ? (
+                    <><br />Last error: {housekeeping.lastError}</>
+                  ) : null}
+                </>
+              )}
+            </p>
+            <button
+              className="ghost-button"
+              disabled={housekeepingBusy || !housekeeping?.configured || !housekeeping?.pending || !!housekeeping?.sweeping}
+              onClick={retryHousekeeping}
+            >
+              {housekeepingBusy ? "Starting…" : housekeeping?.sweeping ? "Sweeping…" : "⟳ Retry housekeeping now"}
+            </button>
 
             <span className="director-label">Transfer host role</span>
             <p className="panel-hint small">Hand the party-leader role to another active player. You lose host authority immediately.</p>
