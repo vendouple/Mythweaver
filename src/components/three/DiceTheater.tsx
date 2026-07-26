@@ -40,70 +40,303 @@ const OUTCOME_LABELS: Record<DiceOutcome, string> = {
 /* Textures                                                            */
 /* ------------------------------------------------------------------ */
 
-/** 5x4 atlas of engraved gold numerals, one cell per d20 face. */
+/**
+ * 5x4 atlas of engraved numerals, one cell per d20 face.
+ *
+ * The old atlas was a flat slate rectangle with a glowing numeral floating in
+ * it, so every face looked like a screen rather than a surface. This one builds
+ * an actual die face: a stone triangle inset inside the cell (the triangle
+ * matters — the UVs are triangular, so a rectangular design bled across the
+ * bevels), a brushed radial sheen, a chamfer highlight on the two upper edges
+ * and shadow on the lower, and the numeral CUT INTO it — dark incision first,
+ * then a bright rim offset up-left, which is how engraving reads under a key
+ * light. The 20 and the 1 get extra treatment so a crit is unmistakable.
+ */
 function makeD20Atlas(accent: string) {
   const size = 1024;
   const cell = size / 5;
+  const cellH = size / 5;
   const canvas = document.createElement("canvas");
   canvas.width = size;
-  canvas.height = Math.ceil(size * 4 / 5);
+  canvas.height = Math.ceil(cellH * 4);
   const ctx = canvas.getContext("2d")!;
-  ctx.fillStyle = "#10141f";
+  ctx.fillStyle = "#070a11";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   for (let value = 1; value <= 20; value += 1) {
     const col = (value - 1) % 5;
     const row = Math.floor((value - 1) / 5);
-    const cx = col * cell + cell / 2;
-    const cy = row * cell + cell * 0.56;
+    const x0 = col * cell;
+    const y0 = row * cellH;
+    const cx = x0 + cell / 2;
+    const cy = y0 + cellH * 0.58;
+    const isTop = value === 20;
+    const isBottom = value === 1;
 
-    const glow = ctx.createRadialGradient(cx, cy, 4, cx, cy, cell * 0.42);
-    glow.addColorStop(0, "rgba(230, 195, 120, 0.28)");
-    glow.addColorStop(1, "rgba(230, 195, 120, 0)");
-    ctx.fillStyle = glow;
-    ctx.fillRect(col * cell, row * cell, cell, cell);
+    ctx.save();
+    // Clip to the face's triangle, apex up — matches the UV layout exactly.
+    ctx.beginPath();
+    ctx.moveTo(cx, y0 + cellH * 0.04);
+    ctx.lineTo(x0 + cell * 0.97, y0 + cellH * 0.96);
+    ctx.lineTo(x0 + cell * 0.03, y0 + cellH * 0.96);
+    ctx.closePath();
+    ctx.clip();
 
-    ctx.font = `700 ${Math.round(cell * 0.46)}px Cinzel, 'Times New Roman', serif`;
+    // Stone body: a vertical gradient so the face has a lit top and dark base.
+    const body = ctx.createLinearGradient(0, y0, 0, y0 + cellH);
+    if (isTop) {
+      body.addColorStop(0, "#3b3320");
+      body.addColorStop(1, "#171308");
+    } else if (isBottom) {
+      body.addColorStop(0, "#3a1a1c");
+      body.addColorStop(1, "#150809");
+    } else {
+      body.addColorStop(0, "#232a3c");
+      body.addColorStop(1, "#0c1018");
+    }
+    ctx.fillStyle = body;
+    ctx.fillRect(x0, y0, cell, cellH);
+
+    // Brushed sheen sweeping off the upper-left, as if from the key light.
+    const sheen = ctx.createRadialGradient(
+      x0 + cell * 0.34, y0 + cellH * 0.3, cell * 0.03,
+      x0 + cell * 0.34, y0 + cellH * 0.3, cell * 0.8
+    );
+    sheen.addColorStop(0, "rgba(255,255,255,0.13)");
+    sheen.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = sheen;
+    ctx.fillRect(x0, y0, cell, cellH);
+
+    // Fine speckle: keeps the stone from looking like flat vector art.
+    ctx.globalAlpha = 0.05;
+    for (let s = 0; s < 90; s += 1) {
+      const sx = x0 + ((s * 37) % 100) / 100 * cell;
+      const sy = y0 + ((s * 61) % 100) / 100 * cellH;
+      ctx.fillStyle = s % 3 === 0 ? "#ffffff" : "#000000";
+      ctx.fillRect(sx, sy, 2.5, 2.5);
+    }
+    ctx.globalAlpha = 1;
+
+    // Chamfer: the bevel that every real die has where the faces meet.
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    ctx.moveTo(x0 + cell * 0.06, y0 + cellH * 0.93);
+    ctx.lineTo(cx, y0 + cellH * 0.08);
+    ctx.lineTo(x0 + cell * 0.94, y0 + cellH * 0.93);
+    ctx.strokeStyle = "rgba(255,255,255,0.16)";
+    ctx.lineWidth = cell * 0.035;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x0 + cell * 0.06, y0 + cellH * 0.93);
+    ctx.lineTo(x0 + cell * 0.94, y0 + cellH * 0.93);
+    ctx.strokeStyle = "rgba(0,0,0,0.55)";
+    ctx.lineWidth = cell * 0.045;
+    ctx.stroke();
+
+    // An inlaid rim line, offset in from the chamfer — the maker's border.
+    ctx.beginPath();
+    ctx.moveTo(cx, y0 + cellH * 0.2);
+    ctx.lineTo(x0 + cell * 0.83, y0 + cellH * 0.86);
+    ctx.lineTo(x0 + cell * 0.17, y0 + cellH * 0.86);
+    ctx.closePath();
+    ctx.strokeStyle = isTop || isBottom ? `${accent}55` : "rgba(190,205,235,0.16)";
+    ctx.lineWidth = cell * 0.012;
+    ctx.stroke();
+
+    // The numeral, ENGRAVED: a dark cut, then a light rim offset up-left.
+    const label = String(value);
+    const fontSize = Math.round(cellH * (label.length > 1 ? 0.34 : 0.4));
+    ctx.font = `700 ${fontSize}px Cinzel, 'Times New Roman', serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.shadowColor = accent;
-    ctx.shadowBlur = 18;
-    ctx.fillStyle = accent;
-    ctx.fillText(String(value), cx, cy);
+    // Cut shadow, pushed down-right into the stone.
+    ctx.fillStyle = "rgba(0,0,0,0.85)";
+    ctx.fillText(label, cx + fontSize * 0.035, cy + fontSize * 0.04);
+    // Bright rim catching the light on the upper-left lip of the incision.
+    ctx.fillStyle = isBottom ? "#ff9a86" : accent;
+    ctx.shadowColor = isTop || isBottom ? accent : "rgba(0,0,0,0)";
+    ctx.shadowBlur = isTop || isBottom ? cell * 0.09 : 0;
+    ctx.fillText(label, cx - fontSize * 0.022, cy - fontSize * 0.026);
     ctx.shadowBlur = 0;
 
+    // The 6/9 underline, so an upside-down face is never ambiguous.
     if (value === 6 || value === 9) {
-      ctx.fillRect(cx - cell * 0.09, cy + cell * 0.27, cell * 0.18, cell * 0.024);
+      ctx.fillStyle = accent;
+      ctx.fillRect(cx - cell * 0.07, cy + fontSize * 0.36, cell * 0.14, cell * 0.018);
     }
+    ctx.restore();
   }
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
-  texture.anisotropy = 4;
+  texture.anisotropy = 8;
   return texture;
 }
 
-/** Single-value texture used on every face of a non-d20 die cube. */
-function makeValueTexture(value: number, accent: string) {
-  const size = 256;
+/** Pip layout per face value, in a -1..1 square. */
+const PIPS: Record<number, Array<[number, number]>> = {
+  1: [[0, 0]],
+  2: [[-0.44, -0.44], [0.44, 0.44]],
+  3: [[-0.46, -0.46], [0, 0], [0.46, 0.46]],
+  4: [[-0.42, -0.42], [0.42, -0.42], [-0.42, 0.42], [0.42, 0.42]],
+  5: [[-0.44, -0.44], [0.44, -0.44], [0, 0], [-0.44, 0.44], [0.44, 0.44]],
+  6: [[-0.42, -0.48], [0.42, -0.48], [-0.42, 0], [0.42, 0], [-0.42, 0.48], [0.42, 0.48]]
+};
+
+/**
+ * One face of a numbered die.
+ *
+ * The old version was a slate square with a hairline border and a glowing
+ * numeral — it read as a UI tile, not an object. This paints a real face:
+ * a stone slab with a lit upper-left, a rounded inset panel, and then either
+ * PIPS (drilled, with an inner shadow and a bright lower-right catchlight, so
+ * they look like holes rather than dots) for d6 values, or an engraved numeral
+ * for larger dice where pips make no sense.
+ */
+function makeValueTexture(value: number, accent: string, pipped: boolean) {
+  const size = 512;
   const canvas = document.createElement("canvas");
   canvas.width = size;
   canvas.height = size;
   const ctx = canvas.getContext("2d")!;
-  ctx.fillStyle = "#10141f";
+  const c = size / 2;
+
+  // Stone body, lit from the upper-left.
+  const body = ctx.createLinearGradient(0, 0, size, size);
+  body.addColorStop(0, "#2a3346");
+  body.addColorStop(0.55, "#161d2b");
+  body.addColorStop(1, "#0a0e16");
+  ctx.fillStyle = body;
   ctx.fillRect(0, 0, size, size);
-  ctx.strokeStyle = "rgba(230,195,120,0.35)";
-  ctx.lineWidth = 6;
-  ctx.strokeRect(14, 14, size - 28, size - 28);
-  ctx.font = `700 ${Math.round(size * 0.5)}px Cinzel, 'Times New Roman', serif`;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.shadowColor = accent;
-  ctx.shadowBlur = 14;
-  ctx.fillStyle = accent;
-  ctx.fillText(String(value), size / 2, size / 2 + 8);
+
+  const sheen = ctx.createRadialGradient(size * 0.3, size * 0.26, 6, size * 0.3, size * 0.26, size * 0.85);
+  sheen.addColorStop(0, "rgba(255,255,255,0.14)");
+  sheen.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = sheen;
+  ctx.fillRect(0, 0, size, size);
+
+  ctx.globalAlpha = 0.05;
+  for (let s = 0; s < 200; s += 1) {
+    const sx = ((s * 41) % 100) / 100 * size;
+    const sy = ((s * 67) % 100) / 100 * size;
+    ctx.fillStyle = s % 3 === 0 ? "#ffffff" : "#000000";
+    ctx.fillRect(sx, sy, 3, 3);
+  }
+  ctx.globalAlpha = 1;
+
+  // Chamfer: bright on the top/left edges, dark on the bottom/right.
+  const bevel = size * 0.055;
+  ctx.lineWidth = bevel;
+  ctx.beginPath();
+  ctx.moveTo(bevel / 2, size - bevel / 2);
+  ctx.lineTo(bevel / 2, bevel / 2);
+  ctx.lineTo(size - bevel / 2, bevel / 2);
+  ctx.strokeStyle = "rgba(255,255,255,0.17)";
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(size - bevel / 2, bevel / 2);
+  ctx.lineTo(size - bevel / 2, size - bevel / 2);
+  ctx.lineTo(bevel / 2, size - bevel / 2);
+  ctx.strokeStyle = "rgba(0,0,0,0.6)";
+  ctx.stroke();
+
+  // Inset panel, rounded — the recessed field the marks sit in.
+  const inset = size * 0.13;
+  const r = size * 0.09;
+  ctx.beginPath();
+  ctx.moveTo(inset + r, inset);
+  ctx.arcTo(size - inset, inset, size - inset, size - inset, r);
+  ctx.arcTo(size - inset, size - inset, inset, size - inset, r);
+  ctx.arcTo(inset, size - inset, inset, inset, r);
+  ctx.arcTo(inset, inset, size - inset, inset, r);
+  ctx.closePath();
+  ctx.strokeStyle = `${accent}30`;
+  ctx.lineWidth = size * 0.008;
+  ctx.stroke();
+
+  if (pipped && PIPS[value]) {
+    const pipR = size * 0.072;
+    for (const [px, py] of PIPS[value]) {
+      const x = c + px * size * 0.31;
+      const y = c + py * size * 0.31;
+      // The hole: dark at the far wall, so it reads as depth.
+      const hole = ctx.createRadialGradient(x - pipR * 0.3, y - pipR * 0.3, pipR * 0.1, x, y, pipR);
+      hole.addColorStop(0, "#02040a");
+      hole.addColorStop(0.7, "#070c16");
+      hole.addColorStop(1, "#0d1420");
+      ctx.beginPath();
+      ctx.arc(x, y, pipR, 0, Math.PI * 2);
+      ctx.fillStyle = hole;
+      ctx.fill();
+      // Inlay glow pooled at the bottom of the drilling.
+      const inlay = ctx.createRadialGradient(x + pipR * 0.25, y + pipR * 0.3, 1, x, y, pipR * 0.95);
+      inlay.addColorStop(0, `${accent}cc`);
+      inlay.addColorStop(0.6, `${accent}44`);
+      inlay.addColorStop(1, `${accent}00`);
+      ctx.fillStyle = inlay;
+      ctx.fill();
+      // The lip: bright where the light clips the near rim, dark opposite.
+      ctx.beginPath();
+      ctx.arc(x, y, pipR, Math.PI * 0.75, Math.PI * 1.75);
+      ctx.strokeStyle = "rgba(0,0,0,0.7)";
+      ctx.lineWidth = size * 0.012;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(x, y, pipR, Math.PI * 1.75, Math.PI * 2.75);
+      ctx.strokeStyle = "rgba(255,255,255,0.3)";
+      ctx.lineWidth = size * 0.01;
+      ctx.stroke();
+    }
+  } else {
+    // Engraved numeral, same cut-then-rim treatment as the d20.
+    const label = String(value);
+    const fontSize = Math.round(size * (label.length > 1 ? 0.4 : 0.5));
+    ctx.font = `700 ${fontSize}px Cinzel, 'Times New Roman', serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = "rgba(0,0,0,0.85)";
+    ctx.fillText(label, c + fontSize * 0.03, c + fontSize * 0.035);
+    ctx.fillStyle = accent;
+    ctx.fillText(label, c - fontSize * 0.02, c - fontSize * 0.025);
+    if (value === 6 || value === 9) {
+      ctx.fillRect(c - size * 0.07, c + fontSize * 0.34, size * 0.14, size * 0.018);
+    }
+  }
+
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 8;
   return texture;
+}
+
+/**
+ * A cube with rounded edges and per-face materials.
+ *
+ * `BoxGeometry` gives hard 90° corners that catch the light as three flat
+ * planes and look like a texture swatch. A real die is a rounded cube: the
+ * chamfer is where all the specular life is. This subdivides a box and pushes
+ * every vertex out onto a superellipsoid, which rounds the edges while keeping
+ * the six faces flat and their UVs intact — so the face textures still map
+ * correctly and each face can keep its own material.
+ */
+function buildRoundedDie(radius: number): THREE.BufferGeometry {
+  const geometry = new THREE.BoxGeometry(1, 1, 1, 5, 5, 5);
+  const position = geometry.getAttribute("position") as THREE.BufferAttribute;
+  const v = new THREE.Vector3();
+  // Higher exponent = flatter faces and a tighter corner radius.
+  const n = 2 / Math.max(0.02, radius);
+  for (let i = 0; i < position.count; i += 1) {
+    v.fromBufferAttribute(position, i);
+    // Superellipsoid: |x|^n + |y|^n + |z|^n = const, solved along the ray.
+    const ax = Math.abs(v.x * 2);
+    const ay = Math.abs(v.y * 2);
+    const az = Math.abs(v.z * 2);
+    const d = Math.pow(Math.pow(ax, n) + Math.pow(ay, n) + Math.pow(az, n), 1 / n);
+    if (d > 0.0001) v.multiplyScalar(1 / d);
+    position.setXYZ(i, v.x, v.y, v.z);
+  }
+  position.needsUpdate = true;
+  geometry.computeVertexNormals();
+  return geometry;
 }
 
 /* ------------------------------------------------------------------ */
@@ -118,7 +351,9 @@ type D20Build = {
 
 /** Icosahedron with per-face atlas UVs and precomputed landing rotations. */
 function buildD20(): D20Build {
-  const geometry = new THREE.IcosahedronGeometry(1, 0).toNonIndexed();
+  // IcosahedronGeometry is already non-indexed; calling toNonIndexed would only
+  // warn. Per-face UVs need the un-shared vertices this already has.
+  const geometry = new THREE.IcosahedronGeometry(1, 0);
   const position = geometry.getAttribute("position");
   const faceCount = position.count / 3; // 20
   const uvs = new Float32Array(position.count * 2);
@@ -273,6 +508,13 @@ export default function DiceTheater({
   onDoneRef.current = onDone;
 
   const isD20 = roll.notation.toLowerCase().includes("d20") || !!roll.d20Mode;
+  // How many faces the die has, so a d6 gets pips and a d10 gets numerals, and
+  // the opposite-face fill uses the right total.
+  const dieSize = (() => {
+    const match = /d\s*(\d+)/i.exec(roll.notation);
+    const parsed = match ? parseInt(match[1], 10) : 6;
+    return Number.isFinite(parsed) && parsed >= 2 ? Math.min(100, parsed) : 6;
+  })();
   const isDual = (roll.d20Mode === "advantage" || roll.d20Mode === "disadvantage") && roll.rolls.length >= 2;
   const chosenIndex = isDual
     ? (roll.d20Mode === "advantage"
@@ -340,7 +582,9 @@ export default function DiceTheater({
 
     if (isD20) {
       const { geometry, presentation } = buildD20();
-      const atlas = makeD20Atlas("#e6c378");
+      // The die itself carries the outcome's color, so a triumph is a gold die
+      // and a catastrophe a red one before the label even appears.
+      const atlas = makeD20Atlas(accent);
       const material = new THREE.MeshStandardMaterial({
         map: atlas,
         roughness: 0.32,
@@ -370,17 +614,43 @@ export default function DiceTheater({
         });
       });
     } else {
-      const geometry = new THREE.BoxGeometry(1.2, 1.2, 1.2);
+      // A ROUNDED cube with six DIFFERENT faces, and it lands on the right one.
+      // Previously the same value was painted on all six sides of a hard box —
+      // which meant it couldn't be wrong, but it also looked like a printed
+      // block instead of a die. Now the die carries a real face set (the rolled
+      // value forward, the rest filled in around it, opposite faces summing to
+      // the die's size the way a real one does) and the settle rotation
+      // presents the rolled face to camera.
+      const geometry = buildRoundedDie(0.16);
+      geometry.scale(1.2, 1.2, 1.2);
       disposables.push(geometry);
+      // Box face order: +X, -X, +Y, -Y, +Z, -Z. +Z is the one facing camera.
+      const faceCount = Math.max(2, dieSize);
+      const pipped = faceCount <= 6;
       shownRolls.forEach((value, index) => {
-        const texture = makeValueTexture(value, "#e6c378");
-        const material = new THREE.MeshStandardMaterial({
-          map: texture,
-          roughness: 0.35,
-          metalness: 0.5
+        // Fill the other five faces with plausible neighbors so no two adjacent
+        // faces repeat; +Z always holds the rolled value.
+        const other = (offset: number) => ((value - 1 + offset) % faceCount) + 1;
+        const faceValues = [
+          other(2),
+          other(faceCount - 2),
+          other(1),
+          other(faceCount - 1),
+          value,
+          // Opposite the rolled face: n+1-value, as on a real die.
+          Math.max(1, faceCount + 1 - value)
+        ];
+        const materials = faceValues.map((faceValue) => {
+          const texture = makeValueTexture(faceValue, accent, pipped);
+          const material = new THREE.MeshStandardMaterial({
+            map: texture,
+            roughness: 0.42,
+            metalness: 0.45
+          });
+          disposables.push(texture, material);
+          return material;
         });
-        disposables.push(texture, material);
-        const mesh = new THREE.Mesh(geometry, material);
+        const mesh = new THREE.Mesh(geometry, materials);
         mesh.scale.setScalar(scale * 0.85);
         const restX = (index - (shownRolls.length - 1) / 2) * spread;
         mesh.position.set(restX, 4.5, 0);
