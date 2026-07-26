@@ -9,7 +9,7 @@ import { ACCENT_THEMES, applyAccent, currentAccent, initAccent } from "@/lib/cli
 import DiceTheater, { DiceRollData } from "@/components/three/DiceTheater";
 import CosmosCanvas from "@/components/three/CosmosCanvas";
 
-type Tab = "act" | "sheet" | "party" | "quest";
+type Tab = "act" | "sheet" | "party" | "quest" | "director";
 
 // A beat can hold on the TV for up to ~32s before the next playback-progress
 // broadcast; this must comfortably exceed that per-beat gap so a controller
@@ -80,6 +80,16 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
   const [miniDice, setMiniDice] = useState<DiceRollData | null>(null);
   const [accent, setAccent] = useState("gold");
   const diceSeenRef = useRef<Set<string> | null>(null);
+
+  // Director (party-leader-only) controls: whisper, model switch, host transfer.
+  const [sway, setSway] = useState("");
+  const [swayBusy, setSwayBusy] = useState(false);
+  const [chatTargets, setChatTargets] = useState<Array<{ id: string; alias: string; label: string; model: string }>>([]);
+  const [selectedTargetId, setSelectedTargetId] = useState<string>("");
+  const [switchBusy, setSwitchBusy] = useState(false);
+  const [transferTargetId, setTransferTargetId] = useState<string>("");
+  const [transferBusy, setTransferBusy] = useState(false);
+  const [directorMsg, setDirectorMsg] = useState<string | null>(null);
 
   useEffect(() => {
     setAccent(initAccent() || currentAccent());
@@ -249,6 +259,65 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
     }
     clearSeat();
     onLeave();
+  };
+
+  // Director controls (party leader only) — load targets when the host tab opens.
+  useEffect(() => {
+    if (!isLeader || tab !== "director" || !campaign) return;
+    let cancelled = false;
+    api.listChatTargets(campaign.id).then((res) => {
+      if (cancelled) return;
+      setChatTargets(res.targets);
+      setSelectedTargetId(res.selectedChatTargetId);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [isLeader, tab, campaign?.id]);
+
+  const sendSway = async () => {
+    if (!campaign || !sway.trim()) return;
+    setSwayBusy(true);
+    setDirectorMsg(null);
+    try {
+      await api.party({ campaignId: campaign.id, action: "sway", guidance: sway.trim() });
+      setSway("");
+      setDirectorMsg("Whisper sent.");
+    } catch (err) {
+      setDirectorMsg(err instanceof Error ? err.message : "The whisper was lost.");
+    } finally {
+      setSwayBusy(false);
+    }
+  };
+
+  const switchModel = async () => {
+    if (!campaign || !selectedTargetId) return;
+    setSwitchBusy(true);
+    setDirectorMsg(null);
+    try {
+      await api.switchModel(campaign.id, seat.playerId, selectedTargetId);
+      await refresh();
+      setDirectorMsg("Narration target updated.");
+    } catch (err) {
+      setDirectorMsg(err instanceof Error ? err.message : "Could not switch the narration target.");
+    } finally {
+      setSwitchBusy(false);
+    }
+  };
+
+  const transferHost = async () => {
+    if (!campaign || !transferTargetId) return;
+    if (!confirm(`Transfer the host role to ${campaign.players.find((p) => p.id === transferTargetId)?.characterName || "that player"}? You will lose host authority immediately.`)) return;
+    setTransferBusy(true);
+    setDirectorMsg(null);
+    try {
+      await api.transferHost(campaign.id, seat.playerId, transferTargetId);
+      setTransferTargetId("");
+      await refresh();
+      setDirectorMsg("Host role transferred.");
+    } catch (err) {
+      setDirectorMsg(err instanceof Error ? err.message : "Could not transfer the host role.");
+    } finally {
+      setTransferBusy(false);
+    }
   };
 
   /* ------------------------------------------------------------------ */
@@ -656,6 +725,65 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
             )}
           </section>
         ) : null}
+
+        {tab === "director" && isLeader ? (
+          <section className="director-panel">
+            <span className="director-label">Whisper to the Weaver</span>
+            <textarea
+              className="field textarea slim"
+              rows={3}
+              placeholder="Sway the story: “introduce a rival”, “raise the stakes”, “wrap this scene soon”…"
+              value={sway}
+              onChange={(event) => setSway(event.target.value)}
+            />
+            <button className="oracle-button" disabled={swayBusy || !sway.trim()} onClick={sendSway}>
+              {swayBusy ? "Whispering…" : "✦ Whisper"}
+            </button>
+
+            {chatTargets.length > 1 ? (
+              <>
+                <span className="director-label">Narration model</span>
+                <p className="panel-hint small">Switch after a provider failure. The next turn uses the selected target.</p>
+                <select
+                  className="field"
+                  value={selectedTargetId}
+                  onChange={(event) => setSelectedTargetId(event.target.value)}
+                >
+                  {chatTargets.map((target) => (
+                    <option key={target.id} value={target.id}>
+                      {target.label} ({target.model})
+                    </option>
+                  ))}
+                </select>
+                <button className="ghost-button" disabled={switchBusy} onClick={switchModel}>
+                  {switchBusy ? "Switching…" : "✷ Apply narration target"}
+                </button>
+              </>
+            ) : null}
+
+            <span className="director-label">Transfer host role</span>
+            <p className="panel-hint small">Hand the party-leader role to another active player. You lose host authority immediately.</p>
+            <select
+              className="field"
+              value={transferTargetId}
+              onChange={(event) => setTransferTargetId(event.target.value)}
+            >
+              <option value="">Pick a player…</option>
+              {campaign.players
+                .filter((player) => player.id !== seat.playerId && !player.away)
+                .map((player) => (
+                  <option key={player.id} value={player.id}>
+                    {player.characterName || player.name}
+                  </option>
+                ))}
+            </select>
+            <button className="ghost-button" disabled={transferBusy || !transferTargetId} onClick={transferHost}>
+              {transferBusy ? "Transferring…" : "♛ Transfer host"}
+            </button>
+
+            {directorMsg ? <div className="form-error">{directorMsg}</div> : null}
+          </section>
+        ) : null}
       </main>
 
       <nav className="controller-tabs">
@@ -663,7 +791,8 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
           ["act", "Act", "❯"],
           ["sheet", "Sheet", "✦"],
           ["party", "Party", "❖"],
-          ["quest", "Quest", "⟡"]
+          ["quest", "Quest", "⟡"],
+          ...(isLeader ? ([["director", "Host", "✷"]] as Array<[Tab, string, string]>) : [])
         ] as Array<[Tab, string, string]>).map(([key, label, glyph]) => (
           <button key={key} className={`tab-button ${tab === key ? "current" : ""}`} onClick={() => { playSfx("tap", 0.6); setTab(key); }}>
             <span aria-hidden>{glyph}</span>

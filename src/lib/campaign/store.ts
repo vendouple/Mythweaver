@@ -491,6 +491,13 @@ function normalizeCampaign(raw: Partial<Campaign> & { suggestedActions?: unknown
     hostStartedAt: raw.hostStartedAt,
     hostActiveAt: raw.hostActiveAt,
     partyLeaderId: raw.partyLeaderId || players[0]?.id,
+    // Normalize the selected narration target alias: keep it as a trimmed
+    // string or undefined. Unknown aliases are tolerated here and resolved
+    // to the default at request time by resolveChatTarget(), so a stale
+    // selection on an old save can never brick narration.
+    selectedChatTargetId: typeof raw.selectedChatTargetId === "string" && raw.selectedChatTargetId.trim()
+      ? raw.selectedChatTargetId.trim()
+      : undefined,
     players,
     startingStory: String(raw.startingStory || raw.memory || ""),
     storyCharacters: Array.isArray(raw.storyCharacters) ? raw.storyCharacters.map(normalizeStoryCharacter) : [],
@@ -516,6 +523,18 @@ function normalizeCampaign(raw: Partial<Campaign> & { suggestedActions?: unknown
     dmPhase: raw.dmPhase && typeof raw.dmPhase === "string" ? raw.dmPhase : undefined,
     presenting: normalizePresenting((raw as any).presenting),
     storySummary: typeof raw.storySummary === "string" ? raw.storySummary.slice(0, 20_000) : undefined,
+    housekeeping: (() => {
+      const h = raw.housekeeping as Partial<Campaign["housekeeping"]> | undefined;
+      if (!h || typeof h !== "object") return undefined;
+      return {
+        consecutiveFailures: Math.max(0, Number(h.consecutiveFailures) || 0),
+        lastAttemptAt: typeof h.lastAttemptAt === "string" ? h.lastAttemptAt : undefined,
+        lastSuccessAt: typeof h.lastSuccessAt === "string" ? h.lastSuccessAt : undefined,
+        cooldownUntil: typeof h.cooldownUntil === "string" ? h.cooldownUntil : undefined,
+        lastFailedFingerprint: typeof h.lastFailedFingerprint === "string" ? h.lastFailedFingerprint : undefined,
+        lastError: typeof h.lastError === "string" ? h.lastError.slice(0, 200) : undefined
+      };
+    })(),
     messages: Array.isArray(raw.messages) ? raw.messages : [],
     campaignType: normalizeCampaignType(raw),
     musicTheme: MUSIC_THEMES.includes(raw.musicTheme as MusicTheme) ? raw.musicTheme : undefined,
@@ -1124,6 +1143,103 @@ export async function logCampaignDebug(campaignId: string, message: string) {
     await appendFile(logPath, `[${timestamp}] ${message}\n`, "utf8");
   } catch (err) {
     console.error("Failed to write campaign debug log:", err);
+  }
+}
+
+/**
+ * Structured operational event log. Appends a single durable line to the
+ * campaign's `debug.log` in the stable format:
+ *   [timestamp] [LEVEL] [Category] Event | {redacted JSON metadata}
+ *
+ * This is the durable source of truth for provider attempts, retries,
+ * timeouts, capability errors, housekeeping lifecycle, image lifecycle,
+ * model/provider switches, and host transfers. `logCampaignDebug` stays
+ * available for the existing free-form transcript lines.
+ *
+ * Metadata is redacted: API keys, authorization headers, and full provider
+ * URLs containing secrets are stripped; oversized strings are truncated so a
+ * giant prompt/result can't drown the log. Never throws — logging is best
+ * effort and must never break a turn.
+ */
+export type CampaignLogLevel = "INFO" | "WARN" | "ERROR";
+export type CampaignLogCategory =
+  | "Narration"
+  | "Housekeeping"
+  | "Image"
+  | "Provider"
+  | "Host"
+  | "System";
+
+const LOG_META_MAX_CHARS = 1200;
+const LOG_STRING_MAX_CHARS = 400;
+
+function redactLogValue(value: unknown): unknown {
+  if (value === null || value === undefined) return value;
+  if (typeof value === "string") {
+    const lower = value.toLowerCase();
+    if (lower.startsWith("bearer ") || lower.includes("api_key") || lower.includes("apikey")) {
+      return "[redacted]";
+    }
+    return value.length > LOG_STRING_MAX_CHARS
+      ? value.slice(0, LOG_STRING_MAX_CHARS) + `…(+${value.length - LOG_STRING_MAX_CHARS} chars)`
+      : value;
+  }
+  if (typeof value === "number" || typeof value === "boolean") return value;
+  if (Array.isArray(value)) return value.map(redactLogValue);
+  if (typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      const keyLower = k.toLowerCase();
+      if (keyLower === "apikey" || keyLower === "api_key" || keyLower === "authorization" || keyLower === "token" || keyLower === "key" || keyLower === "secret") {
+        out[k] = "[redacted]";
+      } else if (keyLower === "baseurl" || keyLower === "base_url" || keyLower === "url") {
+        out[k] = redactUrl(String(v ?? ""));
+      } else {
+        out[k] = redactLogValue(v);
+      }
+    }
+    return out;
+  }
+  return value;
+}
+
+function redactUrl(url: string): string {
+  try {
+    if (!url) return url;
+    if (url.length > LOG_STRING_MAX_CHARS) return url.slice(0, LOG_STRING_MAX_CHARS) + "…";
+    return url;
+  } catch {
+    return "[redacted]";
+  }
+}
+
+export async function logCampaignEvent(
+  campaignId: string,
+  level: CampaignLogLevel,
+  category: CampaignLogCategory,
+  event: string,
+  metadata?: Record<string, unknown>
+) {
+  try {
+    const dir = campaignDir(campaignId);
+    await mkdir(dir, { recursive: true });
+    const logPath = path.join(dir, "debug.log");
+    const timestamp = new Date().toISOString();
+    let metaStr = "";
+    if (metadata && Object.keys(metadata).length) {
+      try {
+        const redacted = redactLogValue(metadata);
+        metaStr = " | " + JSON.stringify(redacted);
+        if (metaStr.length > LOG_META_MAX_CHARS) {
+          metaStr = metaStr.slice(0, LOG_META_MAX_CHARS) + "…(truncated)";
+        }
+      } catch {
+        metaStr = " | [metadata serialize failed]";
+      }
+    }
+    await appendFile(logPath, `[${timestamp}] [${level}] [${category}] ${event}${metaStr}\n`, "utf8");
+  } catch (err) {
+    console.error("Failed to write campaign event log:", err);
   }
 }
 

@@ -18,7 +18,7 @@ import type {
 } from "@/lib/campaign/types";
 import { api, accentColor } from "@/lib/client/api";
 import { bgmDuck, bgmIsMuted, bgmSetContext, bgmSetTheme, subscribeBgm, type BgmContext } from "@/lib/client/audio";
-import { ambienceSetScene, ambienceStop } from "@/lib/client/ambience";
+import { ambienceSetScene, ambienceStop, ambienceAccent } from "@/lib/client/ambience";
 import { playSfx } from "@/lib/client/sfx";
 import { parseInline, plainText, renderInline, renderTokens } from "@/lib/client/markup";
 import { ACCENT_THEMES, applyAccent, currentAccent, initAccent } from "@/lib/client/theme";
@@ -168,6 +168,21 @@ function beatHold(plain: string) {
  */
 const BEAT_SPLIT_TARGET = 240; // aim for chunks around this many chars
 const BEAT_SPLIT_MAX = 340; // never let a single TV beat exceed this
+
+/**
+ * The environmental bed that belongs to each weather-style stage effect.
+ *
+ * `shake`/`flash`/`darkness`/`heartbeat` already have their own one-shot foley;
+ * these four are pure particle systems, so they borrow the real recording of
+ * the thing they're drawing. `embers` has no "embers" shelf — fire is what
+ * embers come off, so that's the right bed.
+ */
+const EFFECT_AMBIENCE: Partial<Record<StageEffectKind, AmbienceSound>> = {
+  rain: "rain",
+  snow: "snow",
+  fog: "wind",
+  embers: "fire"
+};
 
 function marksBalanced(text: string) {
   return (text.match(/\*/g) || []).length % 2 === 0 && (text.match(/`/g) || []).length % 2 === 0;
@@ -495,7 +510,18 @@ export default function HostStage({
         case "flash": setFlashKey((k) => k + 1); if (useDefaultSound) playSfx("flash", strength); break;
         case "darkness": setDarkUntil(Date.now() + 4500); if (useDefaultSound) playSfx("darkness"); break;
         case "heartbeat": setPulseUntil(Date.now() + 5200); if (useDefaultSound) playSfx("heartbeat"); break;
-        default: atmosphereRef.current?.burst(kind, strength);
+        default: {
+          atmosphereRef.current?.burst(kind, strength);
+          // The weather effects are VISUAL-ONLY particles — a downpour used to
+          // start on screen while the room stayed silent. Swell the matching
+          // environmental bed underneath for the life of the effect, unless the
+          // DM named its own cues (then they own the sound) or that bed is
+          // already part of the standing scene.
+          if (useDefaultSound) {
+            const bed = EFFECT_AMBIENCE[kind];
+            if (bed) ambienceAccent(bed, 7000, strength);
+          }
+        }
       }
     };
     for (let i = 0; i < times; i += 1) {
@@ -639,13 +665,35 @@ export default function HostStage({
     api.party({ campaignId: campaign.id, action: "updateSettings", [key]: value }).catch(() => undefined);
   };
 
+  // Narration target status (read-only on the TV): show which model/provider
+  // is currently selected, and who the party leader is (the one who can
+  // switch it from their phone). The TV host isn't necessarily the party
+  // leader, so switching is done on the leader's controller, not here.
+  const [chatTargets, setChatTargets] = useState<Array<{ id: string; alias: string; label: string; model: string }>>([]);
+  const [selectedTargetId, setSelectedTargetId] = useState<string>("");
+  useEffect(() => {
+    if (!drawerOpen) return;
+    let cancelled = false;
+    api.listChatTargets(campaign.id).then((res) => {
+      if (cancelled) return;
+      setChatTargets(res.targets);
+      setSelectedTargetId(res.selectedChatTargetId);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [drawerOpen, campaign.id]);
+  const currentTarget = chatTargets.find((t) => t.id === selectedTargetId);
+
   const previewEffect = (kind: StageEffectKind) => {
     switch (kind) {
       case "shake": setShakeKey((key) => key + 1); playSfx("rumble", 0.8); break;
       case "flash": setFlashKey((key) => key + 1); playSfx("flash", 0.8); break;
       case "darkness": setDarkUntil(Date.now() + 4500); playSfx("darkness"); break;
       case "heartbeat": setPulseUntil(Date.now() + 5200); playSfx("heartbeat"); break;
-      default: atmosphereRef.current?.burst(kind, 0.85);
+      default: {
+        atmosphereRef.current?.burst(kind, 0.85);
+        const bed = EFFECT_AMBIENCE[kind];
+        if (bed) ambienceAccent(bed, 7000, 0.85);
+      }
     }
   };
 
@@ -1320,6 +1368,13 @@ export default function HostStage({
               </button>
             ))}
           </div>
+
+          <label className="director-label">Narration model</label>
+          <p className="panel-hint small">
+            Current: {currentTarget ? `${currentTarget.label} (${currentTarget.model})` : "Loading…"}
+            <br />
+            The party leader switches the model from their phone after a failure.
+          </p>
 
           <button className="ghost-button leave" onClick={onExit}>Leave the table (keeps the saga)</button>
         </aside>

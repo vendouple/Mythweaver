@@ -1,7 +1,7 @@
 import { buildCampaignContext } from "@/lib/campaign/context";
-import { getCampaign, saveCampaign, downloadAndSaveImage, logCampaignDebug, safePushDisplayEvent, isValidImageUrl, startCampaignDraft, finishCampaignDraft, reconcilePresence, normalizeBeatEffect, ensureLocations, getFocusedLocation, persistFocusedLocation, applyFocus } from "@/lib/campaign/store";
+import { getCampaign, getCampaignLock, saveCampaign, downloadAndSaveImage, logCampaignDebug, logCampaignEvent, safePushDisplayEvent, isValidImageUrl, startCampaignDraft, finishCampaignDraft, reconcilePresence, normalizeBeatEffect, ensureLocations, getFocusedLocation, persistFocusedLocation, applyFocus } from "@/lib/campaign/store";
 import { createId } from "@/lib/utils/ids";
-import { aquaConfig, aquaFetch, fastModelTarget, AquaFetchOptions, AquaMessage, AquaToolCall, AquaToolDefinition } from "./client";
+import { aquaConfig, aquaFetch, fastModelTarget, resolveChatTarget, AquaFetchOptions, AquaMessage, AquaToolCall, AquaToolDefinition } from "./client";
 import { runTool, toolDefinitions, applyNpcGroupFields, applyConditionFields } from "@/lib/tools/registry";
 import { generateImage } from "@/lib/aqua/images";
 import { AmbienceMood, Campaign, DisplayEvent, Player, PlayerStat, StoryCharacter } from "@/lib/campaign/types";
@@ -75,8 +75,10 @@ const MAX_DM_STEPS = Math.max(4, Number(process.env.MAX_TOOL_STEPS) || 16);
 
 // Interactive DM turns fail fast: a dead endpoint should surface in seconds,
 // not after 6×60s of silence. Non-interactive generation keeps the defaults.
+// Retries are clamped to a hard maximum (see MAX_RETRIES_HARD_CAP in client.ts)
+// so a misconfigured env value can never trap a turn on one dead provider.
 const INTERACTIVE_FETCH: Pick<AquaFetchOptions, "retries" | "timeoutMs"> = {
-  retries: Math.max(1, Number(process.env.INTERACTIVE_RETRIES) || 3),
+  retries: Math.min(Math.max(1, Number(process.env.INTERACTIVE_RETRIES) || 3), 10),
   timeoutMs: Math.max(5000, Number(process.env.INTERACTIVE_TIMEOUT_MS) || 45000)
 };
 
@@ -454,10 +456,20 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
 
     // Interactive fetch: fail fast, and surface each retry to the TV so a slow
     // request reads as "retrying (2/3)" instead of a silent multi-minute hang.
+    // The narration target is the host's manual selection for this campaign;
+    // resolveChatTarget() falls back to the default when unset/unknown.
+    const selectedChatTargetId = campaign.selectedChatTargetId;
     const interactiveFetch: AquaFetchOptions = {
       ...INTERACTIVE_FETCH,
-      onRetry: ({ attempt, retries }) => {
+      onRetry: ({ attempt, retries, status, error }) => {
         void writeDmStatus(campaignId, `The connection wavers… retrying (${attempt}/${retries})`);
+        void logCampaignEvent(campaignId, "WARN", "Narration", "Provider retry", {
+          attempt,
+          retries,
+          status,
+          target: selectedChatTargetId || "default",
+          error: error instanceof Error ? error.message : error ? String(error) : undefined
+        });
       }
     };
 
@@ -469,7 +481,23 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
     for (let step = 0; step < maxSteps; step += 1) {
       await logCampaignDebug(campaignId, `[AI Step ${step + 1}] Requesting completion...`);
       serverLog("DM AI Step", `Step ${step + 1}/${maxSteps}: Requesting completion...`);
-      const response = await complete(messages, "auto", [...toolsForTurn({ musicTheme: themeChosen ? "set" : undefined }), narrateTurnTool], interactiveFetch);
+      let response: ChatCompletionResponse;
+      try {
+        response = await complete(messages, "auto", [...toolsForTurn({ musicTheme: themeChosen ? "set" : undefined }), narrateTurnTool], interactiveFetch, selectedChatTargetId);
+      } catch (err) {
+        // Narration provider failed all retries on the selected target. Log
+        // durably with classification so the host can see why and switch.
+        const status = (err as any)?.status;
+        const code = (err as any)?.code;
+        void logCampaignEvent(campaignId, "ERROR", "Narration", "Provider request failed", {
+          step: step + 1,
+          status,
+          code,
+          error: err instanceof Error ? err.message : String(err),
+          errorName: err instanceof Error ? err.name : undefined
+        });
+        throw err;
+      }
       const message = response.choices?.[0]?.message || response.message;
       if (!message) throw new Error("Aqua chat response did not include a message");
       await logCampaignDebug(campaignId, `[AI Step ${step + 1}] Received response: ${JSON.stringify(message)}`);
@@ -1026,7 +1054,6 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
       // mood, switched combat, painted its NPCs). A capable model therefore
       // pays ~nothing, while a tool-forgetful RP model gets caught every time —
       // the guidance self-calibrates per turn, so there is no config knob.
-      await reconcileBackdrop();
       // Stage-direction guarantee (feedback: ambience froze on one mood for an
       // entire climax and start_combat never fired even when the model's own
       // reasoning said "combat begins"). When the model didn't direct the
@@ -1037,15 +1064,6 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
       } catch (err) {
         serverError("StageDirector", "Stage-direction reconcile failed (non-fatal)", err);
       }
-      // Portrait guarantee (feedback: NPCs introduced mid-session via
-      // npcUpdates never got generate_image called for them). Paint any
-      // missing NPC faces server-side, a couple per turn. Non-fatal.
-      await reconcileNpcPortraits(latestCampaign);
-      // Housekeeping (small/fast model only, and only past a real threshold):
-      // compact stale transcript/memory/NPC duplicates so the RP model never
-      // context-collapses. Non-fatal on failure; skipped entirely without a
-      // configured fast model.
-      await runHousekeeping(latestCampaign);
     }
 
     // The music theme is chosen by the DM AI before the lobby opens (see
@@ -1062,6 +1080,7 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
 
     finishCampaignDraft(campaignId);
     await saveCampaign(latestCampaign);
+    queuePostTurnMaintenance(latestCampaign, preTurnImageUrl);
 
     // TPK backstop (feedback: "once the party dies the AI is reluctant to call
     // end_campaign"). When the whole party is down and the DM left the saga
@@ -1111,6 +1130,96 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
     }
     throw error;
   }
+}
+
+function cloneCampaign(campaign: Campaign): Campaign {
+  return JSON.parse(JSON.stringify(campaign)) as Campaign;
+}
+
+function queuePostTurnMaintenance(campaign: Campaign, preTurnImageUrl?: string) {
+  const backdropSnapshot = cloneCampaign(campaign);
+  const portraitSnapshot = cloneCampaign(campaign);
+  const housekeepingSnapshot = cloneCampaign(campaign);
+
+  void Promise.allSettled([
+    campaign.status === "active" ? (async () => {
+      try {
+        const scene = (backdropSnapshot.currentScene || "").trim();
+        const modelChangedBackdrop = backdropSnapshot.currentImageUrl !== preTurnImageUrl;
+        if (!scene || modelChangedBackdrop) return;
+        const stale = !backdropSnapshot.backdropScene ||
+          sceneSimilarity(scene, backdropSnapshot.backdropScene) < 0.75 ||
+          sceneSimilarity(`${scene} ${backdropSnapshot.overview || ""}`, backdropSnapshot.backdropScene) < 0.6;
+        if (!stale) return;
+        const beforeImageIds = new Set((backdropSnapshot.images || []).map((image) => image.id));
+        const decision = await chooseBackdrop(backdropSnapshot, false);
+        await applyBackdropDecision(backdropSnapshot, decision, scene, false);
+        const release = await getCampaignLock(campaign.id).acquire();
+        try {
+          const fresh = await getCampaign(campaign.id);
+          if (fresh.status !== "active" || fresh.currentScene !== scene) return;
+          const additions = (backdropSnapshot.images || []).filter((image) => !beforeImageIds.has(image.id));
+          for (const image of additions) {
+            if (!fresh.images.some((existing) => existing.id === image.id)) fresh.images.push(image);
+          }
+          const changed = fresh.currentImageUrl !== backdropSnapshot.currentImageUrl;
+          fresh.currentImageUrl = backdropSnapshot.currentImageUrl;
+          fresh.backdropScene = backdropSnapshot.backdropScene;
+          if (changed) safePushDisplayEvent(fresh, { type: "scene", speaker: "Scene", content: "The TV scene background shifts." });
+          await saveCampaign(fresh);
+        } finally {
+          release();
+        }
+      } catch (err) {
+        serverError("Backdrop", "Background reconcile failed and was skipped (non-fatal)", err);
+      }
+    })() : Promise.resolve(),
+    campaign.status === "active" ? (async () => {
+      const beforePortraitIds = new Set((portraitSnapshot.portraits || []).map((portrait) => portrait.id));
+      await reconcileNpcPortraits(portraitSnapshot);
+      const additions = (portraitSnapshot.portraits || []).filter((portrait) => !beforePortraitIds.has(portrait.id));
+      if (!additions.length) return;
+      const release = await getCampaignLock(campaign.id).acquire();
+      try {
+        const fresh = await getCampaign(campaign.id);
+        if (!fresh.portraits) fresh.portraits = [];
+        for (const portrait of additions) {
+          if (!fresh.portraits.some((existing) => existing.id === portrait.id)) fresh.portraits.push(portrait);
+          const sourceNpc = portraitSnapshot.storyCharacters.find((npc) => npc.name === portrait.characterName);
+          const freshNpc = sourceNpc && fresh.storyCharacters.find((npc) => npc.id === sourceNpc.id);
+          if (freshNpc && !freshNpc.portraitUrl) freshNpc.portraitUrl = sourceNpc.portraitUrl;
+        }
+        await saveCampaign(fresh);
+      } finally {
+        release();
+      }
+    })() : Promise.resolve(),
+    (async () => {
+      const originalMessageIds = new Set(housekeepingSnapshot.messages.map((message) => message.id));
+      const originalNpcIds = new Set(housekeepingSnapshot.storyCharacters.map((npc) => npc.id));
+      const beforeSummary = housekeepingSnapshot.storySummary;
+      const beforeMemory = housekeepingSnapshot.memory;
+      await runHousekeeping(housekeepingSnapshot);
+      const changed = housekeepingSnapshot.storySummary !== beforeSummary ||
+        housekeepingSnapshot.memory !== beforeMemory ||
+        housekeepingSnapshot.messages.length !== originalMessageIds.size ||
+        housekeepingSnapshot.storyCharacters.length !== originalNpcIds.size;
+      if (!changed) return;
+      const keptMessageIds = new Set(housekeepingSnapshot.messages.map((message) => message.id));
+      const keptNpcIds = new Set(housekeepingSnapshot.storyCharacters.map((npc) => npc.id));
+      const release = await getCampaignLock(campaign.id).acquire();
+      try {
+        const fresh = await getCampaign(campaign.id);
+        fresh.storySummary = housekeepingSnapshot.storySummary;
+        fresh.memory = housekeepingSnapshot.memory;
+        fresh.messages = fresh.messages.filter((message) => !originalMessageIds.has(message.id) || keptMessageIds.has(message.id));
+        fresh.storyCharacters = fresh.storyCharacters.filter((npc) => !originalNpcIds.has(npc.id) || keptNpcIds.has(npc.id));
+        await saveCampaign(fresh);
+      } finally {
+        release();
+      }
+    })()
+  ]);
 }
 
 /**
@@ -1753,18 +1862,29 @@ async function complete(
   messages: AquaMessage[],
   toolChoice: "auto" | "none" = "auto",
   tools: typeof toolDefinitions = toolDefinitions,
-  fetchOptions: AquaFetchOptions = {}
+  fetchOptions: AquaFetchOptions = {},
+  targetId?: string
 ) {
-  const config = aquaConfig();
+  // Resolve the narration target from the campaign's manual selection. Falls
+  // back to the default (CHAT_MODEL/BASE_URL/API_KEY) when unset or unknown,
+  // so a stale selection can never brick narration. The target's baseUrl/key
+  // are merged into fetchOptions so they override the defaults for this call
+  // only — credentials never leave the server.
+  const target = resolveChatTarget(targetId);
+  const mergedOptions: AquaFetchOptions = {
+    ...fetchOptions,
+    baseUrl: target.baseUrl || fetchOptions.baseUrl,
+    apiKey: target.apiKey || fetchOptions.apiKey
+  };
   return (await aquaFetch("/chat/completions", {
     method: "POST",
     body: JSON.stringify({
-      model: config.chatModel,
+      model: target.model,
       messages,
       tools,
       tool_choice: toolChoice
     })
-  }, fetchOptions)) as ChatCompletionResponse;
+  }, mergedOptions)) as ChatCompletionResponse;
 }
 
 /**
@@ -1904,6 +2024,64 @@ const HOUSEKEEPING_MESSAGE_TRIGGER = 48; // sweep once this many messages have p
 const HOUSEKEEPING_MEMORY_CHARS_TRIGGER = 6_000;
 const HOUSEKEEPING_NPC_TRIGGER = 8;
 const HOUSEKEEPING_SUMMARY_MAX_CHARS = 8_000;
+// Cross-turn resilience: after this many consecutive failures on UNCHANGED
+// input, suppress housekeeping until the input materially changes or the
+// cooldown elapses. Prevents the observed every-turn retry loop on a dead
+// provider. Env-overridable.
+const HOUSEKEEPING_MAX_CONSECUTIVE_FAILURES = Math.max(1, Number(process.env.HOUSEKEEPING_MAX_CONSECUTIVE_FAILURES) || 5);
+// Cooldown after a failure: don't retry a failed sweep on the same input for
+// this long. The input changing (new messages/NPCs) overrides the cooldown.
+const HOUSEKEEPING_FAILURE_COOLDOWN_MS = Math.max(30_000, Number(process.env.HOUSEKEEPING_FAILURE_COOLDOWN_MS) || 300_000);
+
+/**
+ * Returns the reasons a campaign needs housekeeping (message count, memory
+ * chars, NPC count), or null if none apply. Replaces the old boolean-only
+ * check so the cooldown/fingerprint logic can key off WHY it needs sweeping.
+ */
+function housekeepingReasons(campaign: Campaign): { reasons: string[]; fingerprint: string } | null {
+  const reasons: string[] = [];
+  if (campaign.messages.length > HOUSEKEEPING_MESSAGE_TRIGGER) reasons.push(`messages=${campaign.messages.length}`);
+  if ((campaign.memory || "").length > HOUSEKEEPING_MEMORY_CHARS_TRIGGER) reasons.push(`memory=${(campaign.memory || "").length}`);
+  if (campaign.storyCharacters.length > HOUSEKEEPING_NPC_TRIGGER) reasons.push(`npcs=${campaign.storyCharacters.length}`);
+  if (!reasons.length) return null;
+  // A coarse fingerprint of the input that triggered this sweep. Two sweeps
+  // on the same fingerprint are "the same input" — a failed one shouldn't
+  // retry until it changes (new messages, more memory, more NPCs).
+  const fingerprint = `${campaign.messages.length}:${(campaign.memory || "").length}:${campaign.storyCharacters.length}`;
+  return { reasons, fingerprint };
+}
+
+/**
+ * Decide whether housekeeping should run NOW, given cooldown and the failure
+ * budget. Returns { run: true } or { run: false, reason, until? } for logging.
+ */
+function shouldRunHousekeeping(campaign: Campaign): { run: boolean; reason?: string; until?: string } {
+  const needs = housekeepingReasons(campaign);
+  if (!needs) return { run: false, reason: "no_trigger" };
+
+  const hk = campaign.housekeeping;
+  if (!hk) return { run: true }; // never run before — go
+
+  // Failure budget: too many consecutive failures on the SAME input → stop
+  // until the input changes. A changed input (different fingerprint) resets
+  // the suppression and lets it try again.
+  const sameInput = hk.lastFailedFingerprint === needs.fingerprint;
+  const failures = hk.consecutiveFailures || 0;
+  if (sameInput && failures >= HOUSEKEEPING_MAX_CONSECUTIVE_FAILURES) {
+    return { run: false, reason: "failure_budget", until: hk.cooldownUntil };
+  }
+
+  // Cooldown: after ANY failure, wait before retrying the SAME input. A
+  // changed input overrides the cooldown and tries immediately.
+  if (sameInput && hk.cooldownUntil) {
+    const until = new Date(hk.cooldownUntil).getTime();
+    if (Date.now() < until) {
+      return { run: false, reason: "cooldown", until: hk.cooldownUntil };
+    }
+  }
+
+  return { run: true };
+}
 
 function needsHousekeeping(campaign: Campaign): boolean {
   if (campaign.messages.length > HOUSEKEEPING_MESSAGE_TRIGGER) return true;
@@ -1986,6 +2164,15 @@ async function runHousekeeping(campaign: Campaign): Promise<void> {
 
   const { model, options } = fastModelTarget();
   serverLogSmall("Housekeeping", `Sweep starting for campaign ${campaign.id} on ${model} (${staleCount} stale messages).`);
+  void logCampaignEvent(campaign.id, "INFO", "Housekeeping", "Sweep starting", {
+    model,
+    staleCount,
+    messageCount: campaign.messages.length,
+    memoryChars: (campaign.memory || "").length,
+    npcCount: campaign.storyCharacters.length,
+    hasStorySummary: !!campaign.storySummary
+  });
+  const sweepStartedAt = Date.now();
   try {
     const response = (await aquaFetch("/chat/completions", {
       method: "POST",
@@ -1995,10 +2182,20 @@ async function runHousekeeping(campaign: Campaign): Promise<void> {
         tools: [tool],
         tool_choice: { type: "function", function: { name: "apply_housekeeping" } }
       })
-    }, options)) as ChatCompletionResponse;
+    }, {
+      ...options,
+      retries: Math.max(1, Number(process.env.HOUSEKEEPING_RETRIES) || 3),
+      timeoutMs: Math.max(5000, Number(process.env.HOUSEKEEPING_TIMEOUT_MS) || 45000)
+    })) as ChatCompletionResponse;
     const message = response.choices?.[0]?.message || response.message;
     const call = Array.isArray(message?.tool_calls) ? message?.tool_calls?.[0] : null;
-    if (!call?.function?.arguments) return;
+    if (!call?.function?.arguments) {
+      void logCampaignEvent(campaign.id, "WARN", "Housekeeping", "Sweep produced no tool call", {
+        model,
+        durationMs: Date.now() - sweepStartedAt
+      });
+      return;
+    }
     const args = JSON.parse(call.function.arguments) as Record<string, any>;
 
     if (typeof args.storySummary === "string" && args.storySummary.trim()) {
@@ -2019,8 +2216,23 @@ async function runHousekeeping(campaign: Campaign): Promise<void> {
       }
     }
     serverLogSmall("Housekeeping", `Sweep applied for campaign ${campaign.id} (trimmed ${staleCount} messages)`);
+    void logCampaignEvent(campaign.id, "INFO", "Housekeeping", "Sweep applied", {
+      model,
+      durationMs: Date.now() - sweepStartedAt,
+      trimmedMessages: staleCount,
+      summaryChars: (campaign.storySummary || "").length,
+      memoryChars: (campaign.memory || "").length,
+      npcCount: campaign.storyCharacters.length,
+      duplicateNpcGroups: Array.isArray(args.duplicateNpcs) ? args.duplicateNpcs.length : 0
+    });
   } catch (err) {
     serverError("Housekeeping [small model]", "Housekeeping sweep failed (non-fatal)", err);
+    void logCampaignEvent(campaign.id, "ERROR", "Housekeeping", "Sweep failed", {
+      model,
+      durationMs: Date.now() - sweepStartedAt,
+      error: err instanceof Error ? err.message : String(err),
+      errorName: err instanceof Error ? err.name : undefined
+    });
   }
 }
 
