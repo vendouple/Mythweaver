@@ -13,7 +13,9 @@ export async function generateImage(prompt: string) {
     body: JSON.stringify({ model: config.imageModel, prompt })
   }, {
     baseUrl: config.imageBaseUrl,
-    apiKey: config.imageApiKey
+    apiKey: config.imageApiKey,
+    retries: Math.max(1, Number(process.env.IMAGE_RETRIES) || 3),
+    timeoutMs: Math.max(5000, Number(process.env.IMAGE_TIMEOUT_MS) || 60000)
   })) as ImageResponse;
 
   const first = data.data?.[0];

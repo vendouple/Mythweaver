@@ -467,6 +467,14 @@ export type Campaign = {
   hostStartedAt?: string;
   hostActiveAt?: string;
   partyLeaderId?: string;
+  /**
+   * The narration provider/model target the host has manually selected for
+   * this campaign. An alias resolved server-side by resolveChatTarget() in
+   * aqua/client.ts — the campaign JSON stores ONLY the alias, never
+   * credentials. Undefined/empty → the default target (CHAT_MODEL/BASE_URL/
+   * API_KEY). Set by the `switchModel` party action after a provider failure.
+   */
+  selectedChatTargetId?: string;
   players: Player[];
   startingStory: string;
   storyCharacters: StoryCharacter[];
@@ -526,6 +534,26 @@ export type Campaign = {
    * ballooning its context every turn. Empty until enough history piles up.
    */
   storySummary?: string;
+  /**
+   * Housekeeping operational metadata: cooldown, failure budget, and the
+   * fingerprint of the last attempted input so unchanged failures aren't
+   * retried every turn. Persisted on the campaign so a server restart
+   * doesn't reset the suppression.
+   */
+  housekeeping?: {
+    /** Consecutive failed sweeps since the last success. Reset on success. */
+    consecutiveFailures: number;
+    /** ISO timestamp of the last sweep attempt (success or failure). */
+    lastAttemptAt?: string;
+    /** ISO timestamp of the last successful sweep. */
+    lastSuccessAt?: string;
+    /** ISO timestamp until which new sweeps are suppressed (cooldown). */
+    cooldownUntil?: string;
+    /** Fingerprint of the input (message count, memory chars, NPC count) at the last failed attempt. */
+    lastFailedFingerprint?: string;
+    /** Redacted summary of the last failure (no secrets). */
+    lastError?: string;
+  };
   messages: ChatMessage[];
   campaignType?: CampaignType;
   /**

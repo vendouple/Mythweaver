@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import * as THREE from "three";
 import type { ThemeKey, ThemeVisual } from "./themeVisuals";
@@ -9,17 +9,17 @@ import type { ThemeKey, ThemeVisual } from "./themeVisuals";
  * The Weaving used to give every genre the same holographic floor, the same
  * glyph ring, and an island with nobody on it. Three things fixed here:
  *
- *   GROUND     — the foundation plane gets a per-genre surface. Pirate worlds
+ *   GROUND     â€” the foundation plane gets a per-genre surface. Pirate worlds
  *                are built over a luminous SEA (moving swell, caustics, foam);
  *                cyberpunk over a live circuit board; gothic over cathedral
  *                tracery; horror over throbbing veins; the frontier over
  *                cracked hardpan; steampunk over turning gearwork. The floor
  *                is the largest surface on screen, so this is the single
  *                biggest change to how a theme reads.
- *   FIGURE     — a genre-specific magic circle (pentacle, hexagram, compass
- *                rose, circuit die, gear, lotus mandala, deco fan…) ignites
+ *   FIGURE     â€” a genre-specific magic circle (pentacle, hexagram, compass
+ *                rose, circuit die, gear, lotus mandala, deco fanâ€¦) ignites
  *                inside the inscription as the weave charges.
- *   INHABITANTS— the island is no longer empty. Tiny luminous figures live on
+ *   INHABITANTSâ€” the island is no longer empty. Tiny luminous figures live on
  *                the plateau and act out the genre: duellists trading blows on
  *                the SNARE, a hooded circle at rite, smiths hammering on the
  *                KICK, a patrol walking the rim, statues standing vigil.
@@ -28,7 +28,7 @@ import type { ThemeKey, ThemeVisual } from "./themeVisuals";
  * extra draw calls beyond one plane, one disc, and one LineSegments.
  */
 
-/* ── ground surfaces ─────────────────────────────────────────────────────── */
+/* â”€â”€ ground surfaces â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 export type GroundMode =
   | "grid"
@@ -76,7 +76,7 @@ const GROUND_BODY: Record<GroundMode, string[]> = {
   ],
   water: [
     // A long ocean swell rolling outward, cross-chop over it, and a caustic
-    // mesh where the two wave trains interfere — the classic sunlit-shallows
+    // mesh where the two wave trains interfere â€” the classic sunlit-shallows
     // read, done with two multiplied sines.
     "float wave = 0.5 + 0.5 * sin(r * 1.05 - uTime * 1.45);",
     "float chop = sin(p.x * 0.82 + uTime * 1.15) * sin(p.y * 0.69 - uTime * 0.92);",
@@ -103,7 +103,7 @@ const GROUND_BODY: Record<GroundMode, string[]> = {
     "float petals = abs(sin(ang * 6.2831853 * 6.0));",
     "float rose = 1.0 - smoothstep(0.0, 0.1, abs(fract(r / 2.6 + petals * 0.17) - 0.5) * 2.6);",
     "float rib = 1.0 - smoothstep(0.0, 0.05, abs(fract(ang * 12.0 + uSpin * 0.5) - 0.5) * (6.2831853 / 12.0) * r);",
-    // A scalloped outer arcade — the pointed arches of a nave, seen in plan.
+    // A scalloped outer arcade â€” the pointed arches of a nave, seen in plan.
     "float arch = 1.0 - smoothstep(0.0, 0.13, abs(r - 6.6 - sin(ang * 6.2831853 * 6.0) * 0.6));",
     "st = rose * 0.28 + rib * 0.22 + arch * 0.45;",
     "hi = arch * 0.8 + rose * 0.35;"
@@ -190,7 +190,7 @@ export function groundFragment(mode: GroundMode): string {
     "  float st = 0.0;",
     "  float hi = 0.0;",
     ...GROUND_BODY[mode].map((line) => `  ${line}`),
-    // The kick's wave: wide skirt, soft edges — a swell you feel.
+    // The kick's wave: wide skirt, soft edges â€” a swell you feel.
     "  float pulse = exp(-abs(r - uPulseR) * 1.6) * uPulseA;",
     // The snare's crack: a third the width, so it reads as a separate event.
     "  float crack = exp(-abs(r - uCrackR) * 5.2) * uCrackA;",
@@ -205,7 +205,7 @@ export function groundFragment(mode: GroundMode): string {
   ].join("\n");
 }
 
-/* ── the ritual figure inside the inscription ─────────────────────────────── */
+/* â”€â”€ the ritual figure inside the inscription â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 export type FigureKind =
   | "ring"
@@ -303,7 +303,7 @@ export function makeSigilFigureTexture(kind: FigureKind, accent: string, hot: st
       spokes(5, 0.4, 0.86, -Math.PI / 2, 2, 0.3);
       break;
     case "hexagram":
-      // Two interlocked triangles — a binding, not a blessing.
+      // Two interlocked triangles â€” a binding, not a blessing.
       circle(0.95, 4, 0.45);
       poly(0.86, 3, 1, -Math.PI / 2, 8, 0.9);
       poly(0.86, 3, 1, Math.PI / 2, 8, 0.9);
@@ -400,7 +400,7 @@ export function makeSigilFigureTexture(kind: FigureKind, accent: string, hot: st
       circle(0.12, 5, 0.9);
       break;
     case "burst":
-      // A heraldic starburst — long lances, short lances, and an oath ring.
+      // A heraldic starburst â€” long lances, short lances, and an oath ring.
       circle(0.95, 4, 0.4);
       circle(0.3, 6, 0.85);
       ctx.lineWidth = 7;
@@ -450,430 +450,253 @@ export function makeSigilFigureTexture(kind: FigureKind, accent: string, hot: st
   return texture;
 }
 
-/* ── inhabitants ──────────────────────────────────────────────────────────── */
+/* ── flanking relics ──────────────────────────────────────────────────────── */
 
-export type InhabitKind = "duel" | "brawl" | "patrol" | "rite" | "forge" | "revel" | "vigil";
+/**
+ * Big themed silhouettes that hang at the LEFT AND RIGHT EDGES of the frame.
+ *
+ * The composition's problem was that everything lived in the middle third: the
+ * island, the sigil, the heart. The outer thirds were empty sky, which reads as
+ * an unfinished shot no matter how good the center is. These fill them —
+ * monoliths, hull sections, cathedral arches, wrecked signage, ships' ribs —
+ * hanging far out, slowly turning, catching the light on a crescendo.
+ *
+ * They are deliberately NOT the signature prop (that's one hero object with its
+ * own animation). These are set dressing at scale: one shared wireframe drawn
+ * six times, placed to bracket the frame rather than to be looked at.
+ */
+export type RelicKind =
+  | "monolith"
+  | "arch"
+  | "hull"
+  | "billboard"
+  | "rib"
+  | "gear"
+  | "totem"
+  | "lantern"
+  | "crag";
 
-export type InhabitSpec = {
-  kind: InhabitKind;
-  count: number;
-  /** Plateau radius they occupy. Landmarks live inside ~2.6. */
-  radius: number;
+export const EDGE_RELIC: Record<ThemeKey, RelicKind> = {
+  none: "monolith",
+  // Ruined arcane arches, still standing where the wall isn't.
+  fantasy: "arch",
+  // Hull sections off something that broke up in orbit.
+  scifi: "hull",
+  horror: "monolith",
+  // Dead signage from the block over.
+  noir: "billboard",
+  modern: "billboard",
+  // Weathered totems on the ridgeline.
+  western: "totem",
+  postapoc: "rib",
+  cyberpunk: "billboard",
+  spaceopera: "hull",
+  gothic: "arch",
+  urbanfantasy: "monolith",
+  steampunk: "gear",
+  // Ships' ribs — the frames of hulls that never got finished.
+  pirate: "rib",
+  // Paper lanterns strung between crags.
+  eastasian: "lantern",
+  superhero: "hull",
+  pulp: "crag",
+  cozy: "lantern"
 };
 
-export const INHABIT: Record<ThemeKey, InhabitSpec> = {
-  none: { kind: "patrol", count: 3, radius: 3.5 },
-  // Knights at sword practice on the terrace, plus a walking watch.
-  fantasy: { kind: "duel", count: 4, radius: 3.4 },
-  // Troopers walking a perimeter under the mast.
-  scifi: { kind: "patrol", count: 4, radius: 3.6 },
-  // A hooded circle at rite. They do not move much. That is the point.
-  horror: { kind: "rite", count: 6, radius: 3.2 },
-  // Two figures in a standoff nobody is going to walk away from.
-  noir: { kind: "duel", count: 2, radius: 3.3 },
-  modern: { kind: "patrol", count: 4, radius: 3.6 },
-  // Gunslingers: the draw lands on the snare.
-  western: { kind: "duel", count: 2, radius: 3.4 },
-  // Salvagers breaking scrap down by hand.
-  postapoc: { kind: "forge", count: 4, radius: 3.4 },
-  // A street brawl in the neon.
-  cyberpunk: { kind: "brawl", count: 5, radius: 3.3 },
-  // An honor guard holding the line of the processional.
-  spaceopera: { kind: "vigil", count: 6, radius: 3.5 },
-  // A funeral procession that never reaches the door.
-  gothic: { kind: "rite", count: 6, radius: 3.3 },
-  urbanfantasy: { kind: "duel", count: 4, radius: 3.4 },
-  // Engineers at the anvil, hammering on the downbeat.
-  steampunk: { kind: "forge", count: 4, radius: 3.4 },
-  // A boarding action across the deck.
-  pirate: { kind: "brawl", count: 6, radius: 3.4 },
-  // Two swordsmen at kata, and it is not decorative.
-  eastasian: { kind: "duel", count: 2, radius: 3.3 },
-  superhero: { kind: "duel", count: 4, radius: 3.5 },
-  pulp: { kind: "patrol", count: 3, radius: 3.5 },
-  // Somebody put music on.
-  cozy: { kind: "revel", count: 5, radius: 3.0 }
-};
+/** Build one relic's wireframe. Kept coarse — these are read as silhouettes. */
+function relicGeometry(kind: RelicKind): THREE.BufferGeometry {
+  const group = new THREE.Group();
+  const parts: THREE.BufferGeometry[] = [];
+  const add = (geometry: THREE.BufferGeometry, position?: [number, number, number], rotation?: [number, number, number]) => {
+    const mesh = new THREE.Mesh(geometry);
+    if (position) mesh.position.set(...position);
+    if (rotation) mesh.rotation.set(...rotation);
+    group.add(mesh);
+    parts.push(geometry);
+  };
 
-/** Joints: hip, neck, head, elbowL, handL, elbowR, handR, kneeL, footL, kneeR, footR. */
-const J = 11;
-const SEGS = 13;
-const HEAD_R = 0.045;
+  switch (kind) {
+    case "monolith":
+      // A leaning slab with a smaller shard beside it.
+      add(new THREE.BoxGeometry(1.1, 5.2, 0.7), [0, 0, 0], [0, 0.3, 0.07]);
+      add(new THREE.BoxGeometry(0.5, 2.3, 0.4), [1.1, -1.3, 0.4], [0, 0.8, -0.16]);
+      break;
+    case "arch":
+      // A pointed arch on two piers, the way a nave wall survives a fire.
+      add(new THREE.CylinderGeometry(0.22, 0.3, 3.6, 6), [-1.3, -0.9, 0]);
+      add(new THREE.CylinderGeometry(0.22, 0.3, 3.6, 6), [1.3, -0.9, 0]);
+      add(new THREE.TorusGeometry(1.3, 0.2, 5, 14, Math.PI), [0, 0.9, 0]);
+      add(new THREE.ConeGeometry(0.3, 1.0, 4), [0, 2.4, 0]);
+      break;
+    case "hull":
+      // A curved plate with frame ribs and a stub of spar.
+      add(new THREE.CylinderGeometry(2.0, 1.7, 3.4, 9, 1, true), [0, 0, 0], [0.2, 0, 0.4]);
+      add(new THREE.TorusGeometry(1.85, 0.1, 4, 12), [0, 1.4, 0], [Math.PI / 2, 0, 0]);
+      add(new THREE.BoxGeometry(0.3, 0.3, 3.0), [1.4, -1.0, 0], [0, 0.3, 0.5]);
+      break;
+    case "billboard":
+      // A hoarding frame with its panel half gone and a support truss.
+      add(new THREE.BoxGeometry(4.2, 2.4, 0.12));
+      add(new THREE.BoxGeometry(4.5, 0.16, 0.3), [0, 1.3, 0]);
+      add(new THREE.BoxGeometry(4.5, 0.16, 0.3), [0, -1.3, 0]);
+      add(new THREE.CylinderGeometry(0.14, 0.14, 3.4, 5), [0, -3.0, 0]);
+      add(new THREE.BoxGeometry(0.1, 2.9, 0.1), [-1.4, -0.05, 0.2], [0, 0, 0.4]);
+      break;
+    case "rib":
+      // A keel with frames standing off it — a hull that never got planked.
+      add(new THREE.CylinderGeometry(0.16, 0.24, 5.4, 5), [0, 0, 0], [0, 0, Math.PI / 2]);
+      for (let i = 0; i < 5; i += 1) {
+        const s = 1 - Math.abs(i - 2) * 0.22;
+        add(
+          new THREE.TorusGeometry(1.5 * s, 0.09, 4, 10, Math.PI * 1.1),
+          [(i - 2) * 1.1, 0.9 * s, 0],
+          [0, Math.PI / 2, 0]
+        );
+      }
+      break;
+    case "gear":
+      // A dead gear train: two wheels still meshed, one shaft.
+      add(new THREE.TorusGeometry(1.7, 0.22, 5, 11), [0, 0, 0]);
+      add(new THREE.TorusGeometry(0.95, 0.18, 5, 9), [2.3, -0.9, 0]);
+      for (let i = 0; i < 6; i += 1) {
+        add(new THREE.BoxGeometry(3.3, 0.14, 0.14), [0, 0, 0], [0, 0, (i / 6) * Math.PI]);
+      }
+      add(new THREE.CylinderGeometry(0.12, 0.12, 2.2, 5), [0, 0, 0], [Math.PI / 2, 0, 0]);
+      break;
+    case "totem":
+      // Stacked carved blocks on a post, a wing board at the top.
+      add(new THREE.CylinderGeometry(0.3, 0.36, 4.4, 5));
+      for (let i = 0; i < 3; i += 1) {
+        add(new THREE.BoxGeometry(0.9 - i * 0.14, 0.7, 0.9 - i * 0.14), [0, -1.2 + i * 1.1, 0], [0, i * 0.5, 0]);
+      }
+      add(new THREE.BoxGeometry(2.4, 0.14, 0.5), [0, 2.1, 0], [0, 0, 0.1]);
+      break;
+    case "lantern":
+      // A string of paper lanterns dropping off a broken spar.
+      add(new THREE.CylinderGeometry(0.06, 0.06, 4.6, 4), [0, 0, 0], [0, 0, Math.PI / 2.2]);
+      for (let i = 0; i < 4; i += 1) {
+        const x = -1.7 + i * 1.15;
+        const drop = -0.7 - Math.abs(i - 1.5) * 0.3;
+        add(new THREE.CylinderGeometry(0.42, 0.42, 0.7, 8), [x, drop, 0]);
+        add(new THREE.TorusGeometry(0.44, 0.04, 4, 12), [x, drop + 0.35, 0], [Math.PI / 2, 0, 0]);
+        add(new THREE.TorusGeometry(0.44, 0.04, 4, 12), [x, drop - 0.35, 0], [Math.PI / 2, 0, 0]);
+      }
+      break;
+    default:
+      // A crag: stacked rock masses, no straight lines anywhere.
+      add(new THREE.IcosahedronGeometry(1.7, 0), [0, -0.8, 0]);
+      add(new THREE.IcosahedronGeometry(1.1, 0), [0.7, 1.2, -0.3]);
+      add(new THREE.ConeGeometry(0.9, 2.4, 5), [0.2, 2.6, 0]);
+      break;
+  }
 
-type Actor = {
-  /** Home position on the plateau. */
-  x: number;
-  z: number;
-  facing: number;
-  phase: number;
-  /** 0..1 lunge/strike envelope, fired by a transient and decaying out. */
-  strike: number;
-  cooldown: number;
-  /** Walkers advance along their ring. */
-  travel: number;
-};
+  // Flatten to one wireframe in the group's local space, then throw the
+  // primitives away — from this distance only the edges register anyway.
+  group.updateMatrixWorld(true);
+  const chunks: number[] = [];
+  const v = new THREE.Vector3();
+  group.traverse((child) => {
+    if (!(child instanceof THREE.Mesh)) return;
+    const edges = new THREE.EdgesGeometry(child.geometry as THREE.BufferGeometry, 18);
+    const position = edges.getAttribute("position") as THREE.BufferAttribute;
+    for (let i = 0; i < position.count; i += 1) {
+      v.fromBufferAttribute(position, i);
+      child.localToWorld(v);
+      group.worldToLocal(v);
+      chunks.push(v.x, v.y, v.z);
+    }
+    edges.dispose();
+  });
+  for (const part of parts) part.dispose();
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(chunks), 3));
+  return geometry;
+}
 
-export type Inhabitants = {
+export type EdgeRelics = {
   object: THREE.Object3D;
   /**
-   * @param show 0..1 presence (they fade in once the island is solid)
-   * @param hit  0..1 the transient this genre fights on (usually the snare)
-   * @param beat 0..1 the low-end transient (hammer blows, stomps)
+   * @param show  0..1 overall presence
+   * @param swell 0..1 crescendo — the relics catch the light on it
    */
-  update: (t: number, dt: number, show: number, hit: number, beat: number, level: number) => void;
+  update: (t: number, dt: number, show: number, swell: number, level: number) => void;
   dispose: () => void;
 };
 
-/**
- * Build the island's population. One LineSegments carries every figure, and a
- * single Points carries their weapon sparks, so the whole living crowd is two
- * draw calls.
- */
-export function createInhabitants(
-  spec: InhabitSpec,
-  visual: ThemeVisual,
-  sparkTexture: THREE.Texture,
-  groundY: number
-): Inhabitants {
+export function createEdgeRelics(visual: ThemeVisual, rand: () => number): EdgeRelics {
   const group = new THREE.Group();
-  const count = spec.count;
-  const actors: Actor[] = [];
+  const geometry = relicGeometry(EDGE_RELIC[visual.key] || EDGE_RELIC.none);
+  const disposables: Array<{ dispose: () => void }> = [geometry];
 
-  for (let i = 0; i < count; i += 1) {
-    let x = 0;
-    let z = 0;
-    let facing = 0;
-    if (spec.kind === "duel") {
-      // Pairs squared off against each other, each pair on its own bearing.
-      const pair = Math.floor(i / 2);
-      const pairs = Math.max(1, Math.ceil(count / 2));
-      const bearing = (pair / pairs) * TAU + 0.4;
-      const cx = Math.cos(bearing) * spec.radius;
-      const cz = Math.sin(bearing) * spec.radius;
-      // The two of them stand off along the tangent, facing one another.
-      const side = i % 2 === 0 ? 1 : -1;
-      const tangent = bearing + Math.PI / 2;
-      x = cx + Math.cos(tangent) * 0.34 * side;
-      z = cz + Math.sin(tangent) * 0.34 * side;
-      facing = side > 0 ? tangent + Math.PI : tangent;
-    } else if (spec.kind === "brawl") {
-      // A scrum: everyone crowded in, all facing the middle of it.
-      const bearing = (i / count) * TAU + 0.7;
-      const jitter = 0.72 + ((i * 37) % 11) / 40;
-      const cx = Math.cos(0.9) * spec.radius;
-      const cz = Math.sin(0.9) * spec.radius;
-      x = cx + Math.cos(bearing) * jitter;
-      z = cz + Math.sin(bearing) * jitter;
-      facing = Math.atan2(cz - z, cx - x);
-    } else {
-      const bearing = (i / count) * TAU;
-      x = Math.cos(bearing) * spec.radius;
-      z = Math.sin(bearing) * spec.radius;
-      // Rites and vigils face the worldheart; walkers face their path.
-      facing = spec.kind === "patrol" ? bearing + Math.PI / 2 : Math.atan2(-z, -x);
+  // Three per side. The camera orbits, so "the edge of frame" is a RADIUS and a
+  // HEIGHT rather than a fixed screen position: parked far out and spread in
+  // height, they sweep through the outer thirds as the shot turns, and because
+  // they're beyond the armillary they never tangle with the rings.
+  const SIDES = [1, -1];
+  const items: Array<{
+    line: THREE.LineSegments;
+    material: THREE.LineBasicMaterial;
+    angle: number;
+    radius: number;
+    y: number;
+    spin: number;
+    tumble: number;
+    scale: number;
+    phase: number;
+  }> = [];
+
+  for (const side of SIDES) {
+    for (let i = 0; i < 3; i += 1) {
+      const material = new THREE.LineBasicMaterial({
+        color: new THREE.Color(i === 1 ? visual.secondary : visual.accent),
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending
+      });
+      const line = new THREE.LineSegments(geometry, material);
+      group.add(line);
+      disposables.push(material);
+      items.push({
+        line,
+        material,
+        // Clustered off the camera's two flanks (±90°) rather than evenly
+        // around, so they actually land in the outer thirds of the shot.
+        angle: side * (Math.PI / 2) + (i - 1) * 0.42 + rand() * 0.2,
+        radius: 15 + i * 3.4 + rand() * 2.5,
+        y: 1.5 + i * 3.6 + rand() * 2,
+        spin: (0.012 + rand() * 0.02) * (rand() > 0.5 ? 1 : -1),
+        tumble: 0.1 + rand() * 0.2,
+        scale: 1.5 + rand() * 1.3,
+        phase: rand() * TAU
+      });
     }
-    actors.push({
-      x,
-      z,
-      facing,
-      phase: (i * 2.399963) % TAU,
-      strike: 0,
-      cooldown: (i % 3) * 0.18,
-      travel: (i / count) * TAU
-    });
   }
-
-  const positions = new Float32Array(count * SEGS * 2 * 3);
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-  const material = new THREE.LineBasicMaterial({
-    color: new THREE.Color(visual.accentBright),
-    transparent: true,
-    opacity: 0,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending
-  });
-  const lines = new THREE.LineSegments(geometry, material);
-  group.add(lines);
-
-  // Weapon sparks: one mote per actor, parked below the floor when idle.
-  const sparkPositions = new Float32Array(count * 3).fill(-100);
-  const sparkGeometry = new THREE.BufferGeometry();
-  sparkGeometry.setAttribute("position", new THREE.BufferAttribute(sparkPositions, 3));
-  const sparkMaterial = new THREE.PointsMaterial({
-    map: sparkTexture,
-    color: new THREE.Color(visual.accentBright),
-    size: 0.3,
-    transparent: true,
-    opacity: 0,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending,
-    sizeAttenuation: true
-  });
-  const sparks = new THREE.Points(sparkGeometry, sparkMaterial);
-  group.add(sparks);
-
-  const joints = new Float32Array(J * 3);
-  const set = (index: number, forward: number, up: number, side: number) => {
-    joints[index * 3] = forward;
-    joints[index * 3 + 1] = up;
-    joints[index * 3 + 2] = side;
-  };
-
-  /** Neutral stance, so every pose only has to override what it changes. */
-  const stand = (bob: number) => {
-    set(0, 0, 0.3 + bob, 0);
-    set(1, 0.01, 0.47 + bob, 0);
-    set(2, 0.015, 0.545 + bob, 0);
-    set(3, -0.02, 0.38 + bob, 0.072);
-    set(4, -0.03, 0.29 + bob, 0.082);
-    set(5, -0.02, 0.38 + bob, -0.072);
-    set(6, -0.03, 0.29 + bob, -0.082);
-    set(7, 0.02, 0.16, 0.055);
-    set(8, 0.02, 0, 0.055);
-    set(9, -0.02, 0.16, -0.055);
-    set(10, -0.02, 0, -0.055);
-  };
-
-  const poseWalk = (t: number, phase: number, speed: number) => {
-    const c = t * speed + phase;
-    const a = Math.sin(c);
-    const b = Math.sin(c + Math.PI);
-    stand(Math.abs(a) * 0.012);
-    set(3, b * 0.1, 0.37, 0.072);
-    set(4, b * 0.18, 0.27, 0.082);
-    set(5, a * 0.1, 0.37, -0.072);
-    set(6, a * 0.18, 0.27, -0.082);
-    set(7, a * 0.09, 0.16, 0.055);
-    set(8, a * 0.17, Math.max(0, a) * 0.05, 0.055);
-    set(9, b * 0.09, 0.16, -0.055);
-    set(10, b * 0.17, Math.max(0, b) * 0.05, -0.055);
-  };
-
-  const poseStrike = (t: number, phase: number, k: number) => {
-    // k 0 → weapon cocked high; k 1 → committed, blade thrown forward.
-    const bob = Math.sin(t * 2.1 + phase) * 0.008;
-    const lean = k * 0.15;
-    stand(bob);
-    set(0, lean * 0.5, 0.3 + bob - k * 0.03, 0);
-    set(1, lean, 0.46 + bob - k * 0.02, 0);
-    set(2, lean * 1.2, 0.542 + bob - k * 0.02, 0);
-    set(5, 0.05 + k * 0.13, 0.5 - k * 0.11, -0.07);
-    set(6, 0.03 + k * 0.33, 0.68 - k * 0.45, -0.07);
-    set(3, -0.05 - k * 0.02, 0.39, 0.075);
-    set(4, -0.12 - k * 0.05, 0.31, 0.088);
-    set(7, 0.1 + k * 0.12, 0.15, 0.06);
-    set(8, 0.19 + k * 0.16, 0, 0.06);
-    set(9, -0.11, 0.15, -0.06);
-    set(10, -0.2, 0, -0.06);
-  };
-
-  const poseRite = (t: number, phase: number, lift: number) => {
-    // Hooded, head bowed, arms rising with the crescendo.
-    const sway = Math.sin(t * 0.55 + phase) * 0.02;
-    stand(Math.sin(t * 0.7 + phase) * 0.006);
-    set(1, sway, 0.46, 0);
-    set(2, sway + 0.03, 0.535, 0);
-    const up = 0.42 + lift * 0.26;
-    set(3, 0.03, up, 0.09);
-    set(4, 0.06 + lift * 0.04, up + 0.12 + lift * 0.1, 0.13);
-    set(5, 0.03, up, -0.09);
-    set(6, 0.06 + lift * 0.04, up + 0.12 + lift * 0.1, -0.13);
-    set(7, 0.01, 0.16, 0.05);
-    set(8, 0.01, 0, 0.05);
-    set(9, -0.01, 0.16, -0.05);
-    set(10, -0.01, 0, -0.05);
-  };
-
-  const poseForge = (t: number, phase: number, k: number) => {
-    // Both hands on the hammer; it falls on the beat.
-    const bob = Math.sin(t * 1.8 + phase) * 0.006;
-    stand(bob);
-    set(0, 0.03, 0.29 + bob, 0);
-    set(1, 0.06, 0.45 + bob, 0);
-    set(2, 0.09, 0.525 + bob, 0);
-    const hy = 0.62 - k * 0.44;
-    const hf = 0.1 + k * 0.24;
-    set(3, 0.08, 0.42, 0.06);
-    set(4, hf, hy, 0.045);
-    set(5, 0.08, 0.42, -0.06);
-    set(6, hf, hy, -0.045);
-    set(7, 0.08, 0.15, 0.06);
-    set(8, 0.12, 0, 0.06);
-    set(9, -0.08, 0.15, -0.06);
-    set(10, -0.12, 0, -0.06);
-  };
-
-  const poseRevel = (t: number, phase: number, energy: number) => {
-    // Weight shifting side to side, arms loose and up.
-    const s = Math.sin(t * 1.9 + phase);
-    const c = Math.cos(t * 1.9 + phase);
-    stand(Math.abs(s) * 0.02);
-    set(0, 0, 0.3 + Math.abs(s) * 0.02, s * 0.04);
-    set(1, 0, 0.47, s * 0.05);
-    set(2, 0.01, 0.545, s * 0.06);
-    set(3, 0.04, 0.5 + c * 0.05, 0.11);
-    set(4, 0.07, 0.6 + c * 0.09 + energy * 0.04, 0.15);
-    set(5, 0.04, 0.5 - c * 0.05, -0.11);
-    set(6, 0.07, 0.6 - c * 0.09 + energy * 0.04, -0.15);
-    set(7, 0, 0.16, 0.055 + s * 0.02);
-    set(8, 0, 0, 0.06 + s * 0.03);
-    set(9, 0, 0.16, -0.055 + s * 0.02);
-    set(10, 0, 0, -0.06 + s * 0.03);
-  };
-
-  const poseVigil = (t: number, phase: number) => {
-    // Statue-still, spear grounded. Only the light moves on them.
-    stand(Math.sin(t * 0.4 + phase) * 0.003);
-    set(3, 0.05, 0.42, 0.075);
-    set(4, 0.06, 0.32, 0.085);
-    set(5, 0.06, 0.46, -0.075);
-    set(6, 0.07, 0.7, -0.08);
-    set(7, 0.01, 0.16, 0.05);
-    set(8, 0.01, 0, 0.05);
-    set(9, -0.01, 0.16, -0.05);
-    set(10, -0.01, 0, -0.05);
-  };
-
-  const attr = geometry.getAttribute("position") as THREE.BufferAttribute;
-  const sparkAttr = sparkGeometry.getAttribute("position") as THREE.BufferAttribute;
-  const bones: Array<[number, number]> = [
-    [0, 1],
-    [1, 3],
-    [3, 4],
-    [1, 5],
-    [5, 6],
-    [0, 7],
-    [7, 8],
-    [0, 9],
-    [9, 10]
-  ];
-
-  let shown = 0;
 
   return {
     object: group,
-    update: (t, dt, show, hit, beat, level) => {
-      shown += (show - shown) * Math.min(1, dt * 2.4);
-      material.opacity = shown * (0.5 + level * 0.35);
-      if (shown < 0.01) {
-        sparkMaterial.opacity = 0;
-        return;
+    update: (t, dt, show, swell, level) => {
+      for (const item of items) {
+        // A very slow drift around the world, plus a lazy tumble in place.
+        const angle = item.angle + t * 0.008;
+        item.line.position.set(
+          Math.cos(angle) * item.radius,
+          item.y + Math.sin(t * 0.18 + item.phase) * 0.7,
+          Math.sin(angle) * item.radius
+        );
+        item.line.rotation.y = t * item.spin * 6 + item.phase;
+        item.line.rotation.z = Math.sin(t * 0.13 + item.phase) * item.tumble;
+        // Scale up slightly on a crescendo, so the frame's edges breathe with
+        // the score instead of the center doing all the work.
+        const s = item.scale * (1 + swell * 0.04);
+        item.line.scale.setScalar(s);
+        const target = show * (0.1 + level * 0.05 + swell * 0.14);
+        item.material.opacity += (target - item.material.opacity) * Math.min(1, dt * 2);
       }
-      // Which transient this crowd answers: fighters read the snare, smiths
-      // and stompers read the kick, the rest just breathe.
-      const trigger = spec.kind === "forge" ? beat : hit;
-      let sparkPeak = 0;
-
-      for (let i = 0; i < count; i += 1) {
-        const actor = actors[i];
-        actor.cooldown -= dt;
-        // A hit commits the figure — but only if it has recovered, so the
-        // action reads as deliberate blows rather than a vibrating blur.
-        if (trigger > 0.3 && actor.cooldown <= 0) {
-          actor.strike = 1;
-          actor.cooldown = 0.26 + (i % 4) * 0.07;
-        }
-        actor.strike = Math.max(0, actor.strike - dt * 3.4);
-        const k = 1 - (1 - actor.strike) * (1 - actor.strike);
-
-        let baseX = actor.x;
-        let baseZ = actor.z;
-        let facing = actor.facing;
-
-        switch (spec.kind) {
-          case "patrol": {
-            actor.travel += dt * 0.19 * (0.7 + level * 0.6);
-            baseX = Math.cos(actor.travel) * spec.radius;
-            baseZ = Math.sin(actor.travel) * spec.radius;
-            facing = actor.travel + Math.PI / 2;
-            poseWalk(t, actor.phase, 7.5 * (0.7 + level * 0.6));
-            break;
-          }
-          case "duel":
-          case "brawl": {
-            poseStrike(t, actor.phase, k);
-            // The lunge carries them forward off the mark and back.
-            baseX += Math.cos(facing) * k * 0.16;
-            baseZ += Math.sin(facing) * k * 0.16;
-            break;
-          }
-          case "forge": {
-            poseForge(t, actor.phase, k);
-            break;
-          }
-          case "rite": {
-            poseRite(t, actor.phase, level * 0.5 + hit * 0.5);
-            break;
-          }
-          case "revel": {
-            poseRevel(t, actor.phase, level);
-            break;
-          }
-          default: {
-            poseVigil(t, actor.phase);
-            break;
-          }
-        }
-
-        const cf = Math.cos(facing);
-        const sf = Math.sin(facing);
-        const wx = (f: number, s: number) => baseX + f * cf - s * sf;
-        const wz = (f: number, s: number) => baseZ + f * sf + s * cf;
-        const base = i * SEGS * 2;
-
-        bones.forEach(([a, b], boneIndex) => {
-          const af = joints[a * 3];
-          const au = joints[a * 3 + 1];
-          const as = joints[a * 3 + 2];
-          const bf = joints[b * 3];
-          const bu = joints[b * 3 + 1];
-          const bs = joints[b * 3 + 2];
-          attr.setXYZ(base + boneIndex * 2, wx(af, as), groundY + au, wz(af, as));
-          attr.setXYZ(base + boneIndex * 2 + 1, wx(bf, bs), groundY + bu, wz(bf, bs));
-        });
-
-        // Head as a small diamond, so it reads as a silhouette not a dot.
-        const hf = joints[2 * 3];
-        const hu = joints[2 * 3 + 1];
-        const hs = joints[2 * 3 + 2];
-        const ring: Array<[number, number]> = [
-          [hf, hu + HEAD_R],
-          [hf + HEAD_R, hu],
-          [hf, hu - HEAD_R],
-          [hf - HEAD_R, hu]
-        ];
-        for (let e = 0; e < 4; e += 1) {
-          const [f0, u0] = ring[e];
-          const [f1, u1] = ring[(e + 1) % 4];
-          const o = base + bones.length * 2 + e * 2;
-          attr.setXYZ(o, wx(f0, hs), groundY + u0, wz(f0, hs));
-          attr.setXYZ(o + 1, wx(f1, hs), groundY + u1, wz(f1, hs));
-        }
-
-        // The spark rides the weapon hand at the moment of contact.
-        const showSpark = (spec.kind === "duel" || spec.kind === "brawl" || spec.kind === "forge") && actor.strike > 0.15;
-        if (showSpark) {
-          const gf = joints[6 * 3];
-          const gu = joints[6 * 3 + 1];
-          const gs = joints[6 * 3 + 2];
-          sparkAttr.setXYZ(i, wx(gf, gs), groundY + gu, wz(gf, gs));
-          sparkPeak = Math.max(sparkPeak, actor.strike);
-        } else {
-          sparkAttr.setXYZ(i, 0, -100, 0);
-        }
-      }
-
-      attr.needsUpdate = true;
-      sparkAttr.needsUpdate = true;
-      sparkMaterial.opacity = shown * sparkPeak * 0.9;
-      sparkMaterial.size = 0.22 + sparkPeak * 0.2;
     },
     dispose: () => {
-      geometry.dispose();
-      material.dispose();
-      sparkGeometry.dispose();
-      sparkMaterial.dispose();
+      for (const item of disposables) item.dispose();
     }
   };
 }
+

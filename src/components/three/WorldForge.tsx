@@ -9,8 +9,7 @@ import {
   groundFragment,
   SIGIL_FIGURE,
   makeSigilFigureTexture,
-  INHABIT,
-  createInhabitants
+  createEdgeRelics
 } from "@/components/three/worldSignature";
 import { createThemeProp } from "@/components/three/themeProps";
 
@@ -921,23 +920,16 @@ export default function WorldForge({
       };
     });
 
-    /* -- the island's population --------------------------------------------
-       The world used to finish forging and stand there empty. Now the plateau
-       has PEOPLE on it, and they act out the genre while you wait: knights
-       trading blows on the snare, a hooded circle raising their arms on the
-       crescendo, smiths whose hammers fall on the kick, a patrol walking the
-       rim, an honor guard standing dead still. They fade in as the island
-       itself becomes solid, so the world visibly gets inhabited rather than
-       just built. Two draw calls for the whole crowd. */
-    const inhabitants = createInhabitants(
-      INHABIT[visual.key] || INHABIT.none,
-      visual,
-      sparkTexture,
-      // The plateau's top surface: the shared island cylinder, at its anchor.
-      0.75
-    );
-    scene.add(inhabitants.object);
-    disposables.push(inhabitants);
+    /* -- the flanking relics ------------------------------------------------
+       The left and right thirds of the frame used to be empty sky, which is
+       what made the shot feel unfinished — everything interesting lived in the
+       middle. Now big themed silhouettes hang out at the edges, slowly
+       turning: they read as distant monuments adrift around the world rather
+       than props, they frame the island, and they give the composition
+       something at the corners. One shared wireframe, six instances. */
+    const relics = createEdgeRelics(visual, rand);
+    scene.add(relics.object);
+    disposables.push(relics);
 
     /* -- the theme's signature landmark -------------------------------------
        The hero object that sells the genre at a glance, standing out past the
@@ -1128,8 +1120,8 @@ export default function WorldForge({
         // Hats: a fast counter-rotating sparkle over individual glyphs.
         "  float shimmer = uShimmer * (0.5 + 0.5 * sin(id * 5.1 - uTime * 14.0));",
         "  float glow = uCharge * (0.5 + 0.9 * uCharge) * twinkle",
-        "    + (uBeat * 0.42 + uSwell * 0.5) * (0.25 + uCharge)",
-        "    + strike * 1.5 + shimmer * 0.35;",
+        "    + (uBeat * 0.24 + uSwell * 0.3) * (0.25 + uCharge)",
+        "    + strike * 0.85 + shimmer * 0.2;",
         "  vec3 col = mix(uColor, uHot, clamp(uCharge * 0.7 + uBeat * 0.3 + strike * 1.2, 0.0, 1.0));",
         "  float alpha = tex.a * glow;",
         "  gl_FragColor = vec4(col * alpha, alpha);",
@@ -1396,9 +1388,10 @@ export default function WorldForge({
     disposables.push(beamTexture, beam.geometry, beamMaterial);
 
     /* -- the armillary: rings that ignite AROUND the whole island world ------
-       Formerly five near-flat halos at the same tilt — read as one thick
-       stripe, and every one of them answered the same single "beat". Now it's
-       a proper ARMILLARY SPHERE, and the variation is the point:
+       THREE rings, one per drum voice. Earlier passes had five near-flat halos
+       at the same tilt (one thick stripe, all answering one "beat") and then
+       seven (a thicket). Three is the number where each ring is individually
+       legible, and the variation is the whole point:
 
          equatorial — flat planetary bands, the world's horizon. Driven by the
                       KICK: they thrust outward and thicken on the low end.
@@ -1456,18 +1449,17 @@ export default function WorldForge({
       squash: number;
       color: THREE.Color;
     }> = [
-      // Two flat planetary bands — the world's horizon line, doubled.
-      { role: "equatorial", radius: 6.9, thickness: 0.018, threshold: 0.12, tiltX: 0.06, tiltZ: 0.02, yaw: 0, sway: 0.05, swaySpeed: 0.22, spin: 0.26, squash: 1, color: accentColor },
-      { role: "equatorial", radius: 8.9, thickness: 0.03, threshold: 0.62, tiltX: -0.09, tiltZ: -0.03, yaw: 0, sway: 0.06, swaySpeed: 0.17, spin: -0.19, squash: 1, color: accentColor },
-      // Three upright meridians, evenly spaced in yaw — a longitude cage. The
-      // 60° spacing means each is genuinely perpendicular to the equator and
-      // maximally separated from its siblings.
-      { role: "meridian", radius: 7.6, thickness: 0.02, threshold: 0.28, tiltX: Math.PI / 2, tiltZ: 0, yaw: 0, sway: 0.045, swaySpeed: 0.31, spin: 0, squash: 0.82, color: secondaryColor },
-      { role: "meridian", radius: 7.9, thickness: 0.017, threshold: 0.46, tiltX: Math.PI / 2, tiltZ: 0, yaw: Math.PI / 3, sway: 0.05, swaySpeed: 0.26, spin: 0, squash: 0.78, color: secondaryColor },
-      { role: "meridian", radius: 8.3, thickness: 0.015, threshold: 0.78, tiltX: Math.PI / 2, tiltZ: 0, yaw: (Math.PI / 3) * 2, sway: 0.055, swaySpeed: 0.35, spin: 0, squash: 0.74, color: brightColor },
-      // Two obliques scissoring between the planes at the genre's own cant.
-      { role: "oblique", radius: 7.2, thickness: 0.014, threshold: 0.2, tiltX: obliqueCant, tiltZ: obliqueCant * 0.55, yaw: 0.7, sway: 0.09, swaySpeed: 0.4, spin: 0.52, squash: 0.94, color: brightColor },
-      { role: "oblique", radius: 9.6, thickness: 0.012, threshold: 0.9, tiltX: -obliqueCant * 1.25, tiltZ: obliqueCant * 0.4, yaw: -1.1, sway: 0.11, swaySpeed: 0.33, spin: -0.44, squash: 0.9, color: accentColor }
+      // THREE rings, one per instrument — seven read as a messy thicket, and
+      // the whole point of the variation is that you can tell them apart. Each
+      // is well separated in radius so they never crowd into a single band.
+      //
+      // The flat planetary band — the world's horizon line. Rides the KICK.
+      { role: "equatorial", radius: 6.9, thickness: 0.022, threshold: 0.14, tiltX: 0.06, tiltZ: 0.02, yaw: 0, sway: 0.05, swaySpeed: 0.22, spin: 0.26, squash: 1, color: accentColor },
+      // One upright meridian, perpendicular to it. Rides the SNARE.
+      { role: "meridian", radius: 8.2, thickness: 0.02, threshold: 0.36, tiltX: Math.PI / 2, tiltZ: 0, yaw: Math.PI / 5, sway: 0.05, swaySpeed: 0.28, spin: 0, squash: 0.8, color: secondaryColor },
+      // One oblique scissoring between the two at the genre's own cant, out
+      // past both so the crossing always reads clean. Rides the HATS.
+      { role: "oblique", radius: 9.8, thickness: 0.015, threshold: 0.66, tiltX: -obliqueCant * 1.15, tiltZ: obliqueCant * 0.45, yaw: -1.1, sway: 0.1, swaySpeed: 0.35, spin: -0.44, squash: 0.92, color: brightColor }
     ];
     for (const plan of ringPlan) {
       const geometry = new THREE.TorusGeometry(plan.radius, plan.thickness, 6, 132);
@@ -1866,10 +1858,15 @@ export default function WorldForge({
       // whichever the music actually has (brightness), so a dark cue does not
       // get sparkles it hasn't earned.
       const trebleLevel = music.treble * 0.6 + music.air * 0.4;
-      const kickHit = music.kick * flavor.kick;
-      const snareHit = music.snare * flavor.snare;
-      const hatHit = music.hat * flavor.hat;
-      const swell = music.swell * flavor.swell;
+      // REACTIVITY is scaled down globally here. Earlier passes drove every
+      // channel at full strength and the scene read as strobing rather than
+      // scored — the drums should color the motion, not command it. Tuned so a
+      // hit is clearly legible but never the loudest thing on screen.
+      const REACT = 0.45;
+      const kickHit = music.kick * flavor.kick * REACT;
+      const snareHit = music.snare * flavor.snare * REACT;
+      const hatHit = music.hat * flavor.hat * REACT;
+      const swell = music.swell * flavor.swell * 0.55;
       // The scene's single "something just happened" envelope, for the few
       // places that want a generic accent — dominated by whichever instrument
       // this genre listens to hardest.
@@ -1901,14 +1898,10 @@ export default function WorldForge({
       // docks — that's the Weaving's job — it just stops being distant.
       const gather = isLobby ? easeOutCubic(charge) : 0;
       let frontier: Landmark | null = null;
-      // How solid the island itself is — the population can only stand on it
-      // once there's a floor under them.
-      let islandSolid = 0;
       for (const lm of landmarks) {
         const k = isLobby ? 0 : clamp01((p - lm.windowStart) / lm.windowWidth);
         const flight = easeOutCubic(Math.min(1, k / 0.62));
         const m = easeInOutCubic(clamp01((k - 0.58) / 0.42));
-        if (lm === landmarks[0]) islandSolid = m;
         if (!frontier && k > 0 && k < 1) frontier = lm;
 
         if (flight < 1) {
@@ -2002,20 +1995,11 @@ export default function WorldForge({
         burst.material.opacity = (1 - k) * 0.95;
       }
 
-      /* the island's population -------------------------------------------------
-         They arrive with the ground under them: invisible while the island is
-         still in flight, present the moment it's solid. In the lobby the world
-         hasn't been made yet, so nobody lives there — the crowd is one of the
-         payoffs of the weave completing. Fighters answer the snare, smiths the
-         kick, everybody breathes with the level. */
-      inhabitants.update(
-        t,
-        dt,
-        isLobby ? 0 : clamp01((islandSolid - 0.45) / 0.35),
-        clamp01(snareHit),
-        clamp01(kickHit),
-        musicLevel
-      );
+      /* the flanking relics ----------------------------------------------------
+         Present in both modes — they're what the world is being assembled OUT
+         of, so they're there from the first frame and only brighten as the
+         weave proceeds. */
+      relics.update(t, dt, isLobby ? 0.35 + charge * 0.3 : 0.4 + p * 0.5, swell, musicLevel);
 
       /* the signature landmark ------------------------------------------------
          Its `drive` is the scene's energy: the lobby's gathering charge, or the
@@ -2032,9 +2016,10 @@ export default function WorldForge({
          In the lobby a first equatorial band and one meridian are already lit
          at low charge, so the unforged world has structure to grow into. */
       for (const halo of ascRings) {
-        // Lobby: only the two lowest-threshold rings, and faintly. Weaving:
-        // each wakes as the weave crosses its own threshold.
-        const on = isLobby ? halo.threshold <= 0.3 && charge > 0.05 : p >= halo.threshold;
+        // Lobby: the equator and its meridian, faintly — enough structure for
+        // the unforged world to grow into. Weaving: each wakes as the weave
+        // crosses its own threshold.
+        const on = isLobby ? halo.role !== "oblique" && charge > 0.05 : p >= halo.threshold;
         halo.mesh.visible = on || halo.material.opacity > 0.004;
         if (on && !halo.lit) {
           halo.lit = true;
@@ -2273,12 +2258,12 @@ export default function WorldForge({
       // The KICK's wave: born at the center, crossing the whole foundation in
       // one detected beat, weighted by how much low end this genre listens to.
       gridUniforms.uPulseR.value = easeOutCubic(clamp01(pulseT)) * 17;
-      gridUniforms.uPulseA.value = (1 - clamp01(pulseT)) * (0.55 + music.bass * 0.8) * flavor.kick;
+      gridUniforms.uPulseA.value = (1 - clamp01(pulseT)) * (0.3 + music.bass * 0.4) * flavor.kick;
       // The SNARE's crack: a quarter of the distance in a third of the time.
       gridUniforms.uCrackR.value = easeOutCubic(clamp01(crackT)) * 6.5;
-      gridUniforms.uCrackA.value = Math.pow(1 - clamp01(crackT), 1.8) * 0.7 * flavor.snare;
+      gridUniforms.uCrackA.value = Math.pow(1 - clamp01(crackT), 1.8) * 0.34 * flavor.snare;
       // The HATS: shimmer only, no wave.
-      gridUniforms.uShimmer.value = hatHit * 0.5 + trebleLevel * flavor.hat * 0.25;
+      gridUniforms.uShimmer.value = hatHit * 0.3 + trebleLevel * flavor.hat * 0.14;
 
       // The ritual circle turns — and spins up as it charges. Base inscription
       // stays dim; the glow overlay above it carries the charge.
@@ -2357,9 +2342,11 @@ export default function WorldForge({
       heartCore.scale.setScalar(1 + Math.sin(t * 2.4) * 0.12 + musicLevel * 0.25 + kickHit * 0.4);
       // Swell = the halo bloom. Strings open it up; drums barely touch it.
       heartGlow.scale.setScalar(6 * (1 + swell * 0.22 + musicLevel * 0.06));
-      heartGlowMaterial.opacity = (0.35 + musicLevel * 0.3 + swell * 0.4 + arrivalFlare * 0.4 + (isLobby ? charge * 0.15 : p * 0.25)) * gutter;
+      heartGlowMaterial.opacity = (0.35 + musicLevel * 0.18 + swell * 0.25 + arrivalFlare * 0.4 + (isLobby ? charge * 0.15 : p * 0.25)) * gutter;
+      // The key light used to swing by ~50 units on a hit, which lit the whole
+      // world like a camera flash. Now the music trims it, it doesn't drive it.
       heartLight.intensity = (isLobby ? 4 + charge * 8 : 4 + p * 22) * gutter
-        + musicLevel * 14 + kickHit * 13 + snareHit * 7 + swell * 20 + arrivalFlare * 30;
+        + musicLevel * 7 + kickHit * 6 + snareHit * 3 + swell * 9 + arrivalFlare * 30;
 
       // The light column is the crescendo's instrument: it stretches upward on
       // a swell and spins up with the high end.
