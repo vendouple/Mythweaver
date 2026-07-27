@@ -448,6 +448,16 @@ export type CampaignEnding = {
   title: string;
   /** 1–3 sentence epilogue. */
   summary: string;
+  /**
+   * One line on what became of the WORLD, not the party — the outro's finale
+   * shows the campaign's own island meeting its fate, and this is the caption
+   * under it. Without it the reel falls back to a generic line per kind
+   * ("The world they fought for still stands."), which is true of every saga
+   * and therefore about none of them.
+   */
+  worldFate?: string;
+  /** A short closing line held under FIN on the final frame. */
+  epitaph?: string;
   /** When the ending was sealed. */
   endedAt: string;
   /** Optional highlight lines for the credits (key moments, final fates). */

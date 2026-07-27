@@ -1813,417 +1813,452 @@ button:disabled { cursor: default; opacity: 0.45; }
 }
 
 /* --------------------------------------------------------------------------
-   THE LAST REEL — the finale
+   THE GREAT LOOM — the finale
    --------------------------------------------------------------------------
-   Film grammar, not web grammar. The rules, and breaking any of them is how
-   this drifts back into looking like a settings screen:
+   The saga's tapestry finishing itself; all picture is generative Three.js.
+   Type rules, still load-bearing:
 
-     · TWO VERBS ONLY — fade and cut. No blur-in, no slide-up, no scale-in.
-     · NO CARDS — no rounded corners, no backdrop-filter, no borders around
-       content. Film credits have hairlines and space, not boxes.
-     · NO GLOW ON TYPE — one text-shadow for legibility over picture, and that
-       is the whole budget.
-     · ONE TEXT BLOCK ON SCREEN AT A TIME, in one fixed slot that never
+     · TWO VERBS ONLY — fade and cut. The card crossfade length is --xfade,
+       set per ending kind by the component (defeat sets 0s: hard cuts).
+     · NO CARDS — hairlines and space, never boxes, blur or glow-on-type.
+     · ONE TEXT BLOCK on screen at a time, in one fixed band that never
        resizes. Nothing scrolls. Ever.
-     · NEVER TWO TYPE SIZES competing in one card.
+     · --gate is the aperture (fraction of frame that is picture) and
+       --jitter a horizontal gate jump — both driven per-frame by the loop.
    -------------------------------------------------------------------------- */
-.reel {
+.loom {
   position: absolute;
   inset: 0;
   z-index: 40;
   overflow: hidden;
   background: #000;
   cursor: pointer;
-  /* --gate: aperture half-height as a fraction of the frame, driven per-frame
-     by the render loop so the matte can strike open and slam shut.
-     --jitter: horizontal gate jump, used only by the cliffhanger run-out. */
-  --gate: 0.42;
-  --jitter: 0;
+  user-select: none;
 }
-/* No opening CSS fade. The strike belongs to the picture — the gate opens and
-   the lamp hits the frame, both driven by the render loop — and wrapping that
-   in an `animation: … both` on the root meant anything that stopped the
-   animation from advancing (a backgrounded tab, a paused compositor) held the
-   entire finale at opacity 0 with no way back. */
-
-.reel-gate {
+.loom-gate {
   position: absolute;
   inset: 0;
-  pointer-events: none;
-  transform: translateX(calc(var(--jitter) * 1px));
+  transform: translateX(calc(var(--jitter, 0) * 1px));
 }
-.reel-gate canvas {
-  width: 100% !important;
-  height: 100% !important;
+.loom-gate canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   display: block;
 }
-
-/* The aperture. Real mattes, driven by the render loop — they strike open on
-   the first beat and, for a defeat, shut the doorway down to a hairline. */
-.reel-matte {
+.loom-scrim {
+  /* Readability is structural: a soft dark floor under the reading beats so
+     the words never fight the picture. Not a card — a gradient, like credits. */
   position: absolute;
   left: 0;
   right: 0;
-  background: #000;
-  pointer-events: none;
-  z-index: 3;
-  height: calc((50% - var(--gate) * 100%));
-}
-.reel-matte-top { top: 0; }
-.reel-matte-bottom { bottom: 0; }
-
-/* --------------------------------------------------------------------------
-   The band — every card lives in this ONE grid cell and cross-fades in place
-   -------------------------------------------------------------------------- */
-.reel-band {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: calc((50% - var(--gate) * 100%) + clamp(1.2rem, 4vh, 3rem));
-  z-index: 4;
-  display: grid;
-  place-items: end center;
-  min-height: min(34vh, 20rem);
-  padding: 0 clamp(1.25rem, 6vw, 5rem);
-  pointer-events: none;
+  bottom: 0;
+  height: 62%;
+  background: linear-gradient(180deg, rgba(2, 3, 6, 0) 0%, rgba(2, 3, 6, 0.55) 42%, rgba(2, 3, 6, 0.82) 100%);
   opacity: 0;
-  transition: opacity 0.45s linear;
+  transition: opacity 0.9s ease;
+  z-index: 1;
+  pointer-events: none;
 }
-.reel-band.is-lit { opacity: 1; }
+.loom-scrim.is-on { opacity: 1; }
 
-.reel-card {
+.loom-matte {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: calc((1 - var(--gate, 0.5)) * 50%);
+  background: #000;
+  z-index: 2;
+  pointer-events: none;
+}
+.loom-matte-top { top: 0; }
+.loom-matte-bottom { bottom: 0; }
+
+/* ---- the band: one grid cell, every card stacked into it ---- */
+.loom-band {
+  position: absolute;
+  left: 5%;
+  right: 5%;
+  bottom: calc((1 - var(--gate, 0.5)) * 50% + 2%);
+  height: min(34vh, 340px);
+  z-index: 3;
+  display: grid;
+  pointer-events: none;
+}
+.loom-card {
   grid-area: 1 / 1;
-  width: 100%;
-  max-width: 62rem;
   display: flex;
   flex-direction: column;
   align-items: center;
-  text-align: center;
+  justify-content: flex-end;
   gap: 0.55rem;
+  text-align: center;
   opacity: 0;
   visibility: hidden;
-  /* Fade only. The one concession to easing is a linear ramp, because a
-     projector's dissolve is linear. */
-  transition: opacity 0.5s linear, visibility 0s linear 0.5s;
+  transition: opacity var(--xfade, 0.6s) ease, visibility 0s linear calc(var(--xfade, 0.6s));
+  padding-bottom: 0.6rem;
 }
-.reel-card.is-on {
+.loom-card.is-on {
   opacity: 1;
   visibility: visible;
-  transition: opacity 0.5s linear, visibility 0s linear 0s;
+  transition: opacity var(--xfade, 0.6s) ease, visibility 0s linear 0s;
 }
-/* A defeat cuts. Nothing in a defeat is allowed to ease. */
-.reel-defeat .reel-card { transition: opacity 0s steps(1) 0s, visibility 0s linear 0s; }
 
-/* Small caps labels — the only thing allowed above a card. */
-.reel-label,
-.reel-kicker {
+/* ---- shared type ---- */
+.loom-label,
+.loom-kicker {
   font-family: var(--font-ui), system-ui, sans-serif;
-  font-size: clamp(0.6rem, 0.85vw, 0.72rem);
+  font-size: clamp(0.62rem, 1vw, 0.78rem);
   letter-spacing: 0.42em;
   text-transform: uppercase;
-  color: rgba(232, 220, 192, 0.42);
-  text-indent: 0.42em;
+  color: rgba(214, 220, 235, 0.6);
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.9);
 }
+.loom-band, .loom-band * { pointer-events: none; }
 
-.reel-kind {
-  font-family: var(--font-display), serif;
-  font-weight: 500;
-  font-size: clamp(1.1rem, 2.4vw, 1.9rem);
-  letter-spacing: 0.5em;
-  text-transform: uppercase;
-  text-indent: 0.5em;
-  color: var(--gold-bright);
-  text-shadow: 0 2px 20px rgba(0, 0, 0, 0.9);
-}
-
-/* --------------------------------------------------------------------------
-   The title — the one moment allowed to be enormous
-   -------------------------------------------------------------------------- */
-.reel-title {
-  font-family: var(--font-display), serif;
-  font-weight: 900;
-  text-transform: uppercase;
-  color: var(--parchment);
-  margin: 0;
-  line-height: 0.98;
-  letter-spacing: 0.01em;
-  text-wrap: balance;
-  text-shadow: 0 2px 28px rgba(0, 0, 0, 0.95);
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 0 0.28em;
-}
-/* Sized off a MEASURED word count, not off clamp() and hope. An AI-authored
-   twelve-word title is a certainty, not an edge case. */
-.reel-title[data-len="short"] { font-size: clamp(2.6rem, 8.4vw, 7rem); }
-.reel-title[data-len="mid"]   { font-size: clamp(2.1rem, 6.2vw, 5.2rem); }
-.reel-title[data-len="long"]  { font-size: clamp(1.5rem, 3.9vw, 3.2rem); letter-spacing: 0.03em; }
-
-/* Word-level reveal by opacity only — no blur, no translate. Those read as
-   web; a projector cannot do them. */
-.reel-word {
-  display: inline-block;
-  opacity: 0;
-}
-.reel-card-title.is-on .reel-word {
-  animation: reel-word-in 0.44s linear both;
-  animation-delay: calc(var(--i) * 0.085s + 0.12s);
-}
-@keyframes reel-word-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-/* --------------------------------------------------------------------------
-   Subtitles and intertitles — hard cut, never crossfade
-   -------------------------------------------------------------------------- */
-.reel-subtitle {
+/* ---- strike: the saga's name under the first drawn thread ---- */
+.loom-saga {
   font-family: var(--font-serif), serif;
-  font-size: clamp(1.05rem, 2vw, 1.6rem);
-  line-height: 1.5;
-  color: #f0e8d6;
-  margin: 0;
-  max-width: 46rem;
-  text-wrap: pretty;
-  text-shadow: 0 2px 16px rgba(0, 0, 0, 0.95);
+  font-size: clamp(0.95rem, 1.7vw, 1.3rem);
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  color: rgba(220, 226, 240, 0.55);
+  text-shadow: 0 1px 12px rgba(0, 0, 0, 0.9);
 }
 
-.reel-intertitle {
+/* ---- loom: one line names the weave's fate ---- */
+.loom-line {
   font-family: var(--font-serif), serif;
   font-style: italic;
-  font-size: clamp(1.2rem, 2.6vw, 2.1rem);
-  line-height: 1.35;
-  color: var(--parchment);
-  margin: 0;
-  max-width: 42rem;
-  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.95);
-  animation: reel-cut-in 0.24s steps(2) both;
-}
-@keyframes reel-cut-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  font-size: clamp(1.15rem, 2.4vw, 1.9rem);
+  color: rgba(235, 238, 248, 0.9);
+  text-shadow: 0 2px 16px rgba(0, 0, 0, 0.85);
 }
 
-/* --------------------------------------------------------------------------
-   The ledger — no cards. A hairline, a big number, a tiny label.
-   -------------------------------------------------------------------------- */
-.reel-ledger {
+/* ---- kind: the verdict ---- */
+.loom-kind {
+  font-family: var(--font-display), serif;
+  font-size: clamp(1.7rem, 4.4vw, 3.6rem);
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  padding-left: 0.34em; /* recenter the tracked text */
+  color: #e8e4d8;
+  text-shadow: 0 2px 22px rgba(0, 0, 0, 0.85);
+}
+.loom-victory .loom-kind { color: #ffe2a1; }
+.loom-defeat .loom-kind { color: #96a2b4; }
+.loom-bittersweet .loom-kind { color: #ecc9a8; }
+.loom-escape .loom-kind { color: #bde8f2; }
+.loom-draw .loom-kind { color: #ccd2dc; }
+.loom-cliffhanger .loom-kind { color: #d9b8ff; }
+
+/* ---- title: the one enormous moment ---- */
+.loom-title {
+  font-family: var(--font-display), serif;
+  font-weight: 700;
+  line-height: 1.08;
+  margin: 0;
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
-  gap: clamp(1.1rem, 4vw, 3.2rem);
+  column-gap: 0.32em;
+  row-gap: 0.08em;
+  color: #f2ead6;
+  text-shadow: 0 3px 26px rgba(0, 0, 0, 0.9), 0 0 2px rgba(0, 0, 0, 0.8);
+  max-width: 100%;
 }
-.reel-entry {
+.loom-title[data-len="short"] { font-size: clamp(2.4rem, 6.8vw, 5.8rem); }
+.loom-title[data-len="mid"]   { font-size: clamp(1.9rem, 5vw, 4.4rem); }
+.loom-title[data-len="long"]  { font-size: clamp(1.4rem, 3.4vw, 2.9rem); letter-spacing: 0.03em; }
+.loom-word {
+  opacity: 0;
+  transition: opacity var(--xfade, 0.6s) ease;
+  transition-delay: calc(var(--i, 0) * 0.13s + 0.15s);
+  display: inline-block;
+}
+.loom-card-title.is-on .loom-word { opacity: 1; }
+/* Victory and bittersweet titles are dyed, not glowed: a vertical gradient
+   clipped to the glyphs — uniform per word, so multi-line titles stay even. */
+.loom-victory .loom-word {
+  background: linear-gradient(180deg, #fff3d0 8%, #ffd27a 55%, #c8963c 96%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.loom-bittersweet .loom-word {
+  background: linear-gradient(180deg, #ffdf9e 12%, #d9b98a 46%, #7e8798 88%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.loom-defeat .loom-title { color: #aeb8c8; letter-spacing: 0.06em; }
+.loom-draw .loom-title { color: #dde2ea; }
+.loom-cliffhanger .loom-card-title.is-on .loom-title { animation: loom-unstable 4.8s steps(1) infinite; }
+
+/* ---- epilogue: the summary, sized to its own length ---- */
+.loom-subtitle {
+  font-family: var(--font-serif), serif;
+  color: rgba(238, 240, 248, 0.94);
+  line-height: 1.5;
+  margin: 0;
+  max-width: min(62rem, 92%);
+  text-shadow: 0 2px 16px rgba(0, 0, 0, 0.9);
+}
+.loom-subtitle[data-len="short"] { font-size: clamp(1.1rem, 2.1vw, 1.7rem); }
+.loom-subtitle[data-len="mid"]   { font-size: clamp(0.98rem, 1.75vw, 1.4rem); }
+.loom-subtitle[data-len="long"]  { font-size: clamp(0.86rem, 1.45vw, 1.16rem); line-height: 1.45; }
+
+/* ---- chronicle: one remembered line at a time ---- */
+.loom-intertitle {
+  font-family: var(--font-serif), serif;
+  font-style: italic;
+  font-size: clamp(1.15rem, 2.5vw, 2rem);
+  color: rgba(240, 240, 246, 0.96);
+  margin: 0;
+  max-width: min(56rem, 92%);
+  line-height: 1.4;
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.9);
+  animation: loom-breath var(--xfade, 0.6s) ease;
+}
+@keyframes loom-breath { from { opacity: 0; } to { opacity: 1; } }
+.loom-defeat .loom-intertitle { animation: none; }
+
+/* ---- ledger: hairline, number, label ---- */
+.loom-ledger {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  column-gap: clamp(1.6rem, 4vw, 4rem);
+  row-gap: 1rem;
+  max-width: 94%;
+}
+.loom-entry {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.28rem;
-  min-width: 6rem;
-  padding-top: 0.7rem;
-  border-top: 1px solid rgba(232, 220, 192, 0.3);
+  gap: 0.3rem;
+  padding-top: 0.55rem;
+  border-top: 1px solid rgba(216, 208, 180, 0.35);
+  min-width: 7.5rem;
   opacity: 0;
-  animation: reel-word-in 0.4s linear both;
-  animation-delay: calc(var(--i) * 0.14s + 0.15s);
+  transition: opacity var(--xfade, 0.6s) ease;
+  transition-delay: calc(var(--i, 0) * 0.14s);
 }
-.reel-entry-value {
+.loom-card-ledger.is-on .loom-entry { opacity: 1; }
+.loom-entry-value {
   font-family: var(--font-display), serif;
-  font-weight: 700;
-  font-size: clamp(1.4rem, 3vw, 2.4rem);
-  line-height: 1;
-  color: var(--gold-bright);
-  text-shadow: 0 2px 16px rgba(0, 0, 0, 0.9);
+  font-size: clamp(1.5rem, 2.8vw, 2.4rem);
+  color: #f2ead6;
+  text-shadow: 0 2px 14px rgba(0, 0, 0, 0.9);
+  line-height: 1.1;
 }
-.reel-entry-label {
+.loom-entry-value[data-len="long"] { font-size: clamp(1rem, 1.7vw, 1.4rem); }
+.loom-entry-label {
   font-family: var(--font-ui), system-ui, sans-serif;
-  font-size: clamp(0.58rem, 0.8vw, 0.68rem);
+  font-size: clamp(0.58rem, 0.85vw, 0.72rem);
   letter-spacing: 0.24em;
   text-transform: uppercase;
-  color: rgba(232, 220, 192, 0.5);
-  text-indent: 0.24em;
+  color: rgba(206, 212, 228, 0.62);
 }
 
-/* --------------------------------------------------------------------------
-   The cast — one hero holds the frame at a time
-   -------------------------------------------------------------------------- */
-.reel-cast {
+/* ---- cast: one hero at a time; their thread stands up behind the words ---- */
+.loom-cast {
   display: flex;
   align-items: center;
-  gap: clamp(1rem, 2.5vw, 2rem);
+  gap: clamp(1.1rem, 2.4vw, 2.2rem);
+  max-width: min(58rem, 94%);
   text-align: left;
-  animation: reel-cut-in 0.3s steps(2) both;
 }
-.reel-face {
-  flex: 0 0 auto;
-  width: clamp(5rem, 9vw, 8rem);
-  height: clamp(5rem, 9vw, 8rem);
+.loom-face {
+  width: clamp(88px, 12vw, 128px);
+  height: clamp(88px, 12vw, 128px);
+  flex: none;
+  border: 1px solid rgba(226, 218, 192, 0.4);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.7), 0 14px 40px -18px var(--seat, rgba(230, 195, 120, 0.7));
+  background: #0a0d16;
+  position: relative;
   overflow: hidden;
-  display: grid;
-  place-items: center;
-  /* Backlit, not bordered: the seat colour is a rim of light behind the head,
-     which flatters a variable-quality AI portrait instead of framing it. */
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6), 0 0 38px -6px var(--seat);
-  background: #05060a;
 }
-.reel-face img {
+.loom-face img {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  filter: contrast(1.08) saturate(0.82);
+  display: block;
+  filter: saturate(0.92) contrast(1.04);
 }
-/* Composed as the design, not as a fallback: a struck blank with the hero's
-   initial over the campaign's own glyph. */
-.reel-face-blank {
-  position: relative;
-  width: 100%;
-  height: 100%;
-  display: grid;
-  place-items: center;
-  background: radial-gradient(circle at 50% 38%, rgba(232, 220, 192, 0.14), rgba(5, 6, 10, 0.9) 70%);
-}
-.reel-face-initial {
-  font-family: var(--font-display), serif;
-  font-weight: 900;
-  font-size: clamp(1.8rem, 3.4vw, 3rem);
-  color: rgba(232, 220, 192, 0.85);
-  line-height: 1;
-}
-.reel-face-glyph {
+.loom-face-blank {
   position: absolute;
   inset: 0;
   display: grid;
   place-items: center;
-  font-size: clamp(3.4rem, 6.4vw, 5.6rem);
-  color: var(--seat);
-  opacity: 0.2;
+  background:
+    radial-gradient(120% 90% at 50% 12%, color-mix(in srgb, var(--seat, #c9a35c) 26%, transparent), transparent 70%),
+    #0a0d16;
 }
-.reel-cast-lines {
+.loom-face-initial {
+  font-family: var(--font-display), serif;
+  font-size: clamp(2.1rem, 4.4vw, 3.4rem);
+  color: var(--seat, #e6c378);
+  line-height: 1;
+}
+.loom-face-glyph {
+  position: absolute;
+  right: 7px;
+  bottom: 3px;
+  font-size: clamp(0.85rem, 1.4vw, 1.15rem);
+  color: rgba(222, 226, 240, 0.4);
+}
+.loom-cast-lines {
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
+  gap: 0.22rem;
   min-width: 0;
 }
-.reel-cast-name {
+.loom-cast-name {
   font-family: var(--font-display), serif;
-  font-weight: 700;
-  font-size: clamp(1.3rem, 2.8vw, 2.2rem);
-  line-height: 1.1;
-  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.95);
+  font-size: clamp(1.5rem, 3vw, 2.5rem);
+  line-height: 1.12;
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.9);
 }
-.reel-cast-epithet {
+.loom-cast-epithet {
   font-family: var(--font-serif), serif;
   font-style: italic;
   font-size: clamp(0.95rem, 1.6vw, 1.25rem);
-  color: rgba(232, 220, 192, 0.78);
+  color: rgba(233, 226, 205, 0.85);
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.9);
 }
-.reel-cast-player {
+.loom-cast-player {
   font-family: var(--font-ui), system-ui, sans-serif;
-  font-size: clamp(0.58rem, 0.8vw, 0.68rem);
-  letter-spacing: 0.28em;
+  font-size: clamp(0.6rem, 0.9vw, 0.74rem);
+  letter-spacing: 0.3em;
   text-transform: uppercase;
-  color: rgba(232, 220, 192, 0.4);
-  text-indent: 0.28em;
+  color: rgba(203, 210, 226, 0.55);
+}
+.loom-cast-fate {
+  font-family: var(--font-serif), serif;
+  font-size: clamp(0.9rem, 1.45vw, 1.15rem);
+  color: rgba(230, 233, 242, 0.88);
+  line-height: 1.45;
+  margin: 0.35rem 0 0;
+  text-shadow: 0 2px 14px rgba(0, 0, 0, 0.9);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ---- fin ---- */
+.loom-fin {
+  font-family: var(--font-display), serif;
+  font-size: clamp(2rem, 5vw, 4.4rem);
+  letter-spacing: 0.5em;
+  padding-left: 0.5em;
+  text-transform: uppercase;
+  color: #efe8d4;
+  text-shadow: 0 3px 26px rgba(0, 0, 0, 0.9);
+  position: relative;
+}
+/* The saga's own last line, under FIN. Deliberately small — FIN is the
+   gesture, this is the whisper after it. */
+.loom-epitaph {
+  font-family: var(--font-serif), serif;
+  font-style: italic;
+  font-size: clamp(0.85rem, 1.5vw, 1.15rem);
+  letter-spacing: 0.06em;
+  color: rgba(226, 232, 245, 0.62);
+  text-shadow: 0 2px 14px rgba(0, 0, 0, 0.9);
+  max-width: 42ch;
   margin-top: 0.15rem;
 }
-.reel-cast-fate {
-  font-family: var(--font-serif), serif;
-  font-size: clamp(0.92rem, 1.5vw, 1.15rem);
-  line-height: 1.45;
-  color: rgba(232, 220, 192, 0.72);
-  margin: 0.3rem 0 0;
-  max-width: 34rem;
-}
-
-/* --------------------------------------------------------------------------
-   FIN
-   -------------------------------------------------------------------------- */
-.reel-fin {
-  font-family: var(--font-display), serif;
-  font-weight: 500;
-  font-size: clamp(1.2rem, 2.6vw, 2.1rem);
-  letter-spacing: 0.62em;
-  text-indent: 0.62em;
-  text-transform: uppercase;
-  color: rgba(232, 220, 192, 0.9);
-  text-shadow: 0 2px 22px rgba(0, 0, 0, 0.95);
-}
-/* The cliffhanger's card never quite settles — the lamp is already failing. */
-.reel-cliffhanger .reel-fin { animation: reel-gutter 5.2s steps(1) infinite; }
-@keyframes reel-gutter {
-  0%, 84%, 100% { opacity: 0.9; }
-  86% { opacity: 0.2; }
-  88% { opacity: 0.9; }
-  92% { opacity: 0.35; }
-  94% { opacity: 0.9; }
-}
-
-/* --------------------------------------------------------------------------
-   Controls — present, unobtrusive, never competing with the picture
-   -------------------------------------------------------------------------- */
-.reel-skip,
-.reel-leave {
+.loom-victory .loom-fin { color: #ffe2a1; }
+.loom-defeat .loom-fin { color: #9aa6b8; }
+.loom-draw .loom-fin { font-size: clamp(1.15rem, 2.6vw, 2.1rem); letter-spacing: 0.4em; padding-left: 0.4em; }
+.loom-draw .loom-fin::before,
+.loom-draw .loom-fin::after {
+  content: "";
   position: absolute;
-  z-index: 6;
+  top: 50%;
+  width: clamp(2rem, 6vw, 5rem);
+  height: 1px;
+  background: rgba(216, 220, 232, 0.5);
+}
+.loom-draw .loom-fin::before { right: calc(100% + 1.2rem); }
+.loom-draw .loom-fin::after { left: calc(100% + 0.8rem); }
+.loom-cliffhanger .loom-fin {
+  color: #d9b8ff;
+  font-size: clamp(1.3rem, 3vw, 2.4rem);
+  letter-spacing: 0.42em;
+  padding-left: 0.42em;
+  animation: loom-gutter 5.2s steps(1) infinite;
+}
+@keyframes loom-gutter {
+  0%, 91%, 94%, 100% { opacity: 1; }
+  92%, 93% { opacity: 0.25; }
+}
+@keyframes loom-unstable {
+  0%, 96.4%, 97.4%, 100% { transform: none; opacity: 1; }
+  96.5%, 97.3% { transform: translateX(5px); opacity: 0.82; }
+}
+
+/* ---- controls ---- */
+.loom-skip,
+.loom-back,
+.loom-leave {
+  position: absolute;
+  z-index: 5;
   font-family: var(--font-ui), system-ui, sans-serif;
-  font-size: 0.66rem;
-  letter-spacing: 0.28em;
+  font-size: 0.72rem;
+  letter-spacing: 0.3em;
   text-transform: uppercase;
-  text-indent: 0.28em;
-  color: rgba(232, 220, 192, 0.42);
+  color: rgba(205, 212, 228, 0.55);
   background: none;
   border: none;
-  padding: 0.6rem 0.9rem;
+  border-bottom: 1px solid transparent;
+  padding: 0.5rem 0.2rem;
   cursor: pointer;
-  transition: color 0.3s linear;
+  pointer-events: auto;
+  transition: color 0.25s ease, border-color 0.25s ease;
 }
-.reel-skip:hover,
-.reel-leave:hover { color: var(--parchment); }
-.reel-skip {
-  right: clamp(0.6rem, 2vw, 1.6rem);
-  bottom: clamp(0.6rem, 2vh, 1.4rem);
-}
-.reel-leave {
-  left: 50%;
-  transform: translateX(-50%);
-  bottom: clamp(0.8rem, 3vh, 2rem);
-  animation: reel-word-in 1.2s linear both;
-  animation-delay: 1.4s;
-}
+.loom-skip:hover,
+.loom-back:hover,
+.loom-leave:hover { color: #efe8d4; border-bottom-color: rgba(226, 218, 192, 0.5); }
+.loom-skip { right: 2.2rem; bottom: 1.1rem; }
+.loom-back { left: 2.2rem; bottom: 1.1rem; }
+.loom-leave { left: 50%; transform: translateX(-50%); bottom: 1.1rem; }
 
+/* ---- small screens ---- */
 @media (max-width: 720px) {
-  .reel-band {
-    min-height: min(46vh, 22rem);
-    place-items: center center;
-    bottom: calc((50% - var(--gate) * 100%) + 0.8rem);
-  }
-  .reel-cast {
-    flex-direction: column;
-    text-align: center;
-    gap: 0.7rem;
-  }
-  .reel-cast-fate { text-align: center; }
-  .reel-title[data-len="short"] { font-size: clamp(2.2rem, 11vw, 3.4rem); }
-  .reel-title[data-len="mid"]   { font-size: clamp(1.8rem, 9vw, 2.8rem); }
-  .reel-title[data-len="long"]  { font-size: clamp(1.3rem, 6.4vw, 2rem); }
+  .loom-band { left: 4%; right: 4%; height: 40vh; bottom: calc((1 - var(--gate, 0.5)) * 50% + 1%); }
+  .loom-cast { flex-direction: column; text-align: center; gap: 0.8rem; }
+  .loom-cast-lines { align-items: center; }
+  .loom-cast-fate { text-align: center; -webkit-line-clamp: 4; }
+  .loom-face { width: 76px; height: 76px; }
+  .loom-title[data-len="short"] { font-size: clamp(2.2rem, 11vw, 3.4rem); }
+  .loom-title[data-len="mid"]   { font-size: clamp(1.8rem, 9vw, 2.8rem); }
+  .loom-title[data-len="long"]  { font-size: clamp(1.3rem, 6.4vw, 2rem); }
+  .loom-subtitle[data-len="long"] { font-size: 0.82rem; }
+  .loom-entry { min-width: 5.4rem; }
 }
 
-/* Reduced motion: the reel still cuts between cards, but nothing animates
-   within them and the picture is a single rendered still. */
+/* ---- reduced motion: the loop renders one settled still; cards cut ---- */
 @media (prefers-reduced-motion: reduce) {
-  .reel,
-  .reel-card,
-  .reel-word,
-  .reel-entry,
-  .reel-intertitle,
-  .reel-cast,
-  .reel-leave,
-  .reel-cliffhanger .reel-fin {
+  .loom,
+  .loom-card,
+  .loom-word,
+  .loom-entry,
+  .loom-intertitle,
+  .loom-cast,
+  .loom-leave,
+  .loom-cliffhanger .loom-fin,
+  .loom-cliffhanger .loom-card-title.is-on .loom-title {
     animation: none !important;
     transition: none !important;
-    opacity: 1;
   }
-  .reel-card { visibility: hidden; opacity: 0; }
-  .reel-card.is-on { visibility: visible; opacity: 1; }
+  .loom-card { visibility: hidden; opacity: 0; }
+  .loom-card.is-on { visibility: visible; opacity: 1; }
+  .loom-word { opacity: 1; }
+  .loom-card-ledger.is-on .loom-entry { opacity: 1; }
 }
 
 /* Debug-only full-screen Three.js scene previews */

@@ -134,20 +134,20 @@ function makeGlyphBandTexture(accent: string, glyphs: string, font: string, anis
    fixed slots) from a tiny primitive DSL, so silhouettes read distinctly per
    genre while the assembly choreography stays one code path. */
 
-type Prim = {
+export type Prim = {
   g: "box" | "cone" | "cyl" | "ico" | "tet" | "oct" | "torus" | "sphere";
   a: number[];
   p?: [number, number, number];
   r?: [number, number, number];
 };
 
-type LandmarkDef = {
+export type LandmarkDef = {
   prims: Prim[];
   /** Fragments that never truly settle — shards/drones keep floating. */
   float?: boolean;
 };
 
-function makeGeometry(prim: Prim): THREE.BufferGeometry {
+export function makeGeometry(prim: Prim): THREE.BufferGeometry {
   switch (prim.g) {
     case "box": return new THREE.BoxGeometry(prim.a[0], prim.a[1], prim.a[2]);
     case "cone": return new THREE.ConeGeometry(prim.a[0], prim.a[1], Math.round(prim.a[2] ?? 6));
@@ -161,7 +161,7 @@ function makeGeometry(prim: Prim): THREE.BufferGeometry {
 }
 
 /** The floating island every theme shares — plateau above, crag below. */
-const ISLAND: LandmarkDef = {
+export const ISLAND: LandmarkDef = {
   prims: [
     { g: "cyl", a: [4.3, 2.9, 1.5, 9], p: [0, -0.75, 0] },
     { g: "cone", a: [2.5, 3.0, 7], p: [0, -2.9, 0], r: [Math.PI, 0, 0] }
@@ -187,7 +187,7 @@ const trio = (make: (i: number) => Prim[], spots: Array<[number, number]>): Prim
   })));
 
 /** Six landmark slots on the island plateau (x, z), hero slot first. */
-const SLOTS: Array<[number, number]> = [
+export const SLOTS: Array<[number, number]> = [
   [0, -0.2],
   [-2.2, -1.1],
   [2.0, 1.1],
@@ -196,7 +196,7 @@ const SLOTS: Array<[number, number]> = [
   [0.5, 0.9]
 ];
 
-const KITS: Record<ThemeKey, LandmarkDef[]> = {
+export const KITS: Record<ThemeKey, LandmarkDef[]> = {
   none: [
     { prims: [{ g: "box", a: [0.55, 2.6, 0.55], p: [0, 1.3, 0] }, { g: "oct", a: [0.42], p: [0, 2.95, 0] }] },
     { prims: [{ g: "cone", a: [1.15, 2.2, 5], p: [-0.3, 1.1, 0] }, { g: "cone", a: [0.8, 1.5, 5], p: [0.7, 0.75, 0.4] }] },
@@ -579,7 +579,7 @@ const EMBLEMS: Record<ThemeKey, { prims: Prim[]; y: number }> = {
 
 /* Far-orbit debris silhouettes, themed: crystals, hull plates, skull-round
    stones, glass slivers, planks… depth dressing that reads in genre. */
-const DEBRIS_SHAPE: Record<ThemeKey, (rand: () => number) => THREE.BufferGeometry> = {
+export const DEBRIS_SHAPE: Record<ThemeKey, (rand: () => number) => THREE.BufferGeometry> = {
   none: (r) => new THREE.TetrahedronGeometry(0.22 + r() * 0.3, 0),
   fantasy: (r) => new THREE.OctahedronGeometry(0.2 + r() * 0.26, 0),
   scifi: (r) => new THREE.BoxGeometry(0.34 + r() * 0.3, 0.1 + r() * 0.1, 0.22 + r() * 0.22),

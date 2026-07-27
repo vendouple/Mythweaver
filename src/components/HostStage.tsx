@@ -952,27 +952,6 @@ export default function HostStage({
       // a beat before showing the credits.
       (!!seenRef.current && campaign.displayEvents.some((event) => !seenRef.current?.has(event.id))));
 
-  // The saga's own painted scenes, for the finale to hold full-frame. Spread
-  // across the whole campaign rather than taking the last few, so the reel
-  // shows where the story began as well as where it ended — and the current
-  // backdrop is always last, because that is the frame the table is looking at
-  // when the credits strike.
-  const endingPlates = useMemo(() => {
-    const gallery = (campaign.images || []).map((image) => image.url).filter(Boolean);
-    if (!gallery.length) return [];
-    const wanted = Math.min(4, gallery.length);
-    const picked: string[] = [];
-    for (let i = 0; i < wanted; i += 1) {
-      const url = gallery[Math.round((i * (gallery.length - 1)) / Math.max(wanted - 1, 1))];
-      if (url && !picked.includes(url)) picked.push(url);
-    }
-    if (campaign.currentImageUrl) {
-      const rest = picked.filter((url) => url !== campaign.currentImageUrl);
-      return [...rest, campaign.currentImageUrl];
-    }
-    return picked;
-  }, [campaign.images, campaign.currentImageUrl]);
-
   // The outro plays for a truly completed saga, or for any finale picked in
   // the debug gallery (which never touches the stored campaign).
   const activeEnding = useMemo<CampaignEnding | null>(() => {
@@ -1179,7 +1158,6 @@ export default function HostStage({
           players={campaign.players}
           campaignTitle={campaign.title}
           theme={visual.key}
-          plates={endingPlates}
           onExit={debugOutro ? undefined : onExit}
         />
       ) : null}
