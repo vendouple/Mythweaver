@@ -277,6 +277,8 @@ export const toolDefinitions: AquaToolDefinition[] = [
           kind: { type: "string", enum: ["victory", "defeat", "bittersweet", "escape", "draw", "cliffhanger"], description: "victory = party won; defeat = party lost/dead/failed; bittersweet = mixed; escape = survived by fleeing; draw = stalemate, neither side prevailed; cliffhanger = the story cuts off mid-breath, deliberately unresolved (use for season-finale style stops)." },
           title: { type: "string", description: "Short credits title, e.g. 'The Fat Man Falls' or 'Veridia Burns'." },
           summary: { type: "string", description: "1-3 sentence epilogue shown on the outro. For cliffhangers, end it on the unresolved question." },
+          worldFate: { type: "string", description: "ONE short line on what became of the WORLD/place itself, not the party — the outro shows the campaign's world meeting this fate, and this is its caption. Concrete and specific to this saga, e.g. 'Aethelgard went dark, and the dark was its own.' Max ~140 chars." },
+          epitaph: { type: "string", description: "A short closing line held under FIN on the final frame — the last words the table reads. Max ~110 chars." },
           highlights: { type: "array", items: { type: "string" }, description: "Optional bullet lines for credits (key moments, final fates)." },
           stats: {
             type: "array",
@@ -965,6 +967,8 @@ export async function runTool(campaignId: string, name: string, args: Record<str
         kind: String(args.kind || "bittersweet"),
         title: String(args.title || "The End"),
         summary: String(args.summary || "The saga closes."),
+        worldFate: typeof args.worldFate === "string" ? args.worldFate : undefined,
+        epitaph: typeof args.epitaph === "string" ? args.epitaph : undefined,
         highlights: Array.isArray(args.highlights) ? (args.highlights as unknown[]).map(String) : undefined,
         stats: Array.isArray(args.stats)
           ? (args.stats as Array<Record<string, unknown>>).map((stat) => ({

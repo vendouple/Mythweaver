@@ -666,6 +666,8 @@ function normalizeEnding(raw: unknown): CampaignEnding | undefined {
     kind,
     title,
     summary,
+    worldFate: typeof item.worldFate === "string" && item.worldFate.trim() ? item.worldFate.trim().slice(0, 160) : undefined,
+    epitaph: typeof item.epitaph === "string" && item.epitaph.trim() ? item.epitaph.trim().slice(0, 120) : undefined,
     endedAt: String(item.endedAt || new Date().toISOString()),
     highlights: Array.isArray(item.highlights)
       ? item.highlights.map(String).map((h) => h.trim()).filter(Boolean).slice(0, 12)
@@ -797,11 +799,24 @@ export function pushStageSfx(
 /** Seal the campaign with a win/loss/draw/cliffhanger/bittersweet/escape ending and clear controller actions. */
 export function endCampaign(
   campaign: Campaign,
-  payload: { kind: string; title: string; summary: string; highlights?: string[]; stats?: Array<{ label: string; value: string }>; cast?: unknown }
+  payload: {
+    kind: string;
+    title: string;
+    summary: string;
+    worldFate?: string;
+    epitaph?: string;
+    highlights?: string[];
+    stats?: Array<{ label: string; value: string }>;
+    cast?: unknown;
+  }
 ) {
   const kind = ENDING_KINDS.includes(payload.kind as EndingKind) ? (payload.kind as EndingKind) : "bittersweet";
   const title = (payload.title || "The End").trim() || "The End";
   const summary = (payload.summary || "The saga closes.").trim() || "The saga closes.";
+  // Both optional: the outro has a per-kind fallback for the world's fate and
+  // simply omits the epitaph, so a DM that skips them still gets a whole reel.
+  const worldFate = typeof payload.worldFate === "string" ? payload.worldFate.trim().slice(0, 160) || undefined : undefined;
+  const epitaph = typeof payload.epitaph === "string" ? payload.epitaph.trim().slice(0, 120) || undefined : undefined;
   const highlights = Array.isArray(payload.highlights)
     ? payload.highlights.map(String).map((h) => h.trim()).filter(Boolean).slice(0, 12)
     : undefined;
@@ -809,7 +824,7 @@ export function endCampaign(
   const cast = normalizeEndingCast(payload.cast);
   const endedAt = new Date().toISOString();
   campaign.status = "completed";
-  campaign.ending = { kind, title, summary, endedAt, highlights, stats, cast };
+  campaign.ending = { kind, title, summary, worldFate, epitaph, endedAt, highlights, stats, cast };
   campaign.ambience = {
     mood: "outro",
     intensity: 0.7,

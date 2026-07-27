@@ -1,54 +1,69 @@
 "use client";
 
-// Dev-only harness for eyeballing the Grand Outro without playing a saga to
+// Dev-only harness for eyeballing the Great Loom without playing a saga to
 // its close (same spirit as /weavetest):
-//   /outrotest                              — victory, neutral theme
-//   /outrotest?kind=defeat&theme=horror      — any kind x any theme
-//   /outrotest?kind=cliffhanger&players=1    — worst-case content: one hero
-//   /outrotest?long=1                        — 12-word title, 6 highlights, 5 players
-//   /outrotest?bare=1                        — no highlights, no stats, no cast lines
-//   /outrotest?plates=<campaignId>           — hold that saga's real painted scenes
-//   (with no ?plates the shader's procedural field stands in, which is the
-//    path a saga that never painted a backdrop actually takes)
-// Not linked from anywhere.
+//   /outrotest                               — victory, neutral theme (placeholder copy)
+//   /outrotest?kind=defeat&theme=gothic       — any kind x any of the 18 themes
+//   /outrotest?campaign=<id>                  — a REAL ended saga: its actual ending,
+//                                               players, portraits, title and theme
+//   /outrotest?long=1                         — 12-word title, 6 highlights, 5 players
+//   /outrotest?bare=1                         — no highlights, no stats, no cast lines
+//   /outrotest?players=1                      — worst-case content: one hero
+// Keys: K/k cycle kind · T/t cycle theme · L long · B bare. (Space/→ advance
+// the finale itself; ←/Backspace rewind a beat; Home restarts; Esc seeks to
+// the end — those belong to OutroTheater.)
+// Completed sagas found on disk appear automatically as chips. Not linked
+// from anywhere.
 
 import { useEffect, useMemo, useState } from "react";
 import OutroTheater from "@/components/three/OutroTheater";
 import type { CampaignEnding, EndingKind, Player } from "@/lib/campaign/types";
-import type { ThemeKey } from "@/components/three/themeVisuals";
+import { THEME_KEYS, ThemeKey } from "@/components/three/themeVisuals";
 
 const KINDS: EndingKind[] = ["victory", "defeat", "bittersweet", "escape", "draw", "cliffhanger"];
-const THEMES: ThemeKey[] = ["none", "fantasy", "scifi", "horror", "noir", "western", "postapoc"];
 
-const SAMPLES: Record<EndingKind, Pick<CampaignEnding, "title" | "summary" | "highlights">> = {
+// Placeholder endings, one per kind — stand-ins until a real saga is picked.
+const SAMPLES: Record<EndingKind, Pick<CampaignEnding, "title" | "summary" | "highlights" | "worldFate" | "epitaph">> = {
   victory: {
     title: "The Weaver's Crown",
     summary: "Against every prophecy, the party stood at the world's hinge and pushed. The dark tide broke, and dawn kept its appointment.",
+    worldFate: "The morning came up over Aelis unbroken, for the first time in nine years.",
+    epitaph: "The bells rang all day, and nobody asked them to stop.",
     highlights: ["The final roll was a natural 20", "The Adversary knelt at last", "The realm remembers its saviors"]
   },
   defeat: {
     title: "The Long Dark",
     summary: "The party gave everything, and it was not enough. The last torch guttered out in the deep, and the world above learned to whisper their names.",
+    worldFate: "Aelis went under, tower by tower, and the sea closed over the place it had been.",
+    epitaph: "The maps were redrawn without it. Nobody argued.",
     highlights: ["They fought to the final breath", "The Adversary's laughter still echoes", "Their story became a warning"]
   },
   bittersweet: {
     title: "The Price of Dawn",
     summary: "The city was saved, but not everyone walked out of the fire to see it. Victory tastes of ash and morning rain.",
+    worldFate: "Half of Aelis woke to the light. The other half is still burning, and will be for years.",
+    epitaph: "They saved what they could. It was not everything.",
     highlights: ["The ritual was broken — at a cost", "A hero stayed behind", "The survivors carry the flame"]
   },
   escape: {
     title: "Ashes at Our Heels",
     summary: "No one won. The party simply refused to be there when the ceiling came down, and the desert swallowed the rest.",
+    worldFate: "Aelis is still down there, still turning, still theirs — and they are not going back.",
+    epitaph: "Behind them, a light. Ahead of them, nothing they recognised.",
     highlights: ["The vault door shut behind them", "Nothing followed them out", "The map now has a blank space"]
   },
   draw: {
     title: "Neither Side Yielded",
     summary: "Two forces spent themselves down to the last ember and found the scales exactly level. The war simply stopped.",
+    worldFate: "Aelis stopped turning. Nothing has moved on it since, and nothing has fallen off it either.",
+    epitaph: "Held. Not won, not lost. Held.",
     highlights: ["Both banners still stand", "The bargain holds — for now", "Nobody speaks of who started it"]
   },
   cliffhanger: {
     title: "The Door Opens Inward",
     summary: "The seal cracked, the light inside was wrong, and something on the other side said a name nobody had spoken aloud.",
+    worldFate: "There is a seam under Aelis now, and it is getting wider while everyone sleeps.",
+    epitaph: "It knew one of their names. It has not used the others yet.",
     highlights: ["The name was one of theirs", "The countdown never reached zero", "Someone was already inside"]
   }
 };
@@ -57,6 +72,9 @@ const LONG_SAMPLE = {
   title: "The Seventeen Bells of the Drowned Cathedral Ring Out at Last",
   summary:
     "It took every debt, every favour and every lie the party had ever told, and in the end the bells rang anyway — which is either a triumph or a warning, depending on which of them you ask about it afterwards.",
+  worldFate:
+    "Ys is above the water for the first time in four hundred years, and it is not clear that this was an improvement.",
+  epitaph: "Seventeen bells. Five seals. Two of them holding.",
   highlights: [
     "The first bell woke the harbour",
     "A vow was broken to keep a better one",
@@ -104,6 +122,25 @@ function makePlayers(count: number): Player[] {
   })) as Player[];
 }
 
+type RealSaga = {
+  ending: CampaignEnding;
+  players: Player[];
+  title: string;
+  musicTheme?: string;
+};
+
+type SagaChip = { id: string; title: string; endingKind?: string };
+
+const chip = (active: boolean, tint: string): React.CSSProperties => ({
+  color: active ? "#0a0a0a" : "#cfd6e6",
+  background: active ? tint : "rgba(10,14,24,0.78)",
+  border: `1px solid ${tint}55`,
+  borderRadius: 999,
+  padding: "3px 9px",
+  textDecoration: "none",
+  cursor: "pointer"
+});
+
 export default function OutroTest() {
   // Read after mount so the server and client render the same markup (the nav
   // links below embed the current params, which SSR cannot know).
@@ -111,40 +148,115 @@ export default function OutroTest() {
   useEffect(() => setParams(new URLSearchParams(window.location.search)), []);
   const kindParam = params.get("kind") || "victory";
   const kind = (KINDS.includes(kindParam as EndingKind) ? kindParam : "victory") as EndingKind;
-  const themeParam = params.get("theme") || "none";
-  const theme = (THEMES.includes(themeParam as ThemeKey) ? themeParam : "none") as ThemeKey;
+  const themeParam = params.get("theme") || "";
   const long = params.get("long") === "1";
   const bare = params.get("bare") === "1";
-  const playerCount = Math.max(0, Math.min(5, Number(params.get("players") ?? (long ? 5 : 3))));
+  const playerCount = Math.max(0, Math.min(5, Number(params.get("players") ?? (long ? 5 : 4))));
+  const campaignId = params.get("campaign") || "";
 
-  const players = useMemo(() => makePlayers(bare ? 2 : playerCount), [bare, playerCount]);
-
-  // Real painted scenes from a saga on disk, when one is named. The asset route
-  // serves them, so this exercises the same URLs the finale gets in production.
-  const [plates, setPlates] = useState<string[]>([]);
-  const plateCampaign = params.get("plates") || "";
+  // A real ended saga, when one is named — the genuine article, portraits and all.
+  const [real, setReal] = useState<RealSaga | null>(null);
   useEffect(() => {
-    if (!plateCampaign) return;
+    if (!campaignId) {
+      setReal(null);
+      return;
+    }
     let cancelled = false;
-    fetch(`/api/campaigns/${encodeURIComponent(plateCampaign)}`)
+    fetch(`/api/campaigns/${encodeURIComponent(campaignId)}`)
       .then((res) => res.json())
       .then((data) => {
         if (cancelled) return;
-        const urls: string[] = (data?.campaign?.images || []).map((img: { url: string }) => img.url).filter(Boolean);
-        setPlates(urls.slice(0, 4));
+        const campaign = data?.campaign;
+        if (campaign?.ending) {
+          setReal({
+            ending: campaign.ending,
+            players: campaign.players || [],
+            title: campaign.title || "A Finished Saga",
+            musicTheme: campaign.musicTheme
+          });
+        }
       })
       .catch(() => undefined);
     return () => {
       cancelled = true;
     };
-  }, [plateCampaign]);
+  }, [campaignId]);
 
-  const ending = useMemo<CampaignEnding>(() => {
+  // Every completed saga on disk becomes a chip.
+  const [sagas, setSagas] = useState<SagaChip[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/campaigns")
+      .then((res) => res.json())
+      .then((data) => {
+        if (cancelled) return;
+        const list = (data?.campaigns || [])
+          .filter((c: { status?: string; endingKind?: string }) => c.status === "completed" || c.endingKind)
+          .map((c: { id: string; title: string; endingKind?: string }) => ({ id: c.id, title: c.title, endingKind: c.endingKind }));
+        setSagas(list);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // A real saga carries its own theme unless the URL overrides it.
+  const theme = (
+    THEME_KEYS.includes(themeParam as ThemeKey) ? themeParam : real?.musicTheme && THEME_KEYS.includes(real.musicTheme as ThemeKey) ? real.musicTheme : "none"
+  ) as ThemeKey;
+
+  const href = (next: Partial<{ kind: string; theme: string; long: boolean; bare: boolean; campaign: string }>) => {
+    const kindValue = next.kind ?? kind;
+    const themeValue = next.theme ?? themeParam;
+    const longValue = next.long ?? long;
+    const bareValue = next.bare ?? bare;
+    const campaignValue = next.campaign ?? campaignId;
+    const parts = [
+      campaignValue ? `campaign=${encodeURIComponent(campaignValue)}` : `kind=${kindValue}`,
+      themeValue ? `theme=${themeValue}` : "",
+      longValue ? "long=1" : "",
+      bareValue ? "bare=1" : ""
+    ].filter(Boolean);
+    return `/outrotest?${parts.join("&")}`;
+  };
+
+  // K/T cycle kind and theme even mid-finale; L/B toggle content shape.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const key = event.key.toLowerCase();
+      if (key !== "k" && key !== "t" && key !== "l" && key !== "b") return;
+      const step = event.key === event.key.toUpperCase() ? -1 : 1;
+      if (key === "k") {
+        const next = KINDS[(KINDS.indexOf(kind) + step + KINDS.length) % KINDS.length];
+        window.location.href = href({ kind: next, campaign: "" });
+      } else if (key === "t") {
+        const at = THEME_KEYS.indexOf(theme);
+        const next = THEME_KEYS[(at + step + THEME_KEYS.length) % THEME_KEYS.length];
+        window.location.href = href({ theme: next });
+      } else if (key === "l") {
+        window.location.href = href({ long: !long });
+      } else if (key === "b") {
+        window.location.href = href({ bare: !bare });
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kind, theme, long, bare, campaignId]);
+
+  const samplePlayers = useMemo(() => makePlayers(bare ? 2 : playerCount), [bare, playerCount]);
+
+  const sampleEnding = useMemo<CampaignEnding>(() => {
     const base = long ? LONG_SAMPLE : SAMPLES[kind];
     return {
       kind,
       title: base.title,
       summary: base.summary,
+      // `bare` is the worst-case shape: no world-fate line, no epitaph, so the
+      // reel has to fall back to the per-kind copy and drop the FIN sub-line.
+      worldFate: bare ? undefined : base.worldFate,
+      epitaph: bare ? undefined : base.epitaph,
       endedAt: new Date().toISOString(),
       highlights: bare ? undefined : base.highlights,
       stats: bare
@@ -157,7 +269,7 @@ export default function OutroTest() {
           ],
       cast: bare
         ? undefined
-        : players.map((player, index) => ({
+        : samplePlayers.map((player, index) => ({
             playerId: player.id,
             name: player.characterName,
             title: EPITHETS[index % EPITHETS.length],
@@ -165,17 +277,21 @@ export default function OutroTest() {
             stats: index % 2 ? [{ label: "Lies Told", value: String(3 + index) }] : undefined
           }))
     };
-  }, [kind, long, bare, players]);
+  }, [kind, long, bare, samplePlayers]);
+
+  const ending = real?.ending || sampleEnding;
+  const players = real?.players?.length ? real.players : samplePlayers;
+  const campaignTitle = real?.title || (long ? "The Drowned Cathedral of Ys" : "A Test Saga");
+  const activeKind = real?.ending?.kind || kind;
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "#020306" }}>
       <OutroTheater
-        key={`${kind}-${theme}-${long}-${bare}-${playerCount}`}
+        key={`${real ? campaignId : activeKind}-${theme}-${long}-${bare}-${players.length}`}
         ending={ending}
         players={players}
-        campaignTitle={long ? "The Drowned Cathedral of Ys" : "A Test Saga"}
+        campaignTitle={campaignTitle}
         theme={theme}
-        plates={plates}
         onExit={() => undefined}
       />
       <div
@@ -183,72 +299,39 @@ export default function OutroTest() {
           position: "fixed",
           bottom: 8,
           left: 8,
+          right: 8,
           zIndex: 99,
           display: "flex",
           flexWrap: "wrap",
-          gap: 6,
+          alignItems: "center",
+          gap: 5,
           fontFamily: "system-ui, sans-serif",
           fontSize: 11
         }}
       >
+        {sagas.map((saga) => (
+          <a key={saga.id} href={href({ campaign: saga.id })} style={chip(campaignId === saga.id, "#4fd8a8")} title={saga.id}>
+            ◆ {saga.title}
+            {saga.endingKind ? ` · ${saga.endingKind}` : ""}
+          </a>
+        ))}
         {KINDS.map((k) => (
-          <a
-            key={k}
-            href={`/outrotest?kind=${k}&theme=${theme}${long ? "&long=1" : ""}${bare ? "&bare=1" : ""}`}
-            style={{
-              color: k === kind ? "#0a0a0a" : "#cfd6e6",
-              background: k === kind ? "#e6c378" : "rgba(10,14,24,0.75)",
-              border: "1px solid rgba(230,195,120,0.35)",
-              borderRadius: 999,
-              padding: "3px 9px",
-              textDecoration: "none"
-            }}
-          >
+          <a key={k} href={href({ kind: k, campaign: "" })} style={chip(!campaignId && k === kind, "#e6c378")}>
             {k}
           </a>
         ))}
-        {THEMES.map((t) => (
-          <a
-            key={t}
-            href={`/outrotest?kind=${kind}&theme=${t}${long ? "&long=1" : ""}${bare ? "&bare=1" : ""}`}
-            style={{
-              color: t === theme ? "#0a0a0a" : "#9aa4c0",
-              background: t === theme ? "#7b6cff" : "rgba(10,14,24,0.75)",
-              border: "1px solid rgba(123,108,255,0.3)",
-              borderRadius: 999,
-              padding: "3px 9px",
-              textDecoration: "none"
-            }}
-          >
+        {THEME_KEYS.map((t) => (
+          <a key={t} href={href({ theme: t })} style={chip(t === theme, "#7b6cff")}>
             {t}
           </a>
         ))}
-        <a
-          href={`/outrotest?kind=${kind}&theme=${theme}${long ? "" : "&long=1"}`}
-          style={{
-            color: long ? "#0a0a0a" : "#9aa4c0",
-            background: long ? "#4fd8a8" : "rgba(10,14,24,0.75)",
-            border: "1px solid rgba(79,216,168,0.3)",
-            borderRadius: 999,
-            padding: "3px 9px",
-            textDecoration: "none"
-          }}
-        >
-          long content
+        <a href={href({ long: !long })} style={chip(long, "#4fd8a8")}>
+          long
         </a>
-        <a
-          href={`/outrotest?kind=${kind}&theme=${theme}${bare ? "" : "&bare=1"}`}
-          style={{
-            color: bare ? "#0a0a0a" : "#9aa4c0",
-            background: bare ? "#e0654f" : "rgba(10,14,24,0.75)",
-            border: "1px solid rgba(224,101,79,0.3)",
-            borderRadius: 999,
-            padding: "3px 9px",
-            textDecoration: "none"
-          }}
-        >
-          bare content
+        <a href={href({ bare: !bare })} style={chip(bare, "#e0654f")}>
+          bare
         </a>
+        <span style={{ color: "#7d87a3", letterSpacing: "0.05em" }}>K kind · T theme · L long · B bare · click/Space advance · ← rewind · Home restart · Esc end</span>
       </div>
     </div>
   );

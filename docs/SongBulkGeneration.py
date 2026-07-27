@@ -158,23 +158,23 @@ FILL_PRIORITY = (
 
 # Fallback flavour tags when a themed shelf has no direct prompt in SOUND_DESIGN.
 THEME_FLAVORS = {
-    "fantasy": "orchestral folk palette, harp, strings, noble horns, wooden flute",
-    "scifi": "analog synth palette, warm pads, slow arpeggios, sub bass, glassy bells",
-    "horror": "haunted palette, detuned music box, hollow drones, bowed metal, breathy choir",
-    "noir": "smoky jazz palette, muted trumpet, brushed drums, upright bass, lounge piano",
-    "modern": "sleek hybrid palette, synth pads, processed percussion, taut strings, piano",
-    "western": "frontier palette, reverb guitar, harmonica, lonesome whistle, fiddle",
-    "postapoc": "wasteland palette, dusty guitar, junkyard percussion, kalimba, worn drones",
-    "cyberpunk": "darksynth palette, synthwave, industrial techno, gritty neon-noir electronic",
-    "steampunk": "clockwork percussion, Victorian orchestral, brass, dark cabaret, electro-swing",
-    "gothic": "harpsichord, pipe organ, eerie chamber strings, dark choir, slow dirges",
-    "urbanfantasy": "dark electronic, noir jazz, moody trip-hop, supernatural city night",
-    "spaceopera": "grand heroic brass-heavy cinematic orchestral, sweeping galactic fanfare",
-    "pirate": "accordion, sea shanties, acoustic fiddle, wooden percussion, naval fanfares",
-    "cozy": "soft piano, acoustic fingerpicking, wooden flutes, light bells, lo-fi chillhop",
-    "eastasian": "guzheng, koto, erhu, shakuhachi, taiko ensembles",
-    "superhero": "Hollywood blockbuster brass, driving action strings, guitar/orchestral hybrid",
-    "pulp": "brassy 1930s serial adventure fanfare, exotic tomb/jungle percussion",
+    "fantasy": "sweeping heroic folk-orchestral palette, harp, hammered dulcimer, wooden flute, fiddle, war horns, lush strings, bodhran",
+    "scifi": "cinematic analog-synth palette, warm pads, vintage arpeggiators, sub bass, glassy digital bells, granular shimmer, hybrid strings",
+    "horror": "modern horror-score palette, detuned strings, prepared piano, bowed metal, breathy choir, music box, deep drones",
+    "noir": "smoky film-noir jazz palette, muted trumpet, smoky clarinet, brushed drums, upright bass, lounge piano, vibraphone",
+    "modern": "sleek thriller hybrid palette, pulsing synth bass, taut string ostinatos, processed percussion, felt piano, muted electric guitar",
+    "western": "widescreen frontier palette, twangy baritone guitar, harmonica, lonesome whistle, fiddle, mariachi trumpet, hoofbeat percussion",
+    "postapoc": "gritty wasteland palette, junkyard percussion, detuned guitar, duduk, kalimba, tape-warped drones, raw bass",
+    "cyberpunk": "cinematic darksynth and synthwave palette, analog arpeggios, heavy bass design, industrial drum machines, rain-slick neon pads, glitch textures",
+    "steampunk": "Victorian clockwork orchestral palette, ratchet percussion, brass band, waltzing strings, accordion, music box, dark cabaret swing",
+    "gothic": "dark romantic chamber palette, pipe organ, harpsichord, eerie chamber strings, dark choir, tolling bells",
+    "urbanfantasy": "midnight urban-fantasy palette, trip-hop beats, dark electronica, noir-jazz horns, tremolo guitar, shimmering pads",
+    "spaceopera": "golden-age space-opera palette, massive heroic brass, sweeping romantic strings, choir, celesta, harp, timpani",
+    "pirate": "swashbuckling nautical folk palette, rollicking fiddle, accordion, tin whistle, ship-deck percussion, naval brass, sea-shanty sway",
+    "cozy": "hearth-light pastoral folk palette, felt piano, nylon guitar, glockenspiel, soft flutes, light bells, gentle lo-fi beat, humming strings",
+    "eastasian": "cinematic wuxia palette, guzheng, koto, erhu, shakuhachi, dizi, pipa, taiko, temple bells, silk strings",
+    "superhero": "modern blockbuster palette, towering brass, driving string ostinatos, hybrid percussion, electric guitar, soaring anthem leads",
+    "pulp": "1930s adventure-serial palette, big-band brass fanfares, swashbuckling strings, jungle drums, tomb-echo percussion, mysterious woodwinds",
 }
 
 
@@ -518,7 +518,11 @@ def style_for(relative_path: str, styles: dict[str, str]) -> str:
 
 
 def discover_shelves(styles: dict[str, str], create_missing: bool) -> list[Shelf]:
-    """Return the full BGM catalog (neutral + every theme per mood)."""
+    """Return the full BGM catalog (neutral + every theme per mood).
+
+    Fill order: every neutral mood root first (the universal fallback), then
+    one genre at a time in THEMES order — each group ordered by FILL_PRIORITY.
+    """
     shelves: list[Shelf] = []
     for mood in MOODS:
         for theme in (None, *THEMES):
@@ -540,13 +544,14 @@ def discover_shelves(styles: dict[str, str], create_missing: bool) -> list[Shelf
             shelves.append(Shelf(shelf_path, relative_path, style))
 
     priority = {mood: index for index, mood in enumerate(FILL_PRIORITY)}
-    return sorted(
-        shelves,
-        key=lambda shelf: (
-            priority.get(shelf.relative_path.split("/", 1)[0], 999),
-            shelf.relative_path,
-        ),
-    )
+    theme_rank = {theme: index for index, theme in enumerate(THEMES)}
+
+    def sort_key(shelf: Shelf) -> tuple[int, int, str]:
+        mood, _, theme = shelf.relative_path.partition("/")
+        rank = theme_rank.get(theme, len(THEMES)) if theme else -1
+        return (rank, priority.get(mood, 999), shelf.relative_path)
+
+    return sorted(shelves, key=sort_key)
 
 
 # ---------------------------------------------------------------------------

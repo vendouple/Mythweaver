@@ -582,6 +582,9 @@ export const THEME_VISUALS: Record<ThemeKey, ThemeVisual> = {
   }
 };
 
+/** Every theme key, in declaration order — for dev galleries and pickers. */
+export const THEME_KEYS = Object.keys(THEME_VISUALS) as ThemeKey[];
+
 export function themeVisual(theme: ThemeKey | string | null | undefined): ThemeVisual {
   return THEME_VISUALS[(theme || "none") as ThemeKey] || THEME_VISUALS.none;
 }
