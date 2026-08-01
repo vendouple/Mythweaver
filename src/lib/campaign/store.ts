@@ -320,6 +320,10 @@ export async function createCampaign(
     showPartyAbilities: false,
     showNpcInventories: false,
     showNpcAbilities: false,
+    ttsEnabled: true,
+    ttsVoiceId: undefined,
+    ttsVolume: 1,
+    ttsBatchId: undefined,
     createdAt: now,
     updatedAt: now
   };
@@ -596,6 +600,14 @@ function normalizeCampaign(raw: Partial<Campaign> & { suggestedActions?: unknown
     showPartyAbilities: raw.showPartyAbilities !== undefined ? !!raw.showPartyAbilities : false,
     showNpcInventories: raw.showNpcInventories !== undefined ? !!raw.showNpcInventories : false,
     showNpcAbilities: raw.showNpcAbilities !== undefined ? !!raw.showNpcAbilities : false,
+    // TTS settings: enabled defaults to true (old saves keep narrating), the
+    // voice id is kept as a trimmed nonempty string or undefined, and volume
+    // is clamped to 0..1 with a default of 1.
+    ttsEnabled: raw.ttsEnabled !== undefined ? !!raw.ttsEnabled : true,
+    ttsVoiceId: typeof raw.ttsVoiceId === "string" && raw.ttsVoiceId.trim() ? raw.ttsVoiceId.trim() : undefined,
+    ttsVolume: Number.isFinite(Number(raw.ttsVolume)) ? Math.max(0, Math.min(1, Number(raw.ttsVolume))) : 1,
+    // Transient in-memory registry pointer (not durable): trim or drop.
+    ttsBatchId: typeof raw.ttsBatchId === "string" && raw.ttsBatchId.trim() ? raw.ttsBatchId.trim() : undefined,
     createdAt: String(raw.createdAt || now),
     updatedAt: String(raw.updatedAt || now)
   };
@@ -1254,6 +1266,7 @@ export type CampaignLogCategory =
   | "Image"
   | "Provider"
   | "Host"
+  | "TTS"
   | "System";
 
 const LOG_META_MAX_CHARS = 1200;

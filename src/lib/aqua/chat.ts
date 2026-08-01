@@ -6,6 +6,9 @@ import { runTool, toolDefinitions, applyNpcGroupFields, applyConditionFields } f
 import { generateImage } from "@/lib/aqua/images";
 import { AmbienceMood, Campaign, DisplayEvent, Player, PlayerStat, StoryCharacter } from "@/lib/campaign/types";
 import { MUSIC_THEMES, MusicTheme, THEME_GUIDE } from "@/lib/campaign/musicTheme";
+import { expandDisplayEvent } from "@/lib/campaign/beats";
+import { createBatch, releaseCampaign } from "@/lib/tts/runtime";
+import { getVoice, listVoices } from "@/lib/tts/voices";
 import { advanceCombat, buildExplorationResolution, ENEMY_SLOT, syncFocusedMirror, isPartySplit, rotateActiveLocation, startCombat, endCombat, eligiblePlayerIdsInLocation } from "@/lib/campaign/turns";
 
 // Tiered server-log verbosity (DEBUG_VERBOSE):
@@ -115,12 +118,12 @@ Core rules:
 - Use roll_dice for meaningful risk according to the campaign's Roll Mode (see below).
 
 Dice rules (the server rolls — you NEVER pick, predict, or invent numbers; narrate only from the tool result):
-- A d20 check: call roll_dice with d20Mode "normal" and a dc. Base DC: Easy 10, Medium 15, Hard 20, Very Hard 25.
-- Campaign Difficulty shifts base DCs: easy −2, medium 0, hard +2, insane +4. Apply this BEFORE ability fit.
+- A d20 check: call roll_dice with d20Mode "normal" and a dc. Base DC: Easy 5, Medium 10, Hard 15, Very Hard 18. Most uncertain actions in a medium campaign should land near DC 10, not DC 15.
+- Campaign Difficulty shifts base DCs: easy −2, medium 0, hard +2, insane +4. The SERVER adds this shift, so pass the base DC after ability fit and do NOT add the campaign shift yourself.
 - Ability fit shifts the DC further: a character whose listed special ability directly covers the task: DC −2 or −3. Specialist task with NO fitting ability/tool: DC +2 to +5.
 - d20Mode "advantage"/"disadvantage" is the DM's discretionary call for a REAL situational swing (high ground, flanking, ambush → advantage; blinded, prone, restrained, terrible footing → disadvantage). Use it sparingly. Having a relevant ability is NOT advantage — that's a DC shift.
 - Only use +N/−N modifiers in notation for real damage math or explicit sheet stats.
-- Keep DCs WINNABLE. A plain d20 tops out at 20, so a base DC in the 20s (or one pushed there by the difficulty bias) is impossible — only a nat 20 could pass. Reserve DC 20 for the very hardest feats, and never set a d20 DC above 20 without a real sheet modifier to match. The server clamps impossible DCs back into the achievable range per difficulty, so pass an honest, beatable number.
+- Keep DCs WINNABLE. Reserve effective DC 20 for an extraordinary but genuinely possible feat. If an action cannot physically or logically work, do NOT assign a huge DC and do NOT roll: narrate why it fails. Dice measure uncertain plausible attempts, not whether impossibilities become possible.
 - Outcome spectrum (honor EXACTLY): critical-success (nat 20), strong-success (beat DC by 5+), success, partial-success (miss by 1–4 with a cost — only on easy/medium), failure, hard-failure (miss by 5+), critical-failure (nat 1). On hard/insane, near-misses are full failures (no partials).
 - ENEMY/NPC rolls: call roll_dice with isNpc true and playerName set to the NPC name so the TV dice theater shows them. Chain multiple rolls in one turn for combat (attack → damage, contested checks, multi-enemy).
 - Do NOT restate the roll as a SYSTEM story beat — the TV already animates every roll.
@@ -133,19 +136,20 @@ Roll Mode (how often to call for dice):
 
 When NOT to roll (this matters as much as when to roll):
 - A specialist doing their own established job, with the right tool, no time pressure and nothing meaningful left uncertain, simply SUCCEEDS. Narrate it and move on. A demolitions expert with her kit opening a maintenance valve does not need a check; a locksmith picking an ordinary lock in an empty corridor does not need a check.
+- An action with no plausible path to success simply FAILS. Narrate the hard constraint and offer consequences or grounded alternatives; a natural 20 cannot create an absent item, cross an impossible distance, or override established world facts.
 - Never re-roll the same uncertainty. If a check already settled whether this character can do this kind of thing here, the next identical action inherits that answer — a corridor of four near-identical valves is ONE check (or none), not four. Roll again only when something material changed: new danger, a worse tool, a harder specimen, a deadline, injury.
 - A failure must MOVE the story: change the route, spend a resource, cost time the enemy uses, break the tool, raise an alarm, or reveal something worse. Never answer a failure by inviting the same attempt again — "try the valve again" is not a consequence. If you cannot name what the failure changes, don't call for the roll.
 
 Difficulty (tone of challenge — applies to EVERY contested action):
-Campaign difficulty shifts ALL DCs (attacks to hit, damage thresholds when used, escape/flee, stealth, persuasion, locks, saves). Server also applies the bias if you pass a base DC.
-Base ladder BEFORE difficulty bias: Easy 10, Medium 15, Hard 20, Very Hard 25.
-Then apply campaign bias: easy -2, medium 0, hard +2, insane +4. Then ability fit.
-- easy: forgiving DCs (typical hit/escape ~8-12), softer enemy competence, lower enemy HP, lighter damage, partial successes common, flee often succeeds
-- medium: balanced (typical hit/escape ~12-16), fair enemy HP/damage
-- hard: tougher DCs (typical hit/escape ~16-20), competent enemies, higher HP, harder damage, no partials, flee is risky
-- insane: brutal DCs (typical hit/escape ~18-24), lethal enemies, high HP, heavy damage, no partials, flee is desperate
+Campaign difficulty shifts ALL DCs (attacks to hit, damage thresholds when used, escape/flee, stealth, persuasion, locks, saves). The server applies the bias to the base DC supplied to roll_dice; do not apply it a second time.
+Base ladder BEFORE difficulty bias: Easy 5, Medium 10, Hard 15, Very Hard 18. Use Medium 10 for an ordinary uncertain action; DC 15 means the action itself is genuinely hard.
+Apply ability fit to that base DC; the server then applies campaign bias: easy -2, medium 0, hard +2, insane +4.
+- easy: forgiving DCs (typical check ~5-8), softer enemy competence, lower enemy HP, lighter damage, partial successes common, flee often succeeds
+- medium: balanced (typical check ~8-12), fair enemy HP/damage
+- hard: tougher DCs (typical check ~10-15), competent enemies, higher HP, harder damage, no partials, flee is risky
+- insane: brutal DCs (typical check ~12-17), lethal enemies, high HP, heavy damage, no partials, flee is desperate
 Combat & encounters MUST honor difficulty:
-- Player attack to damage an enemy: set dc to that enemy's defense (base Medium 15 +/- difficulty bias +/- ability fit). Harder difficulty = harder to land hits.
+- Player attack to damage an enemy: set dc to that enemy's defense (ordinary defense 10, hard-to-hit defense 15, then campaign difficulty bias and ability fit). Harder difficulty = harder to land hits.
 - Enemy attack on a player: isNpc true; dc = player defense (same ladder). Harder difficulty = enemies hit more often (lower effective player defense or higher enemy attack competence).
 - Escape / run away / disengage: always a d20 vs DC on the ladder above; hard/insane make escape costly or fail more often.
 - Damage on a hit is MANDATORY: after any successful attack (player OR enemy), immediately roll_dice for the damage, then apply the HP change via playerUpdates/npcUpdates. Never narrate a wound without subtracting HP.
@@ -1151,6 +1155,12 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
     persistFocusedLocation(latestCampaign);
     syncFocusedMirror(latestCampaign);
 
+    // Kick off TTS clip synthesis for this turn's spoken beats. This resolves
+    // the voice, builds the batch SYNCHRONOUSLY (so latestCampaign.ttsBatchId
+    // is set before the save below lets polling clients see it), and only the
+    // actual audio generation runs in the background. Best-effort, never throws.
+    await startTtsForTurn(latestCampaign, turnBeats);
+
     finishCampaignDraft(campaignId);
     await saveCampaign(latestCampaign);
     queuePostTurnMaintenance(latestCampaign, preTurnImageUrl);
@@ -1237,7 +1247,163 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
     } catch (dbErr) {
       serverError("Dungeon Master", "Failed to clear dmStatus on error", dbErr);
     }
+    // A failed turn leaves no spoken beats behind — drop any clips the
+    // sidecar may have queued for this campaign so stale audio never plays.
+    try {
+      releaseCampaign(campaignId);
+    } catch {
+      /* best-effort — never mask the real turn failure */
+    }
     throw error;
+  }
+}
+
+/**
+ * Deterministic delivery-hint heuristic for a spoken line: excited or punchy
+ * lines get a higher exaggeration (up to 1.0), everything else sits at 0.5.
+ * cfgWeight is a constant 0.5 for all clips.
+ */
+function ttsDeliveryHints(text: string): { exaggeration: number; cfgWeight: number } {
+  const exclamations = (text.match(/!/g) || []).length;
+  const sentences = text.split(/[.!?…]+/).map((s) => s.trim()).filter(Boolean);
+  const avgSentenceLength = sentences.length ? text.length / sentences.length : text.length;
+  const words = text.split(/\s+/).filter(Boolean);
+  const allCapsWords = words.filter((w) => w.length >= 3 && /^[^a-z]*[A-Z][^a-z]*$/.test(w) && /[A-Z]/.test(w)).length;
+  const excited = exclamations > 0 || allCapsWords > 0 || avgSentenceLength < 40;
+  return { exaggeration: excited ? 1.0 : 0.5, cfgWeight: 0.5 };
+}
+
+/** Strip inline TV emphasis markers (*…* and `…`) so the TTS reads plain text. */
+function ttsPlainText(text: string): string {
+  return text.replace(/\*+/g, "").replace(/`+/g, "").replace(/[ \t]{2,}/g, " ").trim();
+}
+
+/**
+ * Let the configured fast model simplify delivery for speech synthesis without
+ * changing plot, names, or speaker intent. This is deliberately best-effort:
+ * malformed output, unavailable fast models, and timeouts all retain the
+ * deterministic plain-text version of each line.
+ */
+async function prepareTtsChunks(chunks: Array<{ id: string; text: string }>): Promise<Array<{ id: string; text: string }>> {
+  if (!aquaConfig().fastModel || !chunks.length) return chunks;
+  const { model, options } = fastModelTarget();
+  const fallback = new Map(chunks.map((chunk) => [chunk.id, chunk.text]));
+  try {
+    const response = (await aquaFetch("/chat/completions", {
+      method: "POST",
+      body: JSON.stringify({
+        model,
+        messages: [
+          {
+            role: "system",
+            content: "Rewrite RPG narration for a single TTS voice. Return JSON only: {\"lines\":[{\"id\":string,\"text\":string}]}. Preserve every id exactly. Keep names, facts, dialogue meaning, tense, and mood. Remove markdown and stage directions. Use short natural sentences and punctuation for clear delivery. Do not add or omit content."
+          },
+          { role: "user", content: JSON.stringify({ lines: chunks }) }
+        ],
+        response_format: { type: "json_object" }
+      })
+    }, {
+      ...options,
+      retries: 1,
+      timeoutMs: Math.max(3000, Number(process.env.TTS_PREP_TIMEOUT_MS) || 8000)
+    })) as ChatCompletionResponse;
+    const content = response.choices?.[0]?.message?.content || response.message?.content;
+    const parsed = typeof content === "string" ? JSON.parse(content) : null;
+    if (!Array.isArray(parsed?.lines)) throw new Error("Fast model returned no TTS line list");
+    const rewritten = new Map<string, string>();
+    for (const line of parsed.lines) {
+      const id = typeof line?.id === "string" ? line.id : "";
+      const text = typeof line?.text === "string" ? ttsPlainText(line.text) : "";
+      if (fallback.has(id) && text && text.length <= fallback.get(id)!.length * 2) rewritten.set(id, text);
+    }
+    if (rewritten.size !== chunks.length) throw new Error("Fast model returned an incomplete TTS line list");
+    return chunks.map((chunk) => ({ ...chunk, text: rewritten.get(chunk.id) || chunk.text }));
+  } catch (err) {
+    serverError("TTS", "Fast-model speech preparation failed; using deterministic text", err);
+    return chunks;
+  }
+}
+
+/**
+ * Turn-scoped TTS batch kickoff. Filters this turn's beats down to the spoken
+ * lines (narration + NPC/narrator dialogue, never player lines), resolves the
+ * campaign voice, and creates a fresh in-memory clip batch — releasing any
+ * batch from a previous turn first. The batch id lands on the campaign BEFORE
+ * the caller saves it, so polling clients can start pulling clips immediately;
+ * audio generation itself continues in the background.
+ *
+ * Best-effort by contract: wrapped in try/catch, logs via serverError +
+ * logCampaignEvent, and NEVER throws — a dead sidecar must never break a turn.
+ */
+async function startTtsForTurn(
+  campaign: Campaign,
+  turnBeats: Array<{ speaker?: string; content?: string; event: DisplayEvent }>
+): Promise<void> {
+  try {
+    if (campaign.ttsEnabled === false) return;
+
+    // Speakers that belong at the table, not in the narrator's voice: player
+    // character/display names are excluded; everyone else (NARRATOR, NPCs and
+    // other story characters) is speakable.
+    const playerNames = new Set(
+      campaign.players
+        .flatMap((p) => [p.characterName, p.name])
+        .filter((n): n is string => !!n && !!n.trim())
+        .map((n) => n.trim().toLowerCase())
+    );
+    const storyNames = new Set(
+      campaign.storyCharacters
+        .map((c) => c.name)
+        .filter((n): n is string => !!n && !!n.trim())
+        .map((n) => n.trim().toLowerCase())
+    );
+
+    // Expand each event exactly the way the TV will perform it, then keep only
+    // narration/dialogue beats spoken by the narrator or a story character.
+    const chunks: Array<{ id: string; text: string }> = [];
+    for (const beat of turnBeats) {
+      for (const expanded of expandDisplayEvent(beat.event)) {
+        if (expanded.type !== "narration" && expanded.type !== "dialogue") continue;
+        const speaker = (expanded.speaker || "").trim();
+        const lower = speaker.toLowerCase();
+        if (playerNames.has(lower)) continue;
+        const isNarrator = !speaker || lower === "narrator";
+        if (!isNarrator && !storyNames.has(lower)) continue;
+        const text = ttsPlainText(expanded.content || "");
+        if (text) chunks.push({ id: expanded.id, text });
+      }
+    }
+    if (!chunks.length) return;
+
+    // Voice: the campaign's chosen voice when it still resolves, otherwise the
+    // first discovered voice. No voices on disk → nothing to synthesize.
+    let voiceId: string | undefined;
+    if (campaign.ttsVoiceId) {
+      voiceId = (await getVoice(campaign.ttsVoiceId))?.id;
+    }
+    if (!voiceId) {
+      voiceId = (await listVoices())[0]?.id;
+    }
+    if (!voiceId) return;
+
+    const preparedChunks = await prepareTtsChunks(chunks);
+    const clips = preparedChunks.map(({ id, text }) => ({ id, text, voiceId, ...ttsDeliveryHints(text) }));
+
+    // One live batch per campaign: drop last turn's clips before queuing these.
+    releaseCampaign(campaign.id);
+    const summary = createBatch(campaign.id, clips);
+    campaign.ttsBatchId = summary.batchId;
+    void logCampaignEvent(campaign.id, "INFO", "TTS", "Turn TTS batch queued", {
+      batchId: summary.batchId,
+      clipCount: clips.length,
+      voiceId
+    });
+  } catch (err) {
+    serverError("TTS", "Turn TTS batch creation failed (non-fatal)", err);
+    void logCampaignEvent(campaign.id, "ERROR", "TTS", "Turn TTS batch creation failed", {
+      error: err instanceof Error ? err.message : String(err),
+      errorName: err instanceof Error ? err.name : undefined
+    });
   }
 }
 

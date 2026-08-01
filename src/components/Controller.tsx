@@ -96,6 +96,8 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
   const [targetConfigured, setTargetConfigured] = useState(true);
   const [retryTurnBusy, setRetryTurnBusy] = useState(false);
   const [directorMsg, setDirectorMsg] = useState<string | null>(null);
+  const [voices, setVoices] = useState<Array<{ id: string; fileName: string }>>([]);
+  const [nudgeBusy, setNudgeBusy] = useState(false);
 
   useEffect(() => {
     setAccent(initAccent() || currentAccent());
@@ -291,8 +293,50 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
       if (cancelled) return;
       setHousekeeping(res.status);
     }).catch(() => {});
+    fetch("/api/tts?action=voices", { cache: "no-store" })
+      .then((response) => response.ok ? response.json() : { voices: [] })
+      .then((data) => {
+        if (!cancelled) setVoices(Array.isArray(data.voices) ? data.voices : []);
+      })
+      .catch(() => { if (!cancelled) setVoices([]); });
     return () => { cancelled = true; };
   }, [isLeader, tab, campaignId, weaving]);
+
+  const updateTtsSettings = async (settings: Record<string, unknown>) => {
+    if (!campaign) return;
+    setDirectorMsg(null);
+    try {
+      await api.party({ campaignId: campaign.id, action: "updateSettings", playerId: seat.playerId, ...settings });
+      await refresh();
+    } catch (err) {
+      setDirectorMsg(err instanceof Error ? err.message : "Could not update voice settings.");
+    }
+  };
+
+  const nudgeBackdrop = async () => {
+    if (!campaign) return;
+    setNudgeBusy(true);
+    setDirectorMsg(null);
+    try {
+      await api.party({ campaignId: campaign.id, action: "nudge", playerId: seat.playerId });
+      setDirectorMsg("Backdrop nudge sent.");
+    } catch (err) {
+      setDirectorMsg(err instanceof Error ? err.message : "Could not nudge the backdrop.");
+    } finally {
+      setNudgeBusy(false);
+    }
+  };
+
+  const setBackground = async (url: string) => {
+    if (!campaign) return;
+    setDirectorMsg(null);
+    try {
+      await api.party({ campaignId: campaign.id, action: "setBackground", playerId: seat.playerId, url });
+      await refresh();
+    } catch (err) {
+      setDirectorMsg(err instanceof Error ? err.message : "Could not change the backdrop.");
+    }
+  };
 
   const sendSway = async () => {
     if (!campaign || !sway.trim()) return;
@@ -814,6 +858,54 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
             <button className="oracle-button" disabled={swayBusy || !sway.trim()} onClick={sendSway}>
               {swayBusy ? "Whispering…" : "✦ Whisper"}
             </button>
+
+            <span className="director-label">Stage direction</span>
+            <button className="ghost-button" disabled={nudgeBusy} onClick={nudgeBackdrop}>
+              {nudgeBusy ? "Nudging…" : "Nudge backdrop to match the scene"}
+            </button>
+            {campaign.images.length ? (
+              <div className="gallery">
+                {campaign.images.slice(-8).map((image) => (
+                  <button
+                    key={image.id}
+                    className={`gallery-thumb ${campaign.currentImageUrl === image.url ? "current" : ""}`}
+                    title={image.prompt}
+                    onClick={() => setBackground(image.url)}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={image.url} alt={image.prompt.slice(0, 60)} />
+                  </button>
+                ))}
+              </div>
+            ) : null}
+
+            <span className="director-label">Table voice</span>
+            <button
+              className={`ghost-button ${campaign.ttsEnabled !== false ? "selected" : ""}`}
+              onClick={() => updateTtsSettings({ ttsEnabled: campaign.ttsEnabled === false })}
+            >
+              Voice narration {campaign.ttsEnabled === false ? "off" : "on"}
+            </button>
+            <select
+              className="field"
+              value={campaign.ttsVoiceId || ""}
+              disabled={voices.length === 0}
+              onChange={(event) => updateTtsSettings({ ttsVoiceId: event.target.value })}
+            >
+              <option value="">{voices.length ? "Default voice" : "No voices available"}</option>
+              {voices.map((voice) => <option key={voice.id} value={voice.id}>{voice.id}</option>)}
+            </select>
+            <label className="music-slider">
+              <span>Voice</span>
+              <input
+                type="range"
+                min="0"
+                max="100"
+                value={Math.round((campaign.ttsVolume ?? 1) * 100)}
+                onChange={(event) => updateTtsSettings({ ttsVolume: Number(event.target.value) / 100 })}
+              />
+              <span className="music-pct">{Math.round((campaign.ttsVolume ?? 1) * 100)}%</span>
+            </label>
 
             {narrationFailure ? (
               <>

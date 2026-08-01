@@ -20,7 +20,7 @@ export const toolDefinitions: AquaToolDefinition[] = [
         properties: {
           notation: { type: "string", description: "Optional dice notation like 1d20, 2d6+3, or 4d8-1. Leave empty for a d20 check and use d20Mode + dc instead." },
           d20Mode: { type: "string", enum: ["normal", "advantage", "disadvantage"], description: "Default 'normal'. 'advantage'/'disadvantage' only for rare overwhelming situational edges/impairments — never merely because an ability applies." },
-          dc: { type: "number", description: "Base difficulty class for d20 checks BEFORE campaign difficulty bias (Easy 10, Medium 15, Hard 20, Very Hard 25), after ability fit. Server adds campaign difficulty bias (easy -2 / medium 0 / hard +2 / insane +4). Use for attacks-to-hit, escape, stealth, persuasion, saves — not only skill checks." },
+          dc: { type: "number", description: "Base difficulty class for a plausible, uncertain d20 check BEFORE campaign difficulty bias (Easy 5, Medium 10, Hard 15, Very Hard 18), after ability fit. Server adds campaign difficulty bias (easy -2 / medium 0 / hard +2 / insane +4). Most checks in a medium campaign should be near DC 10. Never roll an impossible action; it fails without a check." },
           reason: { type: "string", description: "Short TV-visible reason, e.g. 'Persuasion check', 'Stealth', 'Sword strike', 'Guard attack'." },
           playerId: { type: "string", description: "Optional player id this roll is for, so the TV can show whose dice are tumbling." },
           playerName: { type: "string", description: "Character or NPC name for the roll, displayed on the TV." },

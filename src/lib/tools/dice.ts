@@ -83,9 +83,8 @@ export function difficultyDcBias(difficulty?: Difficulty | string): number {
 /**
  * The highest EFFECTIVE d20 DC that still leaves a check winnable, per
  * difficulty. A plain d20 tops out at 20, so any DC above 20 can only be beaten
- * by the nat-20 auto-crit — i.e. it is effectively impossible. The DM sometimes
- * stacks "Very Hard 25" + an insane +4 bias into the high 20s; this ceiling
- * pulls the effective DC back into the possible range so a roll always has a
+ * by the nat-20 auto-crit — i.e. it is effectively impossible. This ceiling
+ * pulls an over-tuned effective DC back into the possible range so a roll has a
  * real chance. Harder difficulties allow a steeper (but never impossible) wall.
  * `modifier` (real sheet/damage bonuses baked into the notation) raises the
  * ceiling in lockstep, since the roll's max total is 20 + modifier.
