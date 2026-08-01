@@ -21,7 +21,9 @@ import { bgmDuck, bgmIsMuted, bgmSetContext, bgmSetTheme, subscribeBgm, type Bgm
 import { ambienceSetScene, ambienceStop, ambienceAccent } from "@/lib/client/ambience";
 import { playSfx } from "@/lib/client/sfx";
 import { parseInline, plainText, renderInline, renderTokens } from "@/lib/client/markup";
+import { useTtsSpeech } from "@/lib/client/speech";
 import { ACCENT_THEMES, applyAccent, currentAccent, initAccent } from "@/lib/client/theme";
+import { expandDisplayEvent } from "@/lib/campaign/beats";
 import StageAtmosphere, { AtmosphereHandle } from "@/components/three/StageAtmosphere";
 import DiceTheater, { DiceRollData } from "@/components/three/DiceTheater";
 import CosmosCanvas from "@/components/three/CosmosCanvas";
@@ -167,16 +169,6 @@ function beatHold(plain: string) {
   return Math.max(3200, Math.min(2400 + words * 350, 32000));
 }
 
-/*
- * The couch TV performs one bite-sized subtitle at a time. When the DM hands
- * us an over-long paragraph, we fan it out into several sequential beats (on
- * sentence, then word, boundaries) so it reads as a run of subtitles instead
- * of forcing an unusable scrollbar onto the television. Emphasis spans are
- * never cut mid-span — we only break where * and ` runs are balanced.
- */
-const BEAT_SPLIT_TARGET = 240; // aim for chunks around this many chars
-const BEAT_SPLIT_MAX = 340; // never let a single TV beat exceed this
-
 /**
  * The environmental bed that belongs to each weather-style stage effect.
  *
@@ -191,79 +183,6 @@ const EFFECT_AMBIENCE: Partial<Record<StageEffectKind, AmbienceSound>> = {
   fog: "wind",
   embers: "fire"
 };
-
-function marksBalanced(text: string) {
-  return (text.match(/\*/g) || []).length % 2 === 0 && (text.match(/`/g) || []).length % 2 === 0;
-}
-
-function hardWrapByWords(text: string): string[] {
-  const words = text.split(/\s+/).filter(Boolean);
-  const out: string[] = [];
-  let buf = "";
-  for (const word of words) {
-    const candidate = buf ? `${buf} ${word}` : word;
-    if (candidate.length > BEAT_SPLIT_MAX && buf && marksBalanced(buf)) {
-      out.push(buf);
-      buf = word;
-    } else {
-      buf = candidate;
-    }
-  }
-  if (buf) out.push(buf);
-  return out;
-}
-
-function splitLongContent(content: string): string[] {
-  const text = content.trim();
-  if (text.length <= BEAT_SPLIT_MAX) return [text];
-  // Sentence-ish pieces, keeping terminal punctuation; hard-wrap any monster
-  // sentence that is itself longer than the max.
-  const pieces = text
-    .split(/(?<=[.!?…])\s+(?=["'*(\[]?[A-Z0-9])/)
-    .flatMap((piece) => (piece.length > BEAT_SPLIT_MAX ? hardWrapByWords(piece) : [piece]));
-  const chunks: string[] = [];
-  let buf = "";
-  for (const piece of pieces) {
-    const candidate = buf ? `${buf} ${piece}` : piece;
-    if (candidate.length > BEAT_SPLIT_MAX && buf && marksBalanced(buf)) {
-      chunks.push(buf);
-      buf = piece;
-    } else if (candidate.length >= BEAT_SPLIT_TARGET && marksBalanced(candidate)) {
-      chunks.push(candidate);
-      buf = "";
-    } else {
-      buf = candidate;
-    }
-  }
-  if (buf.trim()) {
-    if (chunks.length && !marksBalanced(buf)) {
-      chunks[chunks.length - 1] = `${chunks[chunks.length - 1]} ${buf}`;
-    } else {
-      chunks.push(buf);
-    }
-  }
-  return chunks.length ? chunks : [text];
-}
-
-/**
- * Expand one display event into the beats the chronicle will actually play:
- * long narration/dialogue/action beats fan out into several subtitle-sized
- * beats (each with a stable derived id); everything else passes through.
- */
-function expandBeat(event: Beat): Beat[] {
-  const splittable = event.type === "narration" || event.type === "dialogue" || event.type === "playerAction";
-  const content = event.content || "";
-  if (!splittable || content.length <= BEAT_SPLIT_MAX) return [event];
-  const parts = splitLongContent(content);
-  if (parts.length <= 1) return [event];
-  // A linked effect fires once, on the first sub-beat only.
-  return parts.map((part, index) => ({
-    ...event,
-    id: `${event.id}#${index}`,
-    content: part,
-    effect: index === 0 ? event.effect : undefined
-  }));
-}
 
 /**
  * The living stage: painted scene, mood atmosphere, letterboxed chronicle
@@ -334,11 +253,14 @@ export default function HostStage({
   const [tomeOpen, setTomeOpen] = useState(false);
   const advanceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [pump, setPump] = useState(0);
+  const [speechOutcome, setSpeechOutcome] = useState<{ beatId: string; spoken: boolean } | null>(null);
+  const presentedBatchRef = useRef<string | null>(null);
 
   // Parse the beat's inline markdown once; the typewriter walks visible
   // characters only, so *marks* never flash on screen mid-reveal.
   const beatTokens = useMemo(() => parseInline(currentBeat?.content || ""), [currentBeat]);
   const beatPlain = useMemo(() => plainText(beatTokens), [beatTokens]);
+  const currentBeatId = currentBeat?.id;
 
   // Ingest new display events into the playback queue (never replay history).
   useEffect(() => {
@@ -351,7 +273,7 @@ export default function HostStage({
       );
       if (recap) {
         beatFxFiredRef.current.add(recap.id); // don't replay its linked effect
-        const [firstRecapBeat, ...remainingRecapBeats] = expandBeat(recap);
+        const [firstRecapBeat, ...remainingRecapBeats] = expandDisplayEvent(recap);
         setCurrentBeat(firstRecapBeat);
         queueRef.current.push(...remainingRecapBeats);
         setShownChars(plainText(parseInline(firstRecapBeat.content || "")).length);
@@ -363,7 +285,7 @@ export default function HostStage({
     for (const event of campaign.displayEvents) {
       if (seen.has(event.id)) continue;
       seen.add(event.id);
-      for (const beat of expandBeat(event)) queueRef.current.push(beat);
+      for (const beat of expandDisplayEvent(event)) queueRef.current.push(beat);
       added = true;
     }
     if (added) setPump((n) => n + 1);
@@ -376,16 +298,24 @@ export default function HostStage({
     for (const player of campaign.players) map.set(player.id, player);
     return map;
   }, [campaign.players]);
+  const { speak: speakTts, stop: stopTts } = useTtsSpeech(
+    campaign.id,
+    campaign.ttsBatchId,
+    tvToken,
+    campaign.ttsEnabled !== false,
+    campaign.ttsVolume ?? 1
+  );
 
   const advance = useCallback(() => {
     if (advanceTimer.current) {
       clearTimeout(advanceTimer.current);
       advanceTimer.current = null;
     }
+    stopTts();
     setCurrentBeat(null);
     setHoldMs(0);
     setPump((n) => n + 1);
-  }, []);
+  }, [stopTts]);
 
   // Take the next beat when idle.
   useEffect(() => {
@@ -416,10 +346,56 @@ export default function HostStage({
     playSfx("beat");
   }, [pump, currentBeat, activeDice, playersById]);
 
+  // Audio belongs only to the turn the TV is actively presenting. TTL still
+  // protects a crashed tab, while this releases normally completed/skipped
+  // batches as soon as the local queue drains.
+  useEffect(() => {
+    if (campaign.ttsBatchId && (currentBeat || activeDice || queueRef.current.length > 0)) {
+      presentedBatchRef.current = campaign.ttsBatchId;
+      return;
+    }
+    const batchId = presentedBatchRef.current;
+    if (!batchId || currentBeat || activeDice || queueRef.current.length > 0) return;
+    presentedBatchRef.current = null;
+    fetch("/api/tts", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "release", campaignId: campaign.id, batchId, hostToken: tvToken })
+    }).catch(() => undefined);
+  }, [campaign.id, campaign.ttsBatchId, currentBeat, activeDice, pump, tvToken]);
+
+  // TTS begins alongside the subtitle typewriter. The clip completion becomes
+  // the beat barrier; missing, disabled, or failed clips resolve to the old
+  // text-only timing instead of blocking the table.
+  useEffect(() => {
+    if (!currentBeatId) {
+      setSpeechOutcome(null);
+      return;
+    }
+    let cancelled = false;
+    setSpeechOutcome(null);
+    void speakTts(currentBeatId).then((spoken) => {
+      if (!cancelled) setSpeechOutcome({ beatId: currentBeatId, spoken });
+    });
+    return () => {
+      cancelled = true;
+      stopTts();
+    };
+  }, [currentBeatId, speakTts, stopTts]);
+
   // Typewriter + auto-advance (paced over visible characters only).
   useEffect(() => {
     if (!currentBeat) return;
     if (shownChars >= beatPlain.length) {
+      if (!speechOutcome || speechOutcome.beatId !== currentBeat.id) return;
+      if (speechOutcome.spoken) {
+        const tail = 550;
+        setHoldMs(tail);
+        advanceTimer.current = setTimeout(advance, tail);
+        return () => {
+          if (advanceTimer.current) clearTimeout(advanceTimer.current);
+        };
+      }
       const hold = beatHold(beatPlain);
       setHoldMs(hold);
       advanceTimer.current = setTimeout(advance, hold);
@@ -430,7 +406,7 @@ export default function HostStage({
     const step = beatPlain.length > 420 ? 4 : 2;
     const timer = setTimeout(() => setShownChars((n) => Math.min(n + step, beatPlain.length)), 24);
     return () => clearTimeout(timer);
-  }, [currentBeat, beatPlain, shownChars, advance]);
+  }, [currentBeat, beatPlain, shownChars, speechOutcome, advance]);
 
   // Space / click skips typing, then skips the hold.
   const skip = useCallback(() => {
@@ -467,13 +443,14 @@ export default function HostStage({
       clearTimeout(advanceTimer.current);
       advanceTimer.current = null;
     }
+    stopTts();
     queueRef.current = [];
     setCurrentBeat(null);
     setHoldMs(0);
     setShownChars(0);
     presentingSentRef.current = false;
     api.party({ campaignId: campaign.id, action: "presenting", active: false, hostToken: tvToken }).catch(() => undefined);
-  }, [campaign.id, tvToken]);
+  }, [campaign.id, tvToken, stopTts]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -625,6 +602,7 @@ export default function HostStage({
   const [swayBusy, setSwayBusy] = useState(false);
   const [paintPrompt, setPaintPrompt] = useState("");
   const [paintBusy, setPaintBusy] = useState(false);
+  const [voices, setVoices] = useState<Array<{ id: string; fileName: string }>>([]);
 
   const sendSway = async () => {
     if (!sway.trim()) return;
@@ -681,6 +659,18 @@ export default function HostStage({
   const toggleSetting = (key: string, value: boolean) => {
     api.party({ campaignId: campaign.id, action: "updateSettings", [key]: value, hostToken: tvToken }).catch(() => undefined);
   };
+
+  const updateTtsSetting = (settings: Record<string, unknown>) => {
+    api.party({ campaignId: campaign.id, action: "updateSettings", ...settings, hostToken: tvToken }).catch(() => undefined);
+  };
+
+  useEffect(() => {
+    if (!drawerOpen) return;
+    fetch("/api/tts?action=voices", { cache: "no-store" })
+      .then((response) => response.ok ? response.json() : { voices: [] })
+      .then((data) => setVoices(Array.isArray(data.voices) ? data.voices : []))
+      .catch(() => setVoices([]));
+  }, [drawerOpen]);
 
   // Narration target status (read-only on the TV): show which model/provider
   // is currently selected, and who the party leader is (the one who can
@@ -1436,6 +1426,36 @@ export default function HostStage({
               </button>
             ))}
           </div>
+
+          <label className="director-label">Table voice</label>
+          <div className="director-toggles">
+            <button
+              className={`chip-toggle tiny ${campaign.ttsEnabled !== false ? "selected" : ""}`}
+              onClick={() => updateTtsSetting({ ttsEnabled: campaign.ttsEnabled === false })}
+            >
+              Voice narration {campaign.ttsEnabled === false ? "off" : "on"}
+            </button>
+          </div>
+          <select
+            className="field"
+            value={campaign.ttsVoiceId || ""}
+            disabled={voices.length === 0}
+            onChange={(event) => updateTtsSetting({ ttsVoiceId: event.target.value })}
+          >
+            <option value="">{voices.length ? "Default voice" : "No voices available"}</option>
+            {voices.map((voice) => <option key={voice.id} value={voice.id}>{voice.id}</option>)}
+          </select>
+          <label className="music-slider">
+            <span>Voice</span>
+            <input
+              type="range"
+              min="0"
+              max="100"
+              value={Math.round((campaign.ttsVolume ?? 1) * 100)}
+              onChange={(event) => updateTtsSetting({ ttsVolume: Number(event.target.value) / 100 })}
+            />
+            <span className="music-pct">{Math.round((campaign.ttsVolume ?? 1) * 100)}%</span>
+          </label>
 
           <label className="director-label">Narration model</label>
           <p className="panel-hint small">

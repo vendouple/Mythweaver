@@ -72,6 +72,9 @@ const debugCampaign: Campaign = {
   showPartyAbilities: true,
   showNpcInventories: true,
   showNpcAbilities: true,
+  ttsEnabled: true,
+  ttsVoiceId: undefined,
+  ttsVolume: 1,
   createdAt: timestamp,
   updatedAt: timestamp
 };

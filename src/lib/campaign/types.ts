@@ -638,6 +638,21 @@ export type Campaign = {
   showPartyAbilities?: boolean;
   showNpcInventories?: boolean;
   showNpcAbilities?: boolean;
+  /**
+   * Campaign TTS settings. `ttsEnabled` defaults to true when unset so old
+   * saves keep narrating; `ttsVoiceId` is a trimmed provider voice id or
+   * undefined (provider default); `ttsVolume` is normalized to 0..1, default 1.
+   */
+  ttsEnabled?: boolean;
+  ttsVoiceId?: string;
+  ttsVolume?: number;
+  /**
+   * Transient in-memory registry pointer to the live TTS clip batch for the
+   * current turn (see lib/tts/runtime.ts). NOT durable — batches live only in
+   * server memory, so this id is meaningless after a restart and is never
+   * written to campaign.json on load normalization.
+   */
+  ttsBatchId?: string;
   createdAt: string;
   updatedAt: string;
 };

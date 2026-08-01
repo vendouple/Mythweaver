@@ -3,6 +3,7 @@ import { getCampaign, getCampaignLock, saveCampaign, safePushDisplayEvent, ensur
 import { listChatTargets, DEFAULT_CHAT_TARGET_ID, isChatTargetConfigured } from "@/lib/aqua/client";
 import { runDungeonMaster, repaintBackdrop, resolveExplorationRound, advanceCombatAndRunEnemies, rotateSpotlight, waitForDmIdle, buildAbsenceBriefing, serverLog, serverError, getHousekeepingStatus, retryHousekeepingNow } from "@/lib/aqua/chat";
 import { turnMode, deadlinePassed, syncFocusedMirror, getActiveLocation, isPartySplit } from "@/lib/campaign/turns";
+import { getVoice } from "@/lib/tts/voices";
 
 export const dynamic = "force-dynamic";
 
@@ -519,6 +520,18 @@ export async function POST(request: Request) {
         if (body.showPartyAbilities !== undefined) campaign.showPartyAbilities = !!body.showPartyAbilities;
         if (body.showNpcInventories !== undefined) campaign.showNpcInventories = !!body.showNpcInventories;
         if (body.showNpcAbilities !== undefined) campaign.showNpcAbilities = !!body.showNpcAbilities;
+        if (body.ttsEnabled !== undefined) campaign.ttsEnabled = !!body.ttsEnabled;
+        if (body.ttsVolume !== undefined) {
+          const volume = Number(body.ttsVolume);
+          if (!Number.isFinite(volume)) return NextResponse.json({ error: "Voice volume must be a number" }, { status: 400 });
+          campaign.ttsVolume = Math.max(0, Math.min(1, volume));
+        }
+        if (body.ttsVoiceId !== undefined) {
+          const voiceId = String(body.ttsVoiceId || "").trim();
+          if (!voiceId) campaign.ttsVoiceId = undefined;
+          else if (!(await getVoice(voiceId))) return NextResponse.json({ error: "Unknown voice" }, { status: 400 });
+          else campaign.ttsVoiceId = voiceId;
+        }
         await saveCampaign(campaign);
         return NextResponse.json({ campaign });
       }

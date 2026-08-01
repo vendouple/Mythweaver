@@ -6,8 +6,9 @@ Couch co-op tabletop RPG: the **TV is the stage**, phones are **player controlle
 
 1. Copy `.env.example` to `.env` (or fill in your existing `.env`) with your model API keys.
 2. `npm install`
-3. `npm run dev`
-4. Open **http://localhost:3000** on the host (TV/PC) and on phones on the same network (use the machine's LAN IP if needed).
+3. Optional voice narration: install the Python dependencies in `services/tts/requirements.txt`, then run `npm run tts` in a second terminal.
+4. `npm run dev`
+5. Open **http://localhost:3000** on the host (TV/PC) and on phones on the same network (use the machine's LAN IP if needed).
 
 ## Play loop
 
@@ -47,6 +48,13 @@ When raising a table you can choose:
 - Ambience moods: calm, tense, adrenaline, battle, boss, mystery, dread, triumph, wonder, somber, **outro**.
 - Stage effects: shake, flash, embers, fog, rain, snow, darkness, heartbeat — with optional **repeat** / **delay** for multi-hit beats.
 - Host hotkeys: **Space** skip beat, **D** director drawer, **T** tome (ignored while typing in inputs).
+
+## Voice narration
+
+- Reference voice samples live in `public/voice`. Add `.wav`, `.mp3`, `.flac`, or `.ogg` files there; the host controls discover them on demand.
+- The host TV and the party leader can enable narration, choose the voice that applies to the **next** generated turn, and adjust active voice volume live.
+- Narrator and NPC lines are synthesized; player-character dialogue remains subtitle-only. Subtitle timing waits for a ready clip to finish, with normal text pacing when a clip is unavailable.
+- The Chatterbox sidecar listens only on `127.0.0.1:5123` by default. Generated WAV data stays in memory for the active turn and is released when presentation ends, with a TTL fallback for interrupted sessions.
 
 ## Project layout (high level)
 
