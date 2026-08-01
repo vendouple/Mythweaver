@@ -9,6 +9,7 @@
  */
 
 import { spawn, spawnSync } from "node:child_process";
+import path from "node:path";
 
 const AUTOSTART = String(process.env.TTS_AUTOSTART ?? "1").toLowerCase() !== "0";
 
@@ -43,7 +44,8 @@ function shutdown(code) {
 process.on("SIGINT", () => shutdown(0));
 process.on("SIGTERM", () => shutdown(0));
 
-const next = start("next", "npx", ["next", "dev"]);
+const nextCli = path.join(process.cwd(), "node_modules", "next", "dist", "bin", "next");
+const next = start("next", process.execPath, [nextCli, "dev"]);
 next.on("exit", (code) => shutdown(code));
 
 if (AUTOSTART) {
