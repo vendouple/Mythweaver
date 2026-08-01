@@ -5,6 +5,7 @@ import type { DisplayEvent } from "@/lib/campaign/types";
 import { api, accentColor, clearSeat, createActionId, StoredSeat, useCampaignPoll, type ChatTargetOption, type HousekeepingStatus, type NarrationFailure } from "@/lib/client/api";
 import { playSfx } from "@/lib/client/sfx";
 import { renderInline, renderMarkdown } from "@/lib/client/markup";
+import { ttsSidecarHealthy } from "@/lib/client/tts";
 import { ACCENT_THEMES, applyAccent, currentAccent, initAccent } from "@/lib/client/theme";
 import DiceTheater, { DiceRollData } from "@/components/three/DiceTheater";
 import CosmosCanvas from "@/components/three/CosmosCanvas";
@@ -98,6 +99,7 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
   const [directorMsg, setDirectorMsg] = useState<string | null>(null);
   const [voices, setVoices] = useState<Array<{ id: string; fileName: string }>>([]);
   const [nudgeBusy, setNudgeBusy] = useState(false);
+  const [ttsBusy, setTtsBusy] = useState(false);
 
   useEffect(() => {
     setAccent(initAccent() || currentAccent());
@@ -311,6 +313,22 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
     } catch (err) {
       setDirectorMsg(err instanceof Error ? err.message : "Could not update voice settings.");
     }
+  };
+
+  const toggleTtsEnabled = async () => {
+    if (!campaign || ttsBusy) return;
+    const nextEnabled = campaign.ttsEnabled === false;
+    setDirectorMsg(null);
+    if (nextEnabled) {
+      setTtsBusy(true);
+      const healthy = await ttsSidecarHealthy();
+      setTtsBusy(false);
+      if (!healthy) {
+        setDirectorMsg("Voice server isn't running — start it with `npm run tts` on the host, then try again.");
+        return;
+      }
+    }
+    await updateTtsSettings({ ttsEnabled: nextEnabled });
   };
 
   const nudgeBackdrop = async () => {
@@ -879,12 +897,13 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
               </div>
             ) : null}
 
-            <span className="director-label">Table voice</span>
+            <span className="director-label">Table voice <span className="beta-tag">beta</span></span>
             <button
               className={`ghost-button ${campaign.ttsEnabled !== false ? "selected" : ""}`}
-              onClick={() => updateTtsSettings({ ttsEnabled: campaign.ttsEnabled === false })}
+              disabled={ttsBusy}
+              onClick={toggleTtsEnabled}
             >
-              Voice narration {campaign.ttsEnabled === false ? "off" : "on"}
+              {ttsBusy ? "Checking voice server…" : `Voice narration ${campaign.ttsEnabled === false ? "off" : "on"}`}
             </button>
             <select
               className="field"

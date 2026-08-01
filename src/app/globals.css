@@ -1678,6 +1678,18 @@ button:disabled { cursor: default; opacity: 0.45; }
 .director .oracle-button { align-self: flex-start; }
 .director-toggles { display: flex; flex-wrap: wrap; gap: 0.4rem; }
 .gallery { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.4rem; }
+.beta-tag {
+  display: inline-block;
+  vertical-align: middle;
+  margin-left: 0.35rem;
+  padding: 0.05rem 0.3rem;
+  border: 1px solid var(--gold);
+  border-radius: 4px;
+  color: var(--gold-bright);
+  font-size: 0.58rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
 .gallery-thumb {
   border: 1px solid transparent;
   border-radius: 8px;
