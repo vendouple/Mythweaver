@@ -22,6 +22,7 @@ import { ambienceSetScene, ambienceStop, ambienceAccent } from "@/lib/client/amb
 import { playSfx } from "@/lib/client/sfx";
 import { parseInline, plainText, renderInline, renderTokens } from "@/lib/client/markup";
 import { useTtsSpeech } from "@/lib/client/speech";
+import { ttsSidecarHealthy } from "@/lib/client/tts";
 import { ACCENT_THEMES, applyAccent, currentAccent, initAccent } from "@/lib/client/theme";
 import { expandDisplayEvent } from "@/lib/campaign/beats";
 import StageAtmosphere, { AtmosphereHandle } from "@/components/three/StageAtmosphere";
@@ -603,6 +604,8 @@ export default function HostStage({
   const [paintPrompt, setPaintPrompt] = useState("");
   const [paintBusy, setPaintBusy] = useState(false);
   const [voices, setVoices] = useState<Array<{ id: string; fileName: string }>>([]);
+  const [ttsBusy, setTtsBusy] = useState(false);
+  const [ttsMsg, setTtsMsg] = useState<string | null>(null);
 
   const sendSway = async () => {
     if (!sway.trim()) return;
@@ -662,6 +665,22 @@ export default function HostStage({
 
   const updateTtsSetting = (settings: Record<string, unknown>) => {
     api.party({ campaignId: campaign.id, action: "updateSettings", ...settings, hostToken: tvToken }).catch(() => undefined);
+  };
+
+  const toggleTtsEnabled = async () => {
+    if (ttsBusy) return;
+    const nextEnabled = campaign.ttsEnabled === false;
+    setTtsMsg(null);
+    if (nextEnabled) {
+      setTtsBusy(true);
+      const healthy = await ttsSidecarHealthy();
+      setTtsBusy(false);
+      if (!healthy) {
+        setTtsMsg("Voice server isn't running — start it with `npm run tts` and try again.");
+        return;
+      }
+    }
+    updateTtsSetting({ ttsEnabled: nextEnabled });
   };
 
   useEffect(() => {
@@ -1427,15 +1446,17 @@ export default function HostStage({
             ))}
           </div>
 
-          <label className="director-label">Table voice</label>
+          <label className="director-label">Table voice <span className="beta-tag">beta</span></label>
           <div className="director-toggles">
             <button
               className={`chip-toggle tiny ${campaign.ttsEnabled !== false ? "selected" : ""}`}
-              onClick={() => updateTtsSetting({ ttsEnabled: campaign.ttsEnabled === false })}
+              disabled={ttsBusy}
+              onClick={toggleTtsEnabled}
             >
-              Voice narration {campaign.ttsEnabled === false ? "off" : "on"}
+              {ttsBusy ? "Checking voice server…" : `Voice narration ${campaign.ttsEnabled === false ? "off" : "on"}`}
             </button>
           </div>
+          {ttsMsg ? <p className="panel-hint small">{ttsMsg}</p> : null}
           <select
             className="field"
             value={campaign.ttsVoiceId || ""}

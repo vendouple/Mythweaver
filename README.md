@@ -6,7 +6,7 @@ Couch co-op tabletop RPG: the **TV is the stage**, phones are **player controlle
 
 1. Copy `.env.example` to `.env` (or fill in your existing `.env`) with your model API keys.
 2. `npm install`
-3. Optional voice narration: install the Python dependencies in `services/tts/requirements.txt`, then run `npm run tts` in a second terminal.
+3. Optional voice narration (beta): install the Python dependencies in `services/tts/requirements.txt`. `npm run dev` then starts the sidecar automatically (set `TTS_AUTOSTART=0` to opt out); you can also run it manually with `npm run tts`.
 4. `npm run dev`
 5. Open **http://localhost:3000** on the host (TV/PC) and on phones on the same network (use the machine's LAN IP if needed).
 
@@ -49,8 +49,9 @@ When raising a table you can choose:
 - Stage effects: shake, flash, embers, fog, rain, snow, darkness, heartbeat — with optional **repeat** / **delay** for multi-hit beats.
 - Host hotkeys: **Space** skip beat, **D** director drawer, **T** tome (ignored while typing in inputs).
 
-## Voice narration
+## Voice narration (beta)
 
+- Enabling narration checks that the local voice server is actually running first — if the sidecar is down, the toggle stays off and the host is told to start it.
 - Reference voice samples live in `public/voice`. Add `.wav`, `.mp3`, `.flac`, or `.ogg` files there; the host controls discover them on demand.
 - The host TV and the party leader can enable narration, choose the voice that applies to the **next** generated turn, and adjust active voice volume live.
 - Narrator and NPC lines are synthesized; player-character dialogue remains subtitle-only. Subtitle timing waits for a ready clip to finish, with normal text pacing when a clip is unavailable.
