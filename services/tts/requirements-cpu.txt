@@ -1,0 +1,7 @@
+# CPU-only Chatterbox TTS sidecar.
+# Works on Windows, Linux, and macOS. It is the required profile for AMD GPUs
+# on native Windows because PyTorch does not provide ROCm acceleration there.
+--extra-index-url https://download.pytorch.org/whl/cpu
+chatterbox-tts>=0.1.1
+torch>=2.1.0
+torchaudio>=2.1.0

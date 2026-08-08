@@ -1,0 +1,13 @@
+# AMD ROCm Chatterbox TTS sidecar (Linux only).
+# Install this only on a Linux system with a compatible ROCm stack. Native
+# Windows has no compatible PyTorch ROCm wheel. RX 6700 XT (gfx1031) is not in
+# AMD's current supported Radeon matrix, so this profile is experimental for
+# that card and may fail; use requirements-cpu.txt on Windows.
+#
+# The PyTorch ROCm wheel channel must match the installed ROCm release. This
+# channel is a reasonable current baseline; replace rocm6.2 after checking
+# https://pytorch.org/get-started/locally for your installed ROCm version.
+--extra-index-url https://download.pytorch.org/whl/rocm6.2
+chatterbox-tts>=0.1.1
+torch>=2.1.0
+torchaudio>=2.1.0

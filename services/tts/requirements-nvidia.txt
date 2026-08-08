@@ -1,0 +1,7 @@
+# NVIDIA CUDA Chatterbox TTS sidecar.
+# Uses PyTorch's CUDA 12.8 wheels. An NVIDIA driver new enough for CUDA 12.8
+# is required; a standalone CUDA Toolkit is not.
+--extra-index-url https://download.pytorch.org/whl/cu128
+chatterbox-tts>=0.1.1
+torch>=2.1.0
+torchaudio>=2.1.0
