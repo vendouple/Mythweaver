@@ -6,6 +6,7 @@
  * the app still runs and narration simply stays text-only.
  *
  *   TTS_AUTOSTART=0  -> skip the sidecar entirely (plain `next dev`)
+ *   TTS_PYTHON=path  -> use this interpreter for the sidecar
  */
 
 import { spawn, spawnSync } from "node:child_process";
@@ -15,6 +16,13 @@ const AUTOSTART = String(process.env.TTS_AUTOSTART ?? "1").toLowerCase() !== "0"
 
 /** First working Python interpreter command, or null. */
 function findPython() {
+  const configured = process.env.TTS_PYTHON?.trim();
+  if (configured) {
+    const probe = spawnSync(configured, ["--version"], { stdio: "ignore" });
+    if (probe.status === 0) return [configured];
+    console.warn(`[dev] TTS_PYTHON is not runnable: ${configured}`);
+  }
+
   for (const candidate of [["python"], ["python3"], ["py", "-3"]]) {
     const [cmd, ...args] = candidate;
     const probe = spawnSync(cmd, [...args, "--version"], { stdio: "ignore" });

@@ -6,7 +6,7 @@ Couch co-op tabletop RPG: the **TV is the stage**, phones are **player controlle
 
 1. Copy `.env.example` to `.env` (or fill in your existing `.env`) with your model API keys.
 2. `npm install`
-3. Optional voice narration (beta): install the Python dependencies in `services/tts/requirements.txt`. `npm run dev` then starts the sidecar automatically (set `TTS_AUTOSTART=0` to opt out); you can also run it manually with `npm run tts`.
+3. Optional voice narration (beta): install one dependency profile from `services/tts`: `requirements-cpu.txt` (portable/default), `requirements-nvidia.txt` (NVIDIA CUDA), or `requirements-amd.txt` (Linux ROCm). `npm run dev` then starts the sidecar automatically (set `TTS_AUTOSTART=0` to opt out); you can also run it manually with `npm run tts`.
 4. `npm run dev`
 5. Open **http://localhost:3000** on the host (TV/PC) and on phones on the same network (use the machine's LAN IP if needed).
 
@@ -52,6 +52,9 @@ When raising a table you can choose:
 ## Voice narration (beta)
 
 - Enabling narration checks that the local voice server is actually running first — if the sidecar is down, the toggle stays off and the host is told to start it.
+- Install exactly one profile with `python -m pip install -r services/tts/requirements-cpu.txt` (or the NVIDIA/AMD equivalent). The legacy `requirements.txt` remains an alias for the CPU profile.
+- The TTS package install and the sidecar must use the same Python interpreter. To select one explicitly for `npm run dev`, set `TTS_PYTHON` in `.env` to its absolute executable path.
+- NVIDIA uses the CUDA profile. AMD ROCm uses the AMD profile only on Linux with a ROCm-compatible card and driver. The RX 6700 XT is `gfx1031` and is not currently in AMD's supported Radeon ROCm matrix; on Windows it must use the CPU profile. A Linux ROCm attempt is unsupported/experimental and may not run.
 - Reference voice samples live in `public/voice`. Add `.wav`, `.mp3`, `.flac`, or `.ogg` files there; the host controls discover them on demand.
 - The host TV and the party leader can enable narration, choose the voice that applies to the **next** generated turn, and adjust active voice volume live.
 - Narrator and NPC lines are synthesized; player-character dialogue remains subtitle-only. Subtitle timing waits for a ready clip to finish, with normal text pacing when a clip is unavailable.

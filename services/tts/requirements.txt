@@ -1,7 +1,3 @@
-# Chatterbox TTS sidecar runtime dependencies.
-# The HTTP layer uses only the Python standard library; the packages below are
-# required for the Chatterbox model itself (torch is a chatterbox-tts dependency,
-# pinned here for reproducibility).
-chatterbox-tts>=0.1.1
-torch>=2.1.0
-torchaudio>=2.1.0
+# Compatibility alias for the portable CPU profile. New installs should choose
+# requirements-cpu.txt, requirements-nvidia.txt, or requirements-amd.txt.
+-r requirements-cpu.txt
