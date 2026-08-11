@@ -12,11 +12,13 @@ import DebugShowcase from "@/components/DebugShowcase";
 
 type View =
   | { kind: "portal" }
-  | { kind: "create" }
+  | { kind: "create"; voiceServer?: VoiceServerSettings }
   | { kind: "host"; campaignId: string }
   | { kind: "join"; initialCode?: string }
   | { kind: "debug" }
   | { kind: "controller"; seat: StoredSeat };
+
+type VoiceServerSettings = { host: string; port: number; voiceId?: string };
 
 /**
  * Thin shell: reads the URL once (?controller=1 / ?code= for phones,
@@ -74,7 +76,7 @@ export default function Home() {
     case "portal":
       return (
         <Portal
-          onCreate={() => setView({ kind: "create" })}
+          onCreate={(voiceServer) => setView({ kind: "create", voiceServer })}
           onResume={openHost}
           onJoin={() => {
             setUrl("controller=1");
@@ -87,7 +89,7 @@ export default function Home() {
         />
       );
     case "create":
-      return <CreateWizard onBack={toPortal} onCreated={(campaign: Campaign) => openHost(campaign.id)} />;
+      return <CreateWizard voiceServer={view.voiceServer} onBack={toPortal} onCreated={(campaign: Campaign) => openHost(campaign.id)} />;
     case "host":
       return <HostExperience campaignId={view.campaignId} onExit={toPortal} />;
     case "join":

@@ -94,10 +94,25 @@ export default function HostExperience({ campaignId, onExit }: { campaignId: str
   // neutral mood roots when that themed shelf is empty. D&D always reads as
   // fantasy even before the classifier has run.
   const musicTheme = campaign?.musicTheme || (campaign?.campaignType === "dnd" ? "fantasy" : null);
+  const [musicThemeOverride, setMusicThemeOverride] = useState<string | null>(null);
+  useEffect(() => {
+    setMusicThemeOverride(campaign?.musicThemeOverride || null);
+  }, [campaign?.musicThemeOverride]);
+  const activeMusicTheme = musicThemeOverride || musicTheme;
   useEffect(() => {
     if (sessionState !== "live") return;
-    bgmSetTheme(musicTheme);
-  }, [musicTheme, sessionState]);
+    bgmSetTheme(activeMusicTheme);
+  }, [activeMusicTheme, sessionState]);
+  const changeMusicTheme = async (theme: string | null) => {
+    setMusicThemeOverride(theme);
+    bgmSetTheme(theme || musicTheme);
+    try {
+      await api.setMusicTheme(campaignId, theme, tvToken);
+    } catch {
+      setMusicThemeOverride(campaign?.musicThemeOverride || null);
+      bgmSetTheme(campaign?.musicThemeOverride || musicTheme);
+    }
+  };
   useEffect(() => {
     if (sessionState !== "live") return;
     if (!status) return;
@@ -269,7 +284,7 @@ export default function HostExperience({ campaignId, onExit }: { campaignId: str
     return (
       <>
         <HostLobby campaign={campaign} theme={musicTheme} />
-        <MusicWidget />
+        <MusicWidget selectedTheme={musicThemeOverride} automaticTheme={musicTheme} onThemeChange={changeMusicTheme} />
       </>
     );
   }
@@ -286,7 +301,7 @@ export default function HostExperience({ campaignId, onExit }: { campaignId: str
           joinCode={campaign.joinCode}
           theme={musicTheme}
         />
-        <MusicWidget />
+        <MusicWidget selectedTheme={musicThemeOverride} automaticTheme={musicTheme} onThemeChange={changeMusicTheme} />
       </>
     );
   }
@@ -297,7 +312,7 @@ export default function HostExperience({ campaignId, onExit }: { campaignId: str
       {visiblePause ? (
         <StoryPause kind={visiblePause.kind} detail={visiblePause.detail} playerName={visiblePause.playerName} theme={musicTheme} />
       ) : null}
-      <MusicWidget />
+      <MusicWidget selectedTheme={musicThemeOverride} automaticTheme={musicTheme} onThemeChange={changeMusicTheme} />
     </>
   );
 }

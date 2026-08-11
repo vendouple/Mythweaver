@@ -3080,7 +3080,8 @@ Return ONLY valid JSON matching this schema. Do not include markdown code fences
         } catch {
           toolArgs = { prompt: call.function.arguments };
         }
-        toolArgs.kind = "portrait";
+        // Profile cards use a square crop; ordinary NPC portraits stay tall.
+        toolArgs.kind = "profile";
         toolArgs.playerId = playerId;
 
         const result = await runTool(campaignId, call.function.name, toolArgs);

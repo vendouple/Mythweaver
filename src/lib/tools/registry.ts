@@ -460,7 +460,7 @@ export const toolDefinitions: AquaToolDefinition[] = [
             type: "string",
             description: "The detailed prompt for the image generator. IMPORTANT: The image generator is a text-to-image model and has NO knowledge of character names, specific campaigns, or in-game lore. Do NOT just pass a character's name like 'Agent Bravo' or 'Steve'. Instead, you MUST write a highly descriptive prompt describing their physical appearance, face features, gender, age, clothing, posture, and environmental style in detail (e.g. 'A close-up portrait of a rugged 35-year-old male secret agent, short dark hair, wearing a black trench coat, dark dramatic alleyway background, cinematic lighting, 8k resolution')."
           },
-          kind: { type: "string", enum: ["scene", "portrait"], description: "scene = TV backdrop; portrait = character face." },
+          kind: { type: "string", enum: ["scene", "portrait", "profile"], description: "scene = TV backdrop; portrait = tall character face; profile = square character-profile image." },
           playerId: { type: "string", description: "For portraits of a player character." },
           npcName: { type: "string", description: "For portraits of an NPC/monster — attaches to that story character." }
         }
@@ -502,10 +502,10 @@ function pruneImageJobs(now: number) {
 
 function queueImageGeneration(campaignId: string, args: Record<string, unknown>): { queued: boolean; deduplicated: boolean } {
   const prompt = String(args.prompt || "").trim();
-  const kind = args.kind === "portrait" ? "portrait" : "scene";
+  const kind = args.kind === "profile" ? "profile" : args.kind === "portrait" ? "portrait" : "scene";
   const playerIdArg = String(args.playerId || "");
   const npcName = typeof args.npcName === "string" ? args.npcName.trim() : "";
-  const target = kind === "portrait" ? (playerIdArg || npcName || "unknown") : "scene";
+  const target = kind !== "scene" ? (playerIdArg || npcName || "unknown") : "scene";
 
   const now = Date.now();
   pruneImageJobs(now);
@@ -548,8 +548,8 @@ function queueImageGeneration(campaignId: string, args: Record<string, unknown>)
     }
     try {
       const image = await generateImage(prompt, {
-        // Scenes fill the TV; portraits fill tall phone/talisman frames.
-        aspect: kind === "portrait" ? "9:16" : "16:9",
+        // Scenes fill the TV; player profiles are square, NPC portraits remain tall.
+        aspect: kind === "profile" ? "1:1" : kind === "portrait" ? "9:16" : "16:9",
         onRetry: ({ attempt, retries, status, error }) => {
           void logCampaignEvent(campaignId, "WARN", "Image", "Image provider retry", {
             kind,
@@ -569,7 +569,7 @@ function queueImageGeneration(campaignId: string, args: Record<string, unknown>)
       const release = await getCampaignLock(campaignId).acquire();
       try {
         const campaign = await getCampaign(campaignId);
-        if (kind === "portrait") {
+        if (kind !== "scene") {
           const player =
             campaign.players.find((item) => item.id === playerIdArg) ||
             campaign.players.find((item) => (item.characterName || item.name).toLowerCase() === playerIdArg.toLowerCase());
@@ -1114,9 +1114,9 @@ export async function runTool(campaignId: string, name: string, args: Record<str
 
     if (name === "generate_image") {
       const prompt = String(args.prompt || "").trim();
-      const kind = args.kind === "portrait" ? "portrait" : "scene";
+      const kind = args.kind === "profile" ? "profile" : args.kind === "portrait" ? "portrait" : "scene";
       if (!prompt) return { error: "Image generation needs a prompt." };
-      if (kind === "portrait" && !String(args.playerId || "") && !String(args.npcName || "")) {
+      if (kind !== "scene" && !String(args.playerId || "") && !String(args.npcName || "")) {
         return { error: "Portraits need a target: pass playerId for a player, or npcName for an NPC/monster." };
       }
       const outcome = queueImageGeneration(campaignId, args);

@@ -607,6 +607,10 @@ export default function HostStage({
   const [ttsBusy, setTtsBusy] = useState(false);
   const [ttsMsg, setTtsMsg] = useState<string | null>(null);
   const [ttsHealth, setTtsHealth] = useState<"checking" | "online" | "offline">("checking");
+  const [ttsHostInput, setTtsHostInput] = useState("");
+  const [ttsPortInput, setTtsPortInput] = useState("");
+  useEffect(() => { setTtsHostInput(campaign.ttsServerHost ?? "127.0.0.1"); }, [campaign.ttsServerHost]);
+  useEffect(() => { setTtsPortInput(String(campaign.ttsServerPort ?? 5123)); }, [campaign.ttsServerPort]);
 
   const sendSway = async () => {
     if (!sway.trim()) return;
@@ -690,7 +694,7 @@ export default function HostStage({
       .then((response) => response.ok ? response.json() : { voices: [] })
       .then((data) => setVoices(Array.isArray(data.voices) ? data.voices : []))
       .catch(() => setVoices([]));
-  }, [drawerOpen]);
+  }, [drawerOpen, campaign.ttsServerHost, campaign.ttsServerPort]);
 
   useEffect(() => {
     if (!drawerOpen) return;
@@ -1463,8 +1467,26 @@ export default function HostStage({
           <label className="director-label">Table voice <span className="beta-tag">beta</span></label>
           <p className="panel-hint small">
             Voice server: <strong>{ttsHealth === "online" ? "online" : ttsHealth === "offline" ? "offline" : "checking…"}</strong> at {campaign.ttsServerHost ?? "127.0.0.1"}:{campaign.ttsServerPort ?? 5123}.
-            {ttsHealth === "offline" ? <> The party leader can check the connection and change the port from Settings.</> : null}
+            {ttsHealth === "offline" ? <> Set the server below, then start TTS/run_tts.bat if needed.</> : null}
           </p>
+          <div className="portal-voice-fields">
+            <input className="field slim" value={ttsHostInput} onChange={(event) => setTtsHostInput(event.target.value)} placeholder="Voice server host" aria-label="Voice server host" />
+            <input className="field slim" type="number" min="1" max="65535" value={ttsPortInput} onChange={(event) => setTtsPortInput(event.target.value)} aria-label="Voice server port" />
+          </div>
+          <button
+            className="ghost-button"
+            disabled={ttsBusy}
+            onClick={() => {
+              const port = Number(ttsPortInput);
+              if (!Number.isInteger(port) || port < 1 || port > 65535 || !ttsHostInput.trim()) {
+                setTtsMsg("Enter a valid voice-server host and port.");
+                return;
+              }
+              updateTtsSetting({ ttsServerHost: ttsHostInput.trim(), ttsServerPort: port });
+            }}
+          >
+            Save voice server
+          </button>
           <div className="director-toggles">
             <button
               className={`chip-toggle tiny ${campaign.ttsEnabled !== false ? "selected" : ""}`}

@@ -590,6 +590,32 @@ button:disabled { cursor: default; opacity: 0.45; }
   border-color: var(--hairline-strong);
   background: rgba(12, 15, 25, 0.86);
 }
+.portal-settings-button {
+  position: fixed;
+  top: 1.25rem;
+  left: 1.25rem;
+  z-index: 45;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  background: var(--panel-bg);
+  color: var(--mist);
+  padding: 0.45rem 0.7rem;
+  cursor: pointer;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+}
+.portal-settings-button:hover { color: var(--parchment); border-color: var(--hairline-strong); }
+.portal-settings {
+  position: fixed;
+  top: 4.3rem;
+  left: 1.25rem;
+  z-index: 45;
+  width: min(19rem, calc(100vw - 2.5rem));
+  padding: 0.9rem;
+  display: grid;
+  gap: 0.6rem;
+}
+.portal-settings-head { display: flex; align-items: center; justify-content: space-between; }
 
 .portal-choices {
   position: relative;
@@ -1598,6 +1624,28 @@ button:disabled { cursor: default; opacity: 0.45; }
   border-radius: 50%;
   background: var(--gold-bright);
   border: none;
+}
+.music-theme {
+  display: grid;
+  gap: 0.32rem;
+  font-size: 0.72rem;
+  color: var(--mist);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+}
+.music-theme select {
+  width: 100%;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  background: rgba(5, 7, 13, 0.72);
+  color: var(--parchment);
+  padding: 0.36rem 0.45rem;
+  text-transform: capitalize;
+}
+.portal-voice-fields {
+  display: grid;
+  grid-template-columns: 1fr 5.5rem;
+  gap: 0.45rem;
 }
 
 .music-now {
