@@ -526,6 +526,13 @@ export async function POST(request: Request) {
           if (!Number.isFinite(volume)) return NextResponse.json({ error: "Voice volume must be a number" }, { status: 400 });
           campaign.ttsVolume = Math.max(0, Math.min(1, volume));
         }
+        if (body.ttsServerPort !== undefined) {
+          const port = Number(body.ttsServerPort);
+          if (!Number.isInteger(port) || port < 1 || port > 65535) {
+            return NextResponse.json({ error: "Voice server port must be between 1 and 65535" }, { status: 400 });
+          }
+          campaign.ttsServerPort = port;
+        }
         if (body.ttsVoiceId !== undefined) {
           const voiceId = String(body.ttsVoiceId || "").trim();
           if (!voiceId) campaign.ttsVoiceId = undefined;

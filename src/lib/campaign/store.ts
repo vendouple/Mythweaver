@@ -323,6 +323,7 @@ export async function createCampaign(
     ttsEnabled: true,
     ttsVoiceId: undefined,
     ttsVolume: 1,
+    ttsServerPort: 5123,
     ttsBatchId: undefined,
     createdAt: now,
     updatedAt: now
@@ -606,6 +607,9 @@ function normalizeCampaign(raw: Partial<Campaign> & { suggestedActions?: unknown
     ttsEnabled: raw.ttsEnabled !== undefined ? !!raw.ttsEnabled : true,
     ttsVoiceId: typeof raw.ttsVoiceId === "string" && raw.ttsVoiceId.trim() ? raw.ttsVoiceId.trim() : undefined,
     ttsVolume: Number.isFinite(Number(raw.ttsVolume)) ? Math.max(0, Math.min(1, Number(raw.ttsVolume))) : 1,
+    ttsServerPort: Number.isInteger(Number(raw.ttsServerPort)) && Number(raw.ttsServerPort) >= 1 && Number(raw.ttsServerPort) <= 65535
+      ? Number(raw.ttsServerPort)
+      : 5123,
     // Transient in-memory registry pointer (not durable): trim or drop.
     ttsBatchId: typeof raw.ttsBatchId === "string" && raw.ttsBatchId.trim() ? raw.ttsBatchId.trim() : undefined,
     createdAt: String(raw.createdAt || now),

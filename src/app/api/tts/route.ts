@@ -34,8 +34,13 @@ export async function GET(request: Request) {
   }
 
   if (action === "health") {
+    const rawPort = url.searchParams.get("port");
+    const port = rawPort === null ? undefined : Number(rawPort);
+    if (rawPort !== null && (port === undefined || !Number.isInteger(port) || port < 1 || port > 65535)) {
+      return NextResponse.json({ error: "Invalid voice server port" }, { status: 400 });
+    }
     try {
-      const health = await sidecarHealth();
+      const health = await sidecarHealth(port);
       return NextResponse.json(health as Record<string, unknown>);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

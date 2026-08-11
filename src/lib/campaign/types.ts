@@ -646,6 +646,8 @@ export type Campaign = {
   ttsEnabled?: boolean;
   ttsVoiceId?: string;
   ttsVolume?: number;
+  /** Local port used by the standalone TTS server (default 5123). */
+  ttsServerPort?: number;
   /**
    * Transient in-memory registry pointer to the live TTS clip batch for the
    * current turn (see lib/tts/runtime.ts). NOT durable — batches live only in

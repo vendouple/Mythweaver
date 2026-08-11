@@ -10,7 +10,7 @@ import { ACCENT_THEMES, applyAccent, currentAccent, initAccent } from "@/lib/cli
 import DiceTheater, { DiceRollData } from "@/components/three/DiceTheater";
 import CosmosCanvas from "@/components/three/CosmosCanvas";
 
-type Tab = "act" | "sheet" | "party" | "quest" | "director";
+type Tab = "settings" | "act" | "sheet" | "party" | "quest" | "director";
 
 // A beat can hold on the TV for up to ~32s before the next playback-progress
 // broadcast; this must comfortably exceed that per-beat gap so a controller
@@ -100,6 +100,8 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
   const [voices, setVoices] = useState<Array<{ id: string; fileName: string }>>([]);
   const [nudgeBusy, setNudgeBusy] = useState(false);
   const [ttsBusy, setTtsBusy] = useState(false);
+  const [ttsHealth, setTtsHealth] = useState<"checking" | "online" | "offline">("checking");
+  const [ttsPortInput, setTtsPortInput] = useState("");
 
   useEffect(() => {
     setAccent(initAccent() || currentAccent());
@@ -110,6 +112,7 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
     [campaign?.players, seat.playerId]
   );
   const isLeader = campaign?.partyLeaderId === seat.playerId;
+  const ttsPort = campaign?.ttsServerPort ?? 5123;
   const color = accentColor(me?.color);
   const weaving = !!campaign?.dmStatus;
   // The TV broadcasts playback progress separately from dmStatus (#2 player
@@ -121,6 +124,22 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
     campaign?.presenting?.active && Date.now() - campaign.presenting.updatedAt < PRESENTING_STALE_MS
   );
   const locked = weaving || presenting;
+
+  useEffect(() => {
+    setTtsPortInput(String(ttsPort));
+  }, [ttsPort]);
+
+  const checkTtsServer = async (port = ttsPort) => {
+    setTtsHealth("checking");
+    setTtsHealth((await ttsSidecarHealthy(port)) ? "online" : "offline");
+  };
+
+  useEffect(() => {
+    if (tab !== "settings") return;
+    void checkTtsServer();
+    const interval = window.setInterval(() => { void checkTtsServer(); }, 10_000);
+    return () => window.clearInterval(interval);
+  }, [tab, ttsPort]);
   // Structured lifecycle gate: a stunned/incapacitated/dead player cannot act
   // this turn. Undefined = able (back-compat). Drives a hard controller lock.
   const canAct = me ? me.canAct !== false : true;
@@ -321,10 +340,10 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
     setDirectorMsg(null);
     if (nextEnabled) {
       setTtsBusy(true);
-      const healthy = await ttsSidecarHealthy();
+      const healthy = await ttsSidecarHealthy(ttsPort);
       setTtsBusy(false);
       if (!healthy) {
-        setDirectorMsg("Voice server isn't running — start it with `npm run tts` on the host, then try again.");
+        setDirectorMsg("Voice server isn't running — start main.py on the host, then try again.");
         return;
       }
     }
@@ -863,6 +882,56 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
           </section>
         ) : null}
 
+        {tab === "settings" ? (
+          <section className="director-panel">
+            <span className="director-label">Voice server</span>
+            <p className="panel-hint small">
+              Status: <strong>{ttsHealth === "online" ? "Online" : ttsHealth === "offline" ? "Offline" : "Checking…"}</strong>
+              {" · "}localhost:{ttsPort}
+              <br />
+              {ttsHealth === "offline"
+                ? "Start main.py on the host computer, then check again."
+                : "The party leader controls this campaign’s voice-server port."}
+            </p>
+            <button className="ghost-button" disabled={ttsHealth === "checking"} onClick={() => void checkTtsServer()}>
+              {ttsHealth === "checking" ? "Checking voice server…" : "Check voice server"}
+            </button>
+            {isLeader ? (
+              <>
+                <label className="director-label" htmlFor="tts-server-port">Voice server port</label>
+                <input
+                  id="tts-server-port"
+                  className="field"
+                  type="number"
+                  min="1"
+                  max="65535"
+                  inputMode="numeric"
+                  value={ttsPortInput}
+                  onChange={(event) => setTtsPortInput(event.target.value)}
+                />
+                <button
+                  className="oracle-button"
+                  disabled={ttsBusy}
+                  onClick={async () => {
+                    const nextPort = Number(ttsPortInput);
+                    if (!Number.isInteger(nextPort) || nextPort < 1 || nextPort > 65535) {
+                      setDirectorMsg("Voice server port must be between 1 and 65535.");
+                      return;
+                    }
+                    setTtsBusy(true);
+                    await updateTtsSettings({ ttsServerPort: nextPort });
+                    setTtsBusy(false);
+                    await checkTtsServer(nextPort);
+                  }}
+                >
+                  Save port
+                </button>
+              </>
+            ) : null}
+            {directorMsg ? <div className="form-error">{directorMsg}</div> : null}
+          </section>
+        ) : null}
+
         {tab === "director" && isLeader ? (
           <section className="director-panel">
             <span className="director-label">Whisper to the Weaver</span>
@@ -1036,6 +1105,7 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
 
       <nav className="controller-tabs">
         {([
+          ["settings", "Settings", "⚙"],
           ["act", "Act", "❯"],
           ["sheet", "Sheet", "✦"],
           ["party", "Party", "❖"],

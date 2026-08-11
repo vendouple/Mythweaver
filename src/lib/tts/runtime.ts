@@ -4,7 +4,7 @@ import { getVoice, isValidVoiceId } from "./voices";
 /**
  * Server-only, ephemeral turn-scoped TTS clip registry.
  *
- * Audio is synthesized by the local sidecar (`services/tts/server.py`) which
+ * Audio is synthesized by the standalone local server (`main.py`) which
  * exposes:
  *   GET  {base}/health     -> { status, voices: string[], ... }
  *   POST {base}/synthesize -> JSON { text, voiceId, exaggeration?, cfgWeight? }
@@ -81,7 +81,10 @@ const DEFAULT_TTL_MS = 10 * 60 * 1000;
 const SWEEP_INTERVAL_MS = 60_000;
 const MAX_TTL_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
 
-function sidecarBaseUrl(): string {
+function sidecarBaseUrl(port?: number): string {
+  if (Number.isInteger(port) && port! >= 1 && port! <= 65535) {
+    return `http://127.0.0.1:${port}`;
+  }
   const raw = process.env.TTS_SIDECAR_URL?.trim();
   const base = raw && raw.length > 0 ? raw : DEFAULT_SIDECAR_URL;
   return base.replace(/\/+$/, "");
@@ -159,7 +162,7 @@ function computeBatchStatus(batch: Batch): BatchStatus {
  * Create a batch and kick off sequential generation in the background.
  * Returns the batch summary immediately; poll `getBatch` for progress.
  */
-export function createBatch(campaignId: string, clips: ClipRequest[]): BatchSummary {
+export function createBatch(campaignId: string, clips: ClipRequest[], sidecarPort?: number): BatchSummary {
   ensureSweeper();
 
   const batch: Batch = {
@@ -181,11 +184,11 @@ export function createBatch(campaignId: string, clips: ClipRequest[]): BatchSumm
   };
 
   batches.set(keyFor(campaignId, batch.id), batch);
-  void runBatch(batch);
+  void runBatch(batch, sidecarPort);
   return toSummary(batch);
 }
 
-async function runBatch(batch: Batch): Promise<void> {
+async function runBatch(batch: Batch, sidecarPort?: number): Promise<void> {
   if (batch.generating) return;
   batch.generating = true;
   touch(batch);
@@ -197,7 +200,7 @@ async function runBatch(batch: Batch): Promise<void> {
         if (clip.status === "pending") clip.status = "cancelled";
         continue;
       }
-      await generateClip(batch, clip);
+      await generateClip(batch, clip, sidecarPort);
       touch(batch);
     }
   } finally {
@@ -212,7 +215,7 @@ async function runBatch(batch: Batch): Promise<void> {
   }
 }
 
-async function generateClip(batch: Batch, clip: StoredClip): Promise<void> {
+async function generateClip(batch: Batch, clip: StoredClip, sidecarPort?: number): Promise<void> {
   // Validate the voice id against discovered voices before hitting the model.
   if (!isValidVoiceId(clip.voiceId) || !(await getVoice(clip.voiceId))) {
     clip.status = "failed";
@@ -223,7 +226,7 @@ async function generateClip(batch: Batch, clip: StoredClip): Promise<void> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), requestTimeoutMs());
   try {
-    const response = await fetch(`${sidecarBaseUrl()}/synthesize`, {
+    const response = await fetch(`${sidecarBaseUrl(sidecarPort)}/synthesize`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -339,11 +342,11 @@ export function releaseCampaign(campaignId: string): number {
 }
 
 /** Health passthrough for the sidecar. */
-export async function sidecarHealth(): Promise<unknown> {
+export async function sidecarHealth(port?: number): Promise<unknown> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), requestTimeoutMs());
   try {
-    const response = await fetch(`${sidecarBaseUrl()}/health`, {
+    const response = await fetch(`${sidecarBaseUrl(port)}/health`, {
       method: "GET",
       signal: controller.signal,
       cache: "no-store",
