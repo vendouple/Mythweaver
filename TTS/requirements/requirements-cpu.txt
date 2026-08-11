@@ -3,5 +3,8 @@
 # on native Windows because PyTorch does not provide ROCm acceleration there.
 --extra-index-url https://download.pytorch.org/whl/cpu
 chatterbox-tts>=0.1.1
+# Chatterbox imports this as `perth`. Pin the official implementation rather
+# than the unrelated/incomplete PyPI package that exposes a None watermarker.
+resemble-perth @ git+https://github.com/resemble-ai/Perth.git@master
 torch>=2.1.0
 torchaudio>=2.1.0

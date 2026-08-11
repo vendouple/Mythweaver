@@ -35,7 +35,10 @@ set "TTS_NEEDS_INSTALL=0"
 if not exist "%TTS_PROFILE_FILE%" set "TTS_NEEDS_INSTALL=1"
 if exist "%TTS_PROFILE_FILE%" set /p TTS_LAST_DEVICE=<"%TTS_PROFILE_FILE%"
 if /I not "%TTS_LAST_DEVICE%"=="%TTS_DEVICE%" set "TTS_NEEDS_INSTALL=1"
-"%TTS_PYTHON%" -c "import chatterbox, torch, torchaudio" >nul 2>nul || set "TTS_NEEDS_INSTALL=1"
+rem A package named `perth` can import successfully while its actual
+rem watermarker is unavailable. Verify the callable Chatterbox needs so an
+rem existing broken environment is repaired automatically.
+"%TTS_PYTHON%" -c "import chatterbox, perth, torch, torchaudio; assert callable(getattr(perth, 'PerthImplicitWatermarker', None))" >nul 2>nul || set "TTS_NEEDS_INSTALL=1"
 
 if "%TTS_NEEDS_INSTALL%"=="1" (
   echo Installing TTS dependencies for %TTS_DEVICE%...
