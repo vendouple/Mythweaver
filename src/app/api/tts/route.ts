@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCampaign, isHostSessionToken } from "@/lib/campaign/store";
-import { getBatch, getClip, readClip, releaseBatch, releaseCampaign, sidecarHealth } from "@/lib/tts/runtime";
-import { listVoices } from "@/lib/tts/voices";
+import { getBatch, getClip, readClip, releaseBatch, releaseCampaign, sidecarHealth, sidecarVoiceIds } from "@/lib/tts/runtime";
+import { isSafeTtsServerHost } from "@/lib/tts/config";
 
 export const dynamic = "force-dynamic";
 
@@ -28,19 +28,29 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const action = url.searchParams.get("action") || "";
 
+  const rawHost = url.searchParams.get("host");
+  const host = rawHost === null ? undefined : rawHost.trim();
+  const rawPort = url.searchParams.get("port");
+  const port = rawPort === null ? undefined : Number(rawPort);
+  if (rawHost !== null && !isSafeTtsServerHost(host)) {
+    return NextResponse.json({ error: "Voice server host must be a local-network IP address" }, { status: 400 });
+  }
+  if (rawPort !== null && (port === undefined || !Number.isInteger(port) || port < 1 || port > 65535)) {
+    return NextResponse.json({ error: "Invalid voice server port" }, { status: 400 });
+  }
+
   if (action === "voices") {
-    const voices = await listVoices();
-    return NextResponse.json({ voices });
+    try {
+      const voices = (await sidecarVoiceIds(host, port)).map((id) => ({ id, fileName: id }));
+      return NextResponse.json({ voices });
+    } catch {
+      return NextResponse.json({ voices: [] });
+    }
   }
 
   if (action === "health") {
-    const rawPort = url.searchParams.get("port");
-    const port = rawPort === null ? undefined : Number(rawPort);
-    if (rawPort !== null && (port === undefined || !Number.isInteger(port) || port < 1 || port > 65535)) {
-      return NextResponse.json({ error: "Invalid voice server port" }, { status: 400 });
-    }
     try {
-      const health = await sidecarHealth(port);
+      const health = await sidecarHealth(host, port);
       return NextResponse.json(health as Record<string, unknown>);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

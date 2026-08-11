@@ -17,7 +17,7 @@ Design constraints:
     * Serializes synthesis through a single lock (GPU inference is not
       thread-safe and the model is stateful per-call).
     * Never writes generated audio to disk; WAV is rendered in-memory.
-    * Voice reference files are discovered under the workspace ``public/voice``
+    * Voice reference files are discovered under the bundle ``Voice``
       directory; voice ids are validated strictly against that directory to
       prevent path traversal.
 """
@@ -28,6 +28,7 @@ import argparse
 import io
 import json
 import logging
+import os
 import socket
 import sys
 import threading
@@ -42,9 +43,9 @@ from typing import Any, Optional
 # Configuration
 # ---------------------------------------------------------------------------
 
-# main.py lives at the workspace root.
+# main.py lives at the root of the portable TTS bundle.
 WORKSPACE_ROOT = Path(__file__).resolve().parent
-VOICE_DIR = WORKSPACE_ROOT / "public" / "voice"
+VOICE_DIR = WORKSPACE_ROOT / "Voice"
 
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 5123
@@ -95,7 +96,10 @@ class ModelManager:
                 import torch  # deferred: heavy import only when needed
                 from chatterbox.tts import ChatterboxTTS
 
-                device = "cuda" if torch.cuda.is_available() else "cpu"
+                requested_device = os.getenv("TTS_DEVICE", "auto").strip().lower()
+                device = "cpu" if requested_device == "cpu" else ("cuda" if torch.cuda.is_available() else "cpu")
+                if requested_device in {"cuda", "rocm"} and device != "cuda":
+                    LOG.warning("TTS_DEVICE=%s requested but no compatible GPU is available; using CPU", requested_device)
                 LOG.info("Loading ChatterboxTTS on %s ...", device)
                 self._model = ChatterboxTTS.from_pretrained(device=device)
                 LOG.info("Model loaded (sample rate=%s).", self.sample_rate)
@@ -350,8 +354,8 @@ class TTSRequestHandler(BaseHTTPRequestHandler):
 
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="Chatterbox TTS server")
-    parser.add_argument("--host", default=DEFAULT_HOST, help="bind host (default 0.0.0.0, all local interfaces)")
-    parser.add_argument("--port", type=int, default=DEFAULT_PORT, help=f"bind port (default {DEFAULT_PORT})")
+    parser.add_argument("--host", default=os.getenv("TTS_HOST", DEFAULT_HOST), help="bind host (default 0.0.0.0, all local interfaces)")
+    parser.add_argument("--port", type=int, default=int(os.getenv("TTS_PORT", str(DEFAULT_PORT))), help=f"bind port (default {DEFAULT_PORT})")
     parser.add_argument(
         "--preload",
         action="store_true",

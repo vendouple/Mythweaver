@@ -4,7 +4,7 @@ import path from "path";
 /**
  * Server-only voice discovery.
  *
- * Reference voice prompts live under `public/voice`. We discover them by
+ * Reference voice prompts live under `TTS/Voice`. We discover them by
  * scanning that directory (top-level files only) and accept a fixed set of
  * audio extensions. Voice ids are the bare filename stems — stable across
  * restarts as long as the underlying file does not change.
@@ -26,11 +26,11 @@ export type VoiceInfo = {
 };
 
 function voiceDir(): string {
-  return path.join(process.cwd(), "public", "voice");
+  return path.join(process.cwd(), "TTS", "Voice");
 }
 
 /**
- * Discover available voices under `public/voice`. Returns a list sorted by
+ * Discover available voices under `TTS/Voice`. Returns a list sorted by
  * id. Missing directory or unreadable entries yield an empty list rather
  * than throwing.
  */

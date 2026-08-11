@@ -3,7 +3,8 @@ import { getCampaign, getCampaignLock, saveCampaign, safePushDisplayEvent, ensur
 import { listChatTargets, DEFAULT_CHAT_TARGET_ID, isChatTargetConfigured } from "@/lib/aqua/client";
 import { runDungeonMaster, repaintBackdrop, resolveExplorationRound, advanceCombatAndRunEnemies, rotateSpotlight, waitForDmIdle, buildAbsenceBriefing, serverLog, serverError, getHousekeepingStatus, retryHousekeepingNow } from "@/lib/aqua/chat";
 import { turnMode, deadlinePassed, syncFocusedMirror, getActiveLocation, isPartySplit } from "@/lib/campaign/turns";
-import { getVoice } from "@/lib/tts/voices";
+import { isValidVoiceId } from "@/lib/tts/voices";
+import { isSafeTtsServerHost } from "@/lib/tts/config";
 
 export const dynamic = "force-dynamic";
 
@@ -533,10 +534,17 @@ export async function POST(request: Request) {
           }
           campaign.ttsServerPort = port;
         }
+        if (body.ttsServerHost !== undefined) {
+          const host = String(body.ttsServerHost || "").trim();
+          if (!isSafeTtsServerHost(host)) {
+            return NextResponse.json({ error: "Voice server host must be a local-network IP address" }, { status: 400 });
+          }
+          campaign.ttsServerHost = host;
+        }
         if (body.ttsVoiceId !== undefined) {
           const voiceId = String(body.ttsVoiceId || "").trim();
           if (!voiceId) campaign.ttsVoiceId = undefined;
-          else if (!(await getVoice(voiceId))) return NextResponse.json({ error: "Unknown voice" }, { status: 400 });
+          else if (!isValidVoiceId(voiceId)) return NextResponse.json({ error: "Invalid voice" }, { status: 400 });
           else campaign.ttsVoiceId = voiceId;
         }
         await saveCampaign(campaign);

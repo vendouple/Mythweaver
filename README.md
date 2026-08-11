@@ -6,7 +6,7 @@ Couch co-op tabletop RPG: the **TV is the stage**, phones are **player controlle
 
 1. Copy `.env.example` to `.env` (or fill in your existing `.env`) with your model API keys.
 2. `npm install`
-3. Optional voice narration (beta): install one dependency profile from `services/tts`: `requirements-cpu.txt` (portable/default), `requirements-nvidia.txt` (NVIDIA CUDA), or `requirements-amd.txt` (Linux ROCm). Start the standalone server by double-clicking `main.py` (or use `npm run tts`).
+3. Optional voice narration (beta): the self-contained `TTS` folder can stay here or be copied to another PC. Copy `TTS/.env.example` to `TTS/.env`, select the device, then double-click `TTS/run_tts.bat`. It creates a virtual environment, installs the CPU/CUDA/ROCm profile you selected, and starts `TTS/main.py`.
 4. `npm run dev`
 5. Open **http://localhost:3000** on the host (TV/PC) and on phones on the same network (use the machine's LAN IP if needed).
 
@@ -52,13 +52,12 @@ When raising a table you can choose:
 ## Voice narration (beta)
 
 - Enabling narration checks that the local voice server is actually running first — if the sidecar is down, the toggle stays off and the host is told to start it.
-- Install exactly one profile with `python -m pip install -r services/tts/requirements-cpu.txt` (or the NVIDIA/AMD equivalent). The legacy `requirements.txt` remains an alias for the CPU profile.
-- The TTS package install and `main.py` must use the same Python interpreter.
+- `TTS/run_tts.bat` handles the dependency profile automatically. The package install and `TTS/main.py` use the same private `TTS/.venv` interpreter.
 - NVIDIA uses the CUDA profile. AMD ROCm uses the AMD profile only on Linux with a ROCm-compatible card and driver. The RX 6700 XT is `gfx1031` and is not currently in AMD's supported Radeon ROCm matrix; on Windows it must use the CPU profile. A Linux ROCm attempt is unsupported/experimental and may not run.
-- Reference voice samples live in `public/voice`. Add `.wav`, `.mp3`, `.flac`, or `.ogg` files there; the host controls discover them on demand.
+- Reference voice samples live in `TTS/Voice`. Add `.wav`, `.mp3`, `.flac`, or `.ogg` files there; the host controls discover them on demand.
 - The host TV and the party leader can enable narration, choose the voice that applies to the **next** generated turn, and adjust active voice volume live.
 - Narrator and NPC lines are synthesized; player-character dialogue remains subtitle-only. Subtitle timing waits for a ready clip to finish, with normal text pacing when a clip is unavailable.
-- `main.py` listens on port `5123` by default and prints both its localhost and LAN URLs at startup. Change the campaign’s port from the bottom-left **Settings** tab on a controller; the party leader can confirm whether the server is online there. Generated WAV data stays in memory for the active turn and is released when presentation ends, with a TTL fallback for interrupted sessions.
+- `TTS/main.py` listens on port `5123` by default and prints both its localhost and LAN URLs at startup. To run TTS on a CUDA-capable LAN PC, copy the complete `TTS` folder there, run `run_tts.bat`, copy its LAN IP, then enter that IP and port in the party leader’s bottom-left **Settings** tab. Generated WAV data stays in memory for the active turn and is released when presentation ends, with a TTL fallback for interrupted sessions.
 
 ## Project layout (high level)
 

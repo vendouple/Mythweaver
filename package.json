@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start -H 0.0.0.0",
-    "tts": "python main.py",
+    "tts": "python TTS/main.py",
     "lint": "next lint",
     "typecheck": "tsc --noEmit"
   },

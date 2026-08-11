@@ -648,6 +648,8 @@ export type Campaign = {
   ttsVolume?: number;
   /** Local port used by the standalone TTS server (default 5123). */
   ttsServerPort?: number;
+  /** LAN address of the standalone TTS server (default 127.0.0.1). */
+  ttsServerHost?: string;
   /**
    * Transient in-memory registry pointer to the live TTS clip batch for the
    * current turn (see lib/tts/runtime.ts). NOT durable — batches live only in
