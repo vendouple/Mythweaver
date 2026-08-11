@@ -102,6 +102,7 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
   const [ttsBusy, setTtsBusy] = useState(false);
   const [ttsHealth, setTtsHealth] = useState<"checking" | "online" | "offline">("checking");
   const [ttsPortInput, setTtsPortInput] = useState("");
+  const [ttsHostInput, setTtsHostInput] = useState("");
 
   useEffect(() => {
     setAccent(initAccent() || currentAccent());
@@ -113,6 +114,7 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
   );
   const isLeader = campaign?.partyLeaderId === seat.playerId;
   const ttsPort = campaign?.ttsServerPort ?? 5123;
+  const ttsHost = campaign?.ttsServerHost ?? "127.0.0.1";
   const color = accentColor(me?.color);
   const weaving = !!campaign?.dmStatus;
   // The TV broadcasts playback progress separately from dmStatus (#2 player
@@ -128,10 +130,11 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
   useEffect(() => {
     setTtsPortInput(String(ttsPort));
   }, [ttsPort]);
+  useEffect(() => { setTtsHostInput(ttsHost); }, [ttsHost]);
 
-  const checkTtsServer = async (port = ttsPort) => {
+  const checkTtsServer = async (host = ttsHost, port = ttsPort) => {
     setTtsHealth("checking");
-    setTtsHealth((await ttsSidecarHealthy(port)) ? "online" : "offline");
+    setTtsHealth((await ttsSidecarHealthy(host, port)) ? "online" : "offline");
   };
 
   useEffect(() => {
@@ -139,7 +142,7 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
     void checkTtsServer();
     const interval = window.setInterval(() => { void checkTtsServer(); }, 10_000);
     return () => window.clearInterval(interval);
-  }, [tab, ttsPort]);
+  }, [tab, ttsHost, ttsPort]);
   // Structured lifecycle gate: a stunned/incapacitated/dead player cannot act
   // this turn. Undefined = able (back-compat). Drives a hard controller lock.
   const canAct = me ? me.canAct !== false : true;
@@ -314,14 +317,14 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
       if (cancelled) return;
       setHousekeeping(res.status);
     }).catch(() => {});
-    fetch("/api/tts?action=voices", { cache: "no-store" })
+    fetch(`/api/tts?action=voices&host=${encodeURIComponent(ttsHost)}&port=${ttsPort}`, { cache: "no-store" })
       .then((response) => response.ok ? response.json() : { voices: [] })
       .then((data) => {
         if (!cancelled) setVoices(Array.isArray(data.voices) ? data.voices : []);
       })
       .catch(() => { if (!cancelled) setVoices([]); });
     return () => { cancelled = true; };
-  }, [isLeader, tab, campaignId, weaving]);
+  }, [isLeader, tab, campaignId, weaving, ttsHost, ttsPort]);
 
   const updateTtsSettings = async (settings: Record<string, unknown>) => {
     if (!campaign) return;
@@ -340,10 +343,10 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
     setDirectorMsg(null);
     if (nextEnabled) {
       setTtsBusy(true);
-      const healthy = await ttsSidecarHealthy(ttsPort);
+      const healthy = await ttsSidecarHealthy(ttsHost, ttsPort);
       setTtsBusy(false);
       if (!healthy) {
-        setDirectorMsg("Voice server isn't running — start main.py on the host, then try again.");
+        setDirectorMsg("Voice server isn't running — start TTS/run_tts.bat on the host, then try again.");
         return;
       }
     }
@@ -887,10 +890,10 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
             <span className="director-label">Voice server</span>
             <p className="panel-hint small">
               Status: <strong>{ttsHealth === "online" ? "Online" : ttsHealth === "offline" ? "Offline" : "Checking…"}</strong>
-              {" · "}localhost:{ttsPort}
+              {" · "}{ttsHost}:{ttsPort}
               <br />
               {ttsHealth === "offline"
-                ? "Start main.py on the host computer, then check again."
+                ? "Start TTS/run_tts.bat on the host computer, then check again."
                 : "The party leader controls this campaign’s voice-server port."}
             </p>
             <button className="ghost-button" disabled={ttsHealth === "checking"} onClick={() => void checkTtsServer()}>
@@ -909,6 +912,15 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
                   value={ttsPortInput}
                   onChange={(event) => setTtsPortInput(event.target.value)}
                 />
+                <label className="director-label" htmlFor="tts-server-host">Voice server LAN IP</label>
+                <input
+                  id="tts-server-host"
+                  className="field"
+                  inputMode="decimal"
+                  placeholder="192.168.1.50"
+                  value={ttsHostInput}
+                  onChange={(event) => setTtsHostInput(event.target.value)}
+                />
                 <button
                   className="oracle-button"
                   disabled={ttsBusy}
@@ -919,9 +931,9 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
                       return;
                     }
                     setTtsBusy(true);
-                    await updateTtsSettings({ ttsServerPort: nextPort });
+                    await updateTtsSettings({ ttsServerHost: ttsHostInput.trim(), ttsServerPort: nextPort });
                     setTtsBusy(false);
-                    await checkTtsServer(nextPort);
+                    await checkTtsServer(ttsHostInput.trim(), nextPort);
                   }}
                 >
                   Save port

@@ -7,8 +7,7 @@ import { generateImage } from "@/lib/aqua/images";
 import { AmbienceMood, Campaign, DisplayEvent, Player, PlayerStat, StoryCharacter } from "@/lib/campaign/types";
 import { MUSIC_THEMES, MusicTheme, THEME_GUIDE } from "@/lib/campaign/musicTheme";
 import { expandDisplayEvent } from "@/lib/campaign/beats";
-import { createBatch, releaseCampaign } from "@/lib/tts/runtime";
-import { getVoice, listVoices } from "@/lib/tts/voices";
+import { createBatch, releaseCampaign, sidecarVoiceIds } from "@/lib/tts/runtime";
 import { advanceCombat, buildExplorationResolution, ENEMY_SLOT, syncFocusedMirror, isPartySplit, rotateActiveLocation, startCombat, endCombat, eligiblePlayerIdsInLocation } from "@/lib/campaign/turns";
 
 // Tiered server-log verbosity (DEBUG_VERBOSE):
@@ -1378,12 +1377,9 @@ async function startTtsForTurn(
     // Voice: the campaign's chosen voice when it still resolves, otherwise the
     // first discovered voice. No voices on disk → nothing to synthesize.
     let voiceId: string | undefined;
-    if (campaign.ttsVoiceId) {
-      voiceId = (await getVoice(campaign.ttsVoiceId))?.id;
-    }
-    if (!voiceId) {
-      voiceId = (await listVoices())[0]?.id;
-    }
+    const availableVoices = await sidecarVoiceIds(campaign.ttsServerHost, campaign.ttsServerPort);
+    if (campaign.ttsVoiceId && availableVoices.includes(campaign.ttsVoiceId)) voiceId = campaign.ttsVoiceId;
+    if (!voiceId) voiceId = availableVoices[0];
     if (!voiceId) return;
 
     const preparedChunks = await prepareTtsChunks(chunks);
@@ -1391,7 +1387,7 @@ async function startTtsForTurn(
 
     // One live batch per campaign: drop last turn's clips before queuing these.
     releaseCampaign(campaign.id);
-    const summary = createBatch(campaign.id, clips, campaign.ttsServerPort);
+    const summary = createBatch(campaign.id, clips, campaign.ttsServerHost, campaign.ttsServerPort);
     campaign.ttsBatchId = summary.batchId;
     void logCampaignEvent(campaign.id, "INFO", "TTS", "Turn TTS batch queued", {
       batchId: summary.batchId,

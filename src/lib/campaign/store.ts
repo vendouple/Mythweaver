@@ -25,6 +25,7 @@ import {
 } from "./types";
 import { createId, createJoinCode } from "@/lib/utils/ids";
 import { MUSIC_THEMES, MusicTheme } from "./musicTheme";
+import { isSafeTtsServerHost } from "@/lib/tts/config";
 
 const dataRoot = path.join(process.cwd(), "data", "campaigns");
 
@@ -324,6 +325,7 @@ export async function createCampaign(
     ttsVoiceId: undefined,
     ttsVolume: 1,
     ttsServerPort: 5123,
+    ttsServerHost: "127.0.0.1",
     ttsBatchId: undefined,
     createdAt: now,
     updatedAt: now
@@ -610,6 +612,9 @@ function normalizeCampaign(raw: Partial<Campaign> & { suggestedActions?: unknown
     ttsServerPort: Number.isInteger(Number(raw.ttsServerPort)) && Number(raw.ttsServerPort) >= 1 && Number(raw.ttsServerPort) <= 65535
       ? Number(raw.ttsServerPort)
       : 5123,
+    ttsServerHost: typeof raw.ttsServerHost === "string" && isSafeTtsServerHost(raw.ttsServerHost)
+      ? raw.ttsServerHost.trim()
+      : "127.0.0.1",
     // Transient in-memory registry pointer (not durable): trim or drop.
     ttsBatchId: typeof raw.ttsBatchId === "string" && raw.ttsBatchId.trim() ? raw.ttsBatchId.trim() : undefined,
     createdAt: String(raw.createdAt || now),

@@ -674,10 +674,10 @@ export default function HostStage({
     setTtsMsg(null);
     if (nextEnabled) {
       setTtsBusy(true);
-      const healthy = await ttsSidecarHealthy(campaign.ttsServerPort);
+      const healthy = await ttsSidecarHealthy(campaign.ttsServerHost, campaign.ttsServerPort);
       setTtsBusy(false);
       if (!healthy) {
-        setTtsMsg("Voice server isn't running — start main.py and try again.");
+        setTtsMsg("Voice server isn't running — start TTS/run_tts.bat and try again.");
         return;
       }
     }
@@ -686,7 +686,7 @@ export default function HostStage({
 
   useEffect(() => {
     if (!drawerOpen) return;
-    fetch("/api/tts?action=voices", { cache: "no-store" })
+    fetch(`/api/tts?action=voices&host=${encodeURIComponent(campaign.ttsServerHost ?? "127.0.0.1")}&port=${campaign.ttsServerPort ?? 5123}`, { cache: "no-store" })
       .then((response) => response.ok ? response.json() : { voices: [] })
       .then((data) => setVoices(Array.isArray(data.voices) ? data.voices : []))
       .catch(() => setVoices([]));
@@ -697,13 +697,13 @@ export default function HostStage({
     let cancelled = false;
     const check = async () => {
       if (!cancelled) setTtsHealth("checking");
-      const online = await ttsSidecarHealthy(campaign.ttsServerPort);
+      const online = await ttsSidecarHealthy(campaign.ttsServerHost, campaign.ttsServerPort);
       if (!cancelled) setTtsHealth(online ? "online" : "offline");
     };
     void check();
     const interval = window.setInterval(() => { void check(); }, 10_000);
     return () => { cancelled = true; window.clearInterval(interval); };
-  }, [drawerOpen, campaign.ttsServerPort]);
+  }, [drawerOpen, campaign.ttsServerHost, campaign.ttsServerPort]);
 
   // Narration target status (read-only on the TV): show which model/provider
   // is currently selected, and who the party leader is (the one who can
@@ -1462,7 +1462,7 @@ export default function HostStage({
 
           <label className="director-label">Table voice <span className="beta-tag">beta</span></label>
           <p className="panel-hint small">
-            Voice server: <strong>{ttsHealth === "online" ? "online" : ttsHealth === "offline" ? "offline" : "checking…"}</strong> on port {campaign.ttsServerPort ?? 5123}.
+            Voice server: <strong>{ttsHealth === "online" ? "online" : ttsHealth === "offline" ? "offline" : "checking…"}</strong> at {campaign.ttsServerHost ?? "127.0.0.1"}:{campaign.ttsServerPort ?? 5123}.
             {ttsHealth === "offline" ? <> The party leader can check the connection and change the port from Settings.</> : null}
           </p>
           <div className="director-toggles">

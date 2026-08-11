@@ -1,10 +1,11 @@
 import { createId } from "@/lib/utils/ids";
-import { getVoice, isValidVoiceId } from "./voices";
+import { isValidVoiceId } from "./voices";
+import { ttsServerHost } from "./config";
 
 /**
  * Server-only, ephemeral turn-scoped TTS clip registry.
  *
- * Audio is synthesized by the standalone local server (`main.py`) which
+ * Audio is synthesized by the standalone local server (`TTS/main.py`) which
  * exposes:
  *   GET  {base}/health     -> { status, voices: string[], ... }
  *   POST {base}/synthesize -> JSON { text, voiceId, exaggeration?, cfgWeight? }
@@ -81,9 +82,9 @@ const DEFAULT_TTL_MS = 10 * 60 * 1000;
 const SWEEP_INTERVAL_MS = 60_000;
 const MAX_TTL_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
 
-function sidecarBaseUrl(port?: number): string {
+function sidecarBaseUrl(host?: string, port?: number): string {
   if (Number.isInteger(port) && port! >= 1 && port! <= 65535) {
-    return `http://127.0.0.1:${port}`;
+    return `http://${ttsServerHost(host)}:${port}`;
   }
   const raw = process.env.TTS_SIDECAR_URL?.trim();
   const base = raw && raw.length > 0 ? raw : DEFAULT_SIDECAR_URL;
@@ -162,7 +163,7 @@ function computeBatchStatus(batch: Batch): BatchStatus {
  * Create a batch and kick off sequential generation in the background.
  * Returns the batch summary immediately; poll `getBatch` for progress.
  */
-export function createBatch(campaignId: string, clips: ClipRequest[], sidecarPort?: number): BatchSummary {
+export function createBatch(campaignId: string, clips: ClipRequest[], sidecarHost?: string, sidecarPort?: number): BatchSummary {
   ensureSweeper();
 
   const batch: Batch = {
@@ -184,11 +185,11 @@ export function createBatch(campaignId: string, clips: ClipRequest[], sidecarPor
   };
 
   batches.set(keyFor(campaignId, batch.id), batch);
-  void runBatch(batch, sidecarPort);
+  void runBatch(batch, sidecarHost, sidecarPort);
   return toSummary(batch);
 }
 
-async function runBatch(batch: Batch, sidecarPort?: number): Promise<void> {
+async function runBatch(batch: Batch, sidecarHost?: string, sidecarPort?: number): Promise<void> {
   if (batch.generating) return;
   batch.generating = true;
   touch(batch);
@@ -200,7 +201,7 @@ async function runBatch(batch: Batch, sidecarPort?: number): Promise<void> {
         if (clip.status === "pending") clip.status = "cancelled";
         continue;
       }
-      await generateClip(batch, clip, sidecarPort);
+      await generateClip(batch, clip, sidecarHost, sidecarPort);
       touch(batch);
     }
   } finally {
@@ -215,9 +216,9 @@ async function runBatch(batch: Batch, sidecarPort?: number): Promise<void> {
   }
 }
 
-async function generateClip(batch: Batch, clip: StoredClip, sidecarPort?: number): Promise<void> {
+async function generateClip(batch: Batch, clip: StoredClip, sidecarHost?: string, sidecarPort?: number): Promise<void> {
   // Validate the voice id against discovered voices before hitting the model.
-  if (!isValidVoiceId(clip.voiceId) || !(await getVoice(clip.voiceId))) {
+  if (!isValidVoiceId(clip.voiceId)) {
     clip.status = "failed";
     clip.error = `unknown or invalid voiceId: ${clip.voiceId}`;
     return;
@@ -226,7 +227,7 @@ async function generateClip(batch: Batch, clip: StoredClip, sidecarPort?: number
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), requestTimeoutMs());
   try {
-    const response = await fetch(`${sidecarBaseUrl(sidecarPort)}/synthesize`, {
+    const response = await fetch(`${sidecarBaseUrl(sidecarHost, sidecarPort)}/synthesize`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -342,11 +343,13 @@ export function releaseCampaign(campaignId: string): number {
 }
 
 /** Health passthrough for the sidecar. */
-export async function sidecarHealth(port?: number): Promise<unknown> {
+export async function sidecarHealth(host?: string, port?: number): Promise<unknown> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), requestTimeoutMs());
+  // A status light must fail fast if a LAN server disappears; synthesis keeps
+  // its longer, separately configured timeout.
+  const timeout = setTimeout(() => controller.abort(), Math.min(requestTimeoutMs(), 5_000));
   try {
-    const response = await fetch(`${sidecarBaseUrl(port)}/health`, {
+    const response = await fetch(`${sidecarBaseUrl(host, port)}/health`, {
       method: "GET",
       signal: controller.signal,
       cache: "no-store",
@@ -355,4 +358,12 @@ export async function sidecarHealth(port?: number): Promise<unknown> {
   } finally {
     clearTimeout(timeout);
   }
+}
+
+/** Return the voice ids advertised by a standalone server. */
+export async function sidecarVoiceIds(host?: string, port?: number): Promise<string[]> {
+  const health = await sidecarHealth(host, port) as { voices?: unknown };
+  return Array.isArray(health.voices)
+    ? health.voices.filter((voice): voice is string => typeof voice === "string" && isValidVoiceId(voice))
+    : [];
 }
