@@ -3,5 +3,7 @@
 # is required; a standalone CUDA Toolkit is not.
 --extra-index-url https://download.pytorch.org/whl/cu128
 chatterbox-tts>=0.1.1
+# Required for Chatterbox's built-in audio watermarker.
+resemble-perth @ git+https://github.com/resemble-ai/Perth.git@master
 torch>=2.1.0
 torchaudio>=2.1.0
