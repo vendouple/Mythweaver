@@ -5,6 +5,7 @@ import { runDungeonMaster, repaintBackdrop, resolveExplorationRound, advanceComb
 import { turnMode, deadlinePassed, syncFocusedMirror, getActiveLocation, isPartySplit } from "@/lib/campaign/turns";
 import { isValidVoiceId } from "@/lib/tts/voices";
 import { isSafeTtsServerHost } from "@/lib/tts/config";
+import { MUSIC_THEMES, type MusicTheme } from "@/lib/campaign/musicTheme";
 
 export const dynamic = "force-dynamic";
 
@@ -44,6 +45,7 @@ const ACTION_AUTHORITY: Record<string, PartyAuthority> = {
   resetTurn: "host",
   setBackground: "host",
   updateSettings: "host",
+  setMusicTheme: "host",
   editMessage: "host",
   editEvent: "host",
   presenting: "tv",
@@ -548,6 +550,20 @@ export async function POST(request: Request) {
           else campaign.ttsVoiceId = voiceId;
         }
         await saveCampaign(campaign);
+        return NextResponse.json({ campaign });
+      }
+
+      if (action === "setMusicTheme") {
+        const campaign = await getCampaign(campaignId);
+        const theme = String(body.theme || "").trim();
+        if (theme && !MUSIC_THEMES.includes(theme as MusicTheme)) {
+          return NextResponse.json({ error: "Unknown music theme" }, { status: 400 });
+        }
+        campaign.musicThemeOverride = theme ? theme : undefined;
+        await saveCampaign(campaign);
+        void logCampaignEvent(campaignId, "INFO", "Host", "BGM theme override changed", {
+          theme: campaign.musicThemeOverride || "automatic"
+        });
         return NextResponse.json({ campaign });
       }
 

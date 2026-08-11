@@ -23,10 +23,12 @@ const STEP_NAMES = ["The Discipline", "The Premise", "The Cast", "The Summons"];
  */
 export default function CreateWizard({
   onBack,
-  onCreated
+  onCreated,
+  voiceServer
 }: {
   onBack: () => void;
   onCreated: (campaign: Campaign) => void;
+  voiceServer?: { host: string; port: number; voiceId?: string };
 }) {
   const [step, setStep] = useState<Step>(0);
   const [campaignType, setCampaignType] = useState<"tabletop" | "dnd">("tabletop");
@@ -110,7 +112,10 @@ export default function CreateWizard({
         campaignType,
         rulesMode: campaignType === "dnd" ? rulesMode : "casual",
         difficulty,
-        rollMode
+        rollMode,
+        ttsServerHost: voiceServer?.host,
+        ttsServerPort: voiceServer?.port,
+        ttsVoiceId: voiceServer?.voiceId
       });
       onCreated(campaign);
     });

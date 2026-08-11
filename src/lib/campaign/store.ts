@@ -589,6 +589,7 @@ function normalizeCampaign(raw: Partial<Campaign> & { suggestedActions?: unknown
     messages: Array.isArray(raw.messages) ? raw.messages : [],
     campaignType: normalizeCampaignType(raw),
     musicTheme: MUSIC_THEMES.includes(raw.musicTheme as MusicTheme) ? raw.musicTheme : undefined,
+    musicThemeOverride: MUSIC_THEMES.includes(raw.musicThemeOverride as MusicTheme) ? raw.musicThemeOverride : undefined,
     isRandomized: !!raw.isRandomized,
     campaignLength: raw.campaignLength || "auto",
     rulesMode: raw.rulesMode === "full" ? "full" : "casual",

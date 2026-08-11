@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
-import { createCampaign, listCampaigns } from "@/lib/campaign/store";
+import { createCampaign, listCampaigns, saveCampaign } from "@/lib/campaign/store";
 import { chooseCampaignTheme, serverLog, serverError } from "@/lib/aqua/chat";
+import { isSafeTtsServerHost } from "@/lib/tts/config";
+import { isValidVoiceId } from "@/lib/tts/voices";
 
 export const dynamic = "force-dynamic";
 
@@ -35,6 +37,13 @@ export async function POST(request: Request) {
       difficulty,
       rollMode
     );
+    const ttsHost = String(body.ttsServerHost || "").trim();
+    const ttsPort = Number(body.ttsServerPort);
+    if (ttsHost && isSafeTtsServerHost(ttsHost)) created.ttsServerHost = ttsHost;
+    if (Number.isInteger(ttsPort) && ttsPort >= 1 && ttsPort <= 65535) created.ttsServerPort = ttsPort;
+    const ttsVoiceId = String(body.ttsVoiceId || "").trim();
+    if (ttsVoiceId && isValidVoiceId(ttsVoiceId)) created.ttsVoiceId = ttsVoiceId;
+    await saveCampaign(created);
 
     // Let the AI pick the score before we hand back the campaign, so the lobby
     // music is already on the right shelf when the table lights up.

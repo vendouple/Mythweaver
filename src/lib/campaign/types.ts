@@ -615,6 +615,8 @@ export type Campaign = {
    * Undefined → the neutral mood roots. See lib/campaign/musicTheme.ts.
    */
   musicTheme?: string;
+  /** Host-selected BGM shelf. Leaves the campaign's visual theme untouched. */
+  musicThemeOverride?: string;
   isRandomized?: boolean;
   campaignLength?: "auto" | "short" | "medium" | "long" | "extra_long" | "infinite";
   rulesMode?: "casual" | "full";

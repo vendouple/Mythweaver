@@ -17,6 +17,7 @@ import {
   ambienceSetVolume,
   subscribeAmbience
 } from "@/lib/client/ambience";
+import { MUSIC_THEMES } from "@/lib/campaign/musicTheme";
 
 /**
  * The bard's little control tag: a speaker chip pinned to the corner of every
@@ -24,7 +25,15 @@ import {
  * mute, music volume, SFX volume, and a "now playing" readout — the shelf key
  * and track name make it easy to check whether the score matches the theme.
  */
-export default function MusicWidget() {
+export default function MusicWidget({
+  selectedTheme = null,
+  automaticTheme = null,
+  onThemeChange = () => {}
+}: {
+  selectedTheme?: string | null;
+  automaticTheme?: string | null;
+  onThemeChange?: (theme: string | null) => void;
+}) {
   const [open, setOpen] = useState(false);
   const [blocked, setBlocked] = useState(false);
   const [muted, setMuted] = useState(false);
@@ -139,6 +148,16 @@ export default function MusicWidget() {
               onChange={(e) => onMusicVol(parseFloat(e.target.value))}
             />
             <span className="music-pct">{Math.round((muted ? 0 : musicVol) * 100)}</span>
+          </label>
+
+          <label className="music-theme">
+            <span>BGM theme</span>
+            <select value={selectedTheme || ""} onChange={(e) => onThemeChange(e.target.value || null)}>
+              <option value="">Automatic{automaticTheme ? ` (${automaticTheme})` : ""}</option>
+              {MUSIC_THEMES.map((theme) => (
+                <option key={theme} value={theme}>{theme}</option>
+              ))}
+            </select>
           </label>
 
           <label className="music-slider">

@@ -95,6 +95,8 @@ export const api = {
     post<{ campaignId: string; player: Player; isPartyLeader: boolean }>("/api/join", body),
   chat: (body: Record<string, unknown>) => post<{ campaign?: Campaign; error?: string }>("/api/chat", body),
   party: (body: Record<string, unknown>) => post<{ campaign?: Campaign; error?: string }>("/api/party", body),
+  setMusicTheme: (campaignId: string, theme: string | null, hostToken: string) =>
+    post<{ campaign?: Campaign }>("/api/party", { campaignId, action: "setMusicTheme", theme: theme || "", hostToken }),
   listChatTargets: (campaignId: string) =>
     post<ChatTargetsResult>("/api/party", {
       campaignId,
