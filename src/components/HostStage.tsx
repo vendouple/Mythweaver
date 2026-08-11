@@ -606,6 +606,7 @@ export default function HostStage({
   const [voices, setVoices] = useState<Array<{ id: string; fileName: string }>>([]);
   const [ttsBusy, setTtsBusy] = useState(false);
   const [ttsMsg, setTtsMsg] = useState<string | null>(null);
+  const [ttsHealth, setTtsHealth] = useState<"checking" | "online" | "offline">("checking");
 
   const sendSway = async () => {
     if (!sway.trim()) return;
@@ -673,10 +674,10 @@ export default function HostStage({
     setTtsMsg(null);
     if (nextEnabled) {
       setTtsBusy(true);
-      const healthy = await ttsSidecarHealthy();
+      const healthy = await ttsSidecarHealthy(campaign.ttsServerPort);
       setTtsBusy(false);
       if (!healthy) {
-        setTtsMsg("Voice server isn't running — start it with `npm run tts` and try again.");
+        setTtsMsg("Voice server isn't running — start main.py and try again.");
         return;
       }
     }
@@ -690,6 +691,19 @@ export default function HostStage({
       .then((data) => setVoices(Array.isArray(data.voices) ? data.voices : []))
       .catch(() => setVoices([]));
   }, [drawerOpen]);
+
+  useEffect(() => {
+    if (!drawerOpen) return;
+    let cancelled = false;
+    const check = async () => {
+      if (!cancelled) setTtsHealth("checking");
+      const online = await ttsSidecarHealthy(campaign.ttsServerPort);
+      if (!cancelled) setTtsHealth(online ? "online" : "offline");
+    };
+    void check();
+    const interval = window.setInterval(() => { void check(); }, 10_000);
+    return () => { cancelled = true; window.clearInterval(interval); };
+  }, [drawerOpen, campaign.ttsServerPort]);
 
   // Narration target status (read-only on the TV): show which model/provider
   // is currently selected, and who the party leader is (the one who can
@@ -1447,6 +1461,10 @@ export default function HostStage({
           </div>
 
           <label className="director-label">Table voice <span className="beta-tag">beta</span></label>
+          <p className="panel-hint small">
+            Voice server: <strong>{ttsHealth === "online" ? "online" : ttsHealth === "offline" ? "offline" : "checking…"}</strong> on port {campaign.ttsServerPort ?? 5123}.
+            {ttsHealth === "offline" ? <> The party leader can check the connection and change the port from Settings.</> : null}
+          </p>
           <div className="director-toggles">
             <button
               className={`chip-toggle tiny ${campaign.ttsEnabled !== false ? "selected" : ""}`}

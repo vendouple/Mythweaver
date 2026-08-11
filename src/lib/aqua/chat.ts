@@ -1391,7 +1391,7 @@ async function startTtsForTurn(
 
     // One live batch per campaign: drop last turn's clips before queuing these.
     releaseCampaign(campaign.id);
-    const summary = createBatch(campaign.id, clips);
+    const summary = createBatch(campaign.id, clips, campaign.ttsServerPort);
     campaign.ttsBatchId = summary.batchId;
     void logCampaignEvent(campaign.id, "INFO", "TTS", "Turn TTS batch queued", {
       batchId: summary.batchId,

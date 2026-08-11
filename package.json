@@ -3,11 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "node scripts/dev-with-tts.mjs",
-    "dev:next": "next dev",
+    "dev": "next dev",
     "build": "next build",
     "start": "next start -H 0.0.0.0",
-    "tts": "python services/tts/server.py",
+    "tts": "python main.py",
     "lint": "next lint",
     "typecheck": "tsc --noEmit"
   },
