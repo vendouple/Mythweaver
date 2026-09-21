@@ -92,6 +92,37 @@ stage cues remain silent until a matching file is added.
 - [ ] `coin.mp3` - A few coins landing on a hard surface.
 - [ ] `item-pickup.mp3` - Small rewarding inventory pickup chime.
 
+## Additional story cues
+
+These names are wired into the model tools, beat effects, and the preview lab.
+They remain safely silent until recorded files are supplied; no assets were added
+with this expansion. Use short, dry recordings without intelligible speech.
+
+- [ ] `reveal.mp3` - Soft dramatic reveal accent.
+- [ ] `discovery.mp3` - Restrained clue or secret-found chime.
+- [ ] `quest-complete.mp3` - Brief milestone resolution.
+- [ ] `level-up.mp3` - Rising achievement flourish.
+- [ ] `spell-charge.mp3` - Compact gathering-energy swell.
+- [ ] `shield-break.mp3` - Barrier crack and collapse.
+- [ ] `teleport.mp3` - Quick displacement whoosh.
+- [ ] `glitch.mp3` - Short signal breakup.
+- [ ] `scan.mp3` - Electronic sweep.
+- [ ] `radio-call.mp3` - Radio squelch without words.
+- [ ] `reload.mp3` - Mechanical magazine or chamber movement.
+- [ ] `ricochet.mp3` - Single deflection whine.
+- [ ] `footsteps-stone.mp3` - A few hard-floor steps.
+- [ ] `footsteps-water.mp3` - A few shallow-water steps.
+- [ ] `footsteps-snow.mp3` - A few packed-snow steps.
+- [ ] `chain-rattle.mp3` - Short loose-chain movement.
+- [ ] `page-turn.mp3` - A single paper page, distinct from the generic beat cue.
+- [ ] `quill-write.mp3` - Brief pen or quill scratch.
+- [ ] `bell.mp3` - Single bell strike.
+- [ ] `clock-tick.mp3` - A few restrained clock ticks.
+- [ ] `crowd-gasp.mp3` - Brief collective reaction without words.
+- [ ] `applause.mp3` - Short group applause.
+- [ ] `intro-rise.mp3` - Optional opening-preview swell.
+- [ ] `outro-resolve.mp3` - Optional finale-preview resolution.
+
 ## Suggested priority
 
 For the broadest storytelling coverage, add these first:
@@ -107,5 +138,7 @@ For the broadest storytelling coverage, add these first:
 9. `creature-roar.mp3`
 10. `item-pickup.mp3`
 
-After adding files, use the host debug showcase's **SFX cues** controls to
-audition each cue against the app's normal music and ambience levels.
+After adding files, refresh the browser and open `/?debug=1`, then select **Audio**.
+Search cues and inspect their recorded/synthesized/missing labels. These labels
+describe file availability, not autoplay permission. **Stop preview** stops active
+cues, environmental loops, and scheduled repeats without changing mixer levels.

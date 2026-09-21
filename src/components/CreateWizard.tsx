@@ -3,8 +3,9 @@
 import { useState } from "react";
 import { api, Campaign } from "@/lib/client/api";
 import CosmosCanvas from "@/components/three/CosmosCanvas";
+import { createId } from "@/lib/utils/ids";
 
-type Npc = { name: string; description: string; status: string };
+type Npc = { id: string; name: string; description: string; status: string };
 type Step = 0 | 1 | 2 | 3;
 
 const LENGTHS: Array<{ value: string; label: string; sub: string }> = [
@@ -80,6 +81,7 @@ export default function CreateWizard({
         rulesMode
       });
       const suggested = (result.npcs as Npc[]).map((npc) => ({
+        id: createId("draft-npc"),
         name: String(npc.name || "Stranger"),
         description: String(npc.description || ""),
         status: npc.status === "Future NPC" ? "Future NPC" : "Starting NPC"
@@ -97,7 +99,7 @@ export default function CreateWizard({
       });
       setNpcs((prev) => [
         ...prev,
-        { name: String(result.name || "Stranger"), description: String(result.description || ""), status: "Starting NPC" }
+        { id: createId("draft-npc"), name: String(result.name || "Stranger"), description: String(result.description || ""), status: "Starting NPC" }
       ]);
     });
 
@@ -106,7 +108,7 @@ export default function CreateWizard({
       const { campaign } = await api.createCampaign({
         title: surprise ? "" : title,
         startingStory: surprise ? "" : story,
-        storyCharacters: surprise ? [] : npcs,
+        storyCharacters: surprise ? [] : npcs.map(({ name, description, status }) => ({ name, description, status })),
         isRandomized: surprise,
         campaignLength,
         campaignType,
@@ -149,7 +151,7 @@ export default function CreateWizard({
 
       <div className="wizard-frame panel">
         <header className="wizard-head">
-          <button className="ghost-button" onClick={back}>←</button>
+          <button className="ghost-button" aria-label="Back" disabled={busy !== null} onClick={back}>←</button>
           <div className="wizard-steps">
             {STEP_NAMES.map((name, index) => (
               <span key={name} className={`wizard-step ${index === step ? "current" : index < step ? "done" : ""} ${surprise && index === 2 ? "skipped" : ""}`}>
@@ -159,17 +161,17 @@ export default function CreateWizard({
           </div>
         </header>
 
-        {error ? <div className="form-error">{error}</div> : null}
+        {error ? <div className="form-error" role="alert">{error}</div> : null}
 
         {step === 0 ? (
           <section className="wizard-body">
             <h2 className="panel-title">Choose the discipline</h2>
             <div className="choice-grid">
-              <button className={`choice-card ${campaignType === "tabletop" ? "selected" : ""}`} onClick={() => setCampaignType("tabletop")}>
+              <button className={`choice-card ${campaignType === "tabletop" ? "selected" : ""}`} aria-pressed={campaignType === "tabletop"} onClick={() => setCampaignType("tabletop")}>
                 <span className="choice-title">Story Engine</span>
                 <span className="choice-sub">Any genre — noir, sci-fi, horror, heists, slice of life. Rules melt into the fiction.</span>
               </button>
-              <button className={`choice-card ${campaignType === "dnd" ? "selected" : ""}`} onClick={() => setCampaignType("dnd")}>
+              <button className={`choice-card ${campaignType === "dnd" ? "selected" : ""}`} aria-pressed={campaignType === "dnd"} onClick={() => setCampaignType("dnd")}>
                 <span className="choice-title">Dungeons & Dragons</span>
                 <span className="choice-sub">Swords, spells, and dungeon-crawling heroics.</span>
               </button>
@@ -177,10 +179,10 @@ export default function CreateWizard({
 
             {campaignType === "dnd" ? (
               <div className="choice-row">
-                <button className={`chip-toggle ${rulesMode === "casual" ? "selected" : ""}`} onClick={() => setRulesMode("casual")}>
+                <button className={`chip-toggle ${rulesMode === "casual" ? "selected" : ""}`} aria-pressed={rulesMode === "casual"} onClick={() => setRulesMode("casual")}>
                   Rules-light <em>HP and heart, no bookkeeping</em>
                 </button>
-                <button className={`chip-toggle ${rulesMode === "full" ? "selected" : ""}`} onClick={() => setRulesMode("full")}>
+                <button className={`chip-toggle ${rulesMode === "full" ? "selected" : ""}`} aria-pressed={rulesMode === "full"} onClick={() => setRulesMode("full")}>
                   Full 5e <em>Stats, classes, spell slots</em>
                 </button>
               </div>
@@ -192,6 +194,7 @@ export default function CreateWizard({
                 <button
                   key={length.value}
                   className={`chip-toggle ${campaignLength === length.value ? "selected" : ""}`}
+                  aria-pressed={campaignLength === length.value}
                   onClick={() => setCampaignLength(length.value)}
                 >
                   {length.label} <em>{length.sub}</em>
@@ -210,6 +213,7 @@ export default function CreateWizard({
                 <button
                   key={d.value}
                   className={`chip-toggle ${difficulty === d.value ? "selected" : ""}`}
+                  aria-pressed={difficulty === d.value}
                   onClick={() => setDifficulty(d.value)}
                 >
                   {d.label} <em>{d.sub}</em>
@@ -228,6 +232,7 @@ export default function CreateWizard({
                 <button
                   key={m.value}
                   className={`chip-toggle ${rollMode === m.value ? "selected" : ""}`}
+                  aria-pressed={rollMode === m.value}
                   onClick={() => setRollMode(m.value)}
                 >
                   {m.label} <em>{m.sub}</em>
@@ -253,12 +258,14 @@ export default function CreateWizard({
               <>
                 <input
                   className="field"
+                  aria-label="Campaign title"
                   placeholder="Title of the legend (optional — the Oracle can name it)"
                   value={title}
                   onChange={(event) => setTitle(event.target.value)}
                 />
                 <textarea
                   className="field textarea"
+                  aria-label="Starting story"
                   rows={9}
                   placeholder="Where does it begin? A rain-slick megacity, a manor with one locked door, a caravan crossing dead salt flats… Write a seed or a saga — or leave it to the Oracle."
                   value={story}
@@ -280,24 +287,27 @@ export default function CreateWizard({
             <p className="panel-hint">Figures the Weaver will keep in play — allies, villains, and those yet to arrive. Optional but potent.</p>
             <div className="npc-list">
               {npcs.map((npc, index) => (
-                <div key={`${npc.name}-${index}`} className="npc-row">
+                <div key={npc.id} className="npc-row">
                   <div className="npc-fields">
                     <div className="npc-row-top">
                       <input
                         className="field slim"
+                        aria-label={`NPC ${index + 1} name`}
                         value={npc.name}
                         onChange={(event) => setNpcs((prev) => prev.map((item, i) => i === index ? { ...item, name: event.target.value } : item))}
                       />
                       <button
                         className={`chip-toggle tiny ${npc.status === "Starting NPC" ? "selected" : ""}`}
+                        aria-pressed={npc.status === "Starting NPC"}
                         onClick={() => setNpcs((prev) => prev.map((item, i) => i === index ? { ...item, status: item.status === "Starting NPC" ? "Future NPC" : "Starting NPC" } : item))}
                       >
                         {npc.status === "Starting NPC" ? "Opens the tale" : "Arrives later"}
                       </button>
-                      <button className="archive-delete" onClick={() => setNpcs((prev) => prev.filter((_, i) => i !== index))}>✕</button>
+                      <button className="archive-delete" aria-label={`Remove ${npc.name || `NPC ${index + 1}`}`} onClick={() => setNpcs((prev) => prev.filter((_, i) => i !== index))}>✕</button>
                     </div>
                     <textarea
                       className="field textarea slim"
+                      aria-label={`NPC ${index + 1} description`}
                       rows={2}
                       value={npc.description}
                       onChange={(event) => setNpcs((prev) => prev.map((item, i) => i === index ? { ...item, description: event.target.value } : item))}
@@ -313,7 +323,7 @@ export default function CreateWizard({
               <button className="ghost-button" disabled={busy !== null} onClick={conjureNpc}>
                 {busy === "npc" ? "Conjuring…" : "+ Conjure one"}
               </button>
-              <button className="ghost-button" onClick={() => setNpcs((prev) => [...prev, { name: "", description: "", status: "Starting NPC" }])}>
+              <button className="ghost-button" disabled={busy !== null} onClick={() => setNpcs((prev) => [...prev, { id: createId("draft-npc"), name: "", description: "", status: "Starting NPC" }])}>
                 + Write your own
               </button>
             </div>

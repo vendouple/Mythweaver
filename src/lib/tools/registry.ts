@@ -1,6 +1,7 @@
 ﻿import { getCampaign, getCampaignLock, readCampaignTextFile, saveCampaign, writeCampaignTextFile, downloadAndSaveImage, logCampaignDebug, logCampaignEvent, safePushDisplayEvent, isValidImageUrl, pushStageSfx, endCampaign, ensureLocations, getFocusedLocation, applyFocus } from "@/lib/campaign/store";
 import { createId } from "@/lib/utils/ids";
 import { generateImage } from "@/lib/aqua/images";
+import { normalizeActions } from "@/lib/aqua/turnPayload";
 import { getCurrentDate } from "./date";
 import { rollD20Mode, rollDice, judgeD20Outcome, difficultyDcBias, clampD20Dc } from "./dice";
 import type { AquaToolDefinition } from "@/lib/aqua/client";
@@ -8,6 +9,7 @@ import { AmbienceAcoustic, AmbienceMood, AmbienceSound, PlayerStat, SfxCue, Stag
 import type { Location as CampaignLocation } from "@/lib/campaign/types";
 import { MUSIC_THEMES, MusicTheme, THEME_GUIDE } from "@/lib/campaign/musicTheme";
 import { startCombat, endCombat, syncFocusedMirror } from "@/lib/campaign/turns";
+import { AMBIENCE_SOUNDS, AMBIENCE_ACOUSTICS, EFFECT_KINDS, SFX_CUES } from "@/lib/campaign/stageCatalog";
 
 export const toolDefinitions: AquaToolDefinition[] = [
   {
@@ -68,7 +70,7 @@ export const toolDefinitions: AquaToolDefinition[] = [
     type: "function",
     function: {
       name: "update_campaign_state",
-      description: "Update the TV scene, display events, per-player controller actions, player inventory, abilities, portraits, notes, stats, or long-term memory.",
+      description: "Update structured state needed before the next tool: NPCs before combat, HP, inventory, location labels, backdrop URLs, or memory. Put final story/dialogue and final choices in narrate_turn, not displayEvents. Omitted fields are unchanged; inventory and abilities replace the whole list; stats merge by name.",
       parameters: {
         type: "object",
         properties: {
@@ -227,8 +229,8 @@ export const toolDefinitions: AquaToolDefinition[] = [
           mood: { type: "string", enum: ["calm", "tense", "adrenaline", "battle", "boss", "mystery", "dread", "triumph", "wonder", "somber", "outro"], description: "Emotional register of the current scene. 'battle' = ordinary combat encounters; 'boss' = climactic showdowns against a major villain or endgame threat; 'adrenaline' = high-energy excitement that is NOT combat (chases, escapes, heists, races against time). Use 'outro' only when ending the campaign (end_campaign also sets it)." },
           intensity: { type: "number", description: "0.0 to 1.0 - how hard the TV leans into the mood. Default 0.6." },
           note: { type: "string", description: "Optional short sensory flavor, e.g. 'rain hammers the tin roof'. May be shown faintly on the TV." },
-          sounds: { type: "array", maxItems: 2, items: { type: "string", enum: ["none", "storm", "rain", "wind", "snow", "ocean", "water", "forest", "swamp", "desert", "insects", "birds", "cave", "dungeon", "tavern", "village", "castle", "city", "traffic", "crowd", "office", "industrial", "machinery", "electrical", "ventilation", "laboratory", "spaceship", "western-town", "wasteland", "battlefield", "fire", "supernatural"] }, description: "Up to two long environmental beds that are actually audible. Use [\"none\"] for intentional silence. Omit to let the TV infer them from scene text." },
-          acoustics: { type: "array", maxItems: 2, items: { type: "string", enum: ["outdoors", "indoors", "small-room", "large-hall", "cave", "distant", "muffled", "underwater"] }, description: "Up to two acoustic modifiers. Space modifiers add room character; distance/material modifiers filter the sound." }
+          sounds: { type: "array", maxItems: 2, items: { type: "string", enum: AMBIENCE_SOUNDS }, description: "Up to two environmental beds actually audible here. Use [\"none\"] for intentional silence; omit to infer from the scene." },
+          acoustics: { type: "array", maxItems: 2, items: { type: "string", enum: AMBIENCE_ACOUSTICS }, description: "Up to two acoustic modifiers: one space, optionally one distance/material treatment." }
         }
       }
     }
@@ -251,13 +253,13 @@ export const toolDefinitions: AquaToolDefinition[] = [
     type: "function",
     function: {
       name: "trigger_effect",
-      description: "Fire a combined cinematic effect on the TV immediately: one or more simultaneous sound cues, optionally paired with a synchronized visual enhancement. Missing cue files safely play nothing. Layer cues for moments such as explosion+debris or airlock-open+alarm. Use repeat and delayMs for heartbeats, knocks, alarms, footsteps, or gunfire. For a visual that must land on a specific spoken line, attach an effect to that narrate_turn story beat instead.",
+      description: "Fire a cinematic effect on the TV immediately: sound cues, a visual, or both. Missing cue files safely play nothing. Layer cues for moments such as explosion+debris or airlock-open+alarm. Use repeat and delayMs for heartbeats, knocks, alarms, footsteps, or gunfire. For an effect that must land on a spoken line, attach it to that narrate_turn story beat instead.",
       parameters: {
         type: "object",
-        required: ["cues"],
+        anyOf: [{ required: ["cues"] }, { required: ["visual"] }],
         properties: {
-          cues: { type: "array", minItems: 1, maxItems: 4, items: { type: "string", enum: ["beat", "heartbeat", "rumble", "flash", "darkness", "door-creak", "door-open", "door-close", "knock", "airlock-open", "airlock-close", "code-beep", "code-success", "code-denied", "alarm", "siren", "radio-static", "power-up", "power-down", "explosion", "gunshot", "laser", "impact", "debris", "glass-break", "sword", "arrow", "shield", "footsteps", "horse", "thunder", "fire-burst", "splash", "wind-gust", "magic", "portal", "spell-fail", "creature-roar", "whisper", "trap", "lock-click", "coin", "item-pickup", "heal"] }, description: "One to four sounds fired together on each repeat." },
-          visual: { type: "string", enum: ["none", "shake", "flash", "embers", "fog", "rain", "snow", "darkness", "heartbeat"], description: "Optional synchronized screen enhancement. Default none." },
+          cues: { type: "array", minItems: 1, maxItems: 4, items: { type: "string", enum: SFX_CUES }, description: "One to four sounds fired together on each repeat." },
+          visual: { type: "string", enum: ["none", ...EFFECT_KINDS], description: "Optional screen enhancement. shockwave = expanding impact ring; heal = restorative glow; glitch = signal distortion; spotlight = reveal. Omit for sound only." },
           strength: { type: "number", description: "0.0 to 1.0 impact strength. Default 0.6." },
           repeat: { type: "number", description: "How many times to fire (1-12). Default 1." },
           delayMs: { type: "number", description: "Delay in ms between repeats (0-10000). Fast heartbeat about 320; slow heartbeat about 850; knocks about 600." }
@@ -451,7 +453,7 @@ export const toolDefinitions: AquaToolDefinition[] = [
     type: "function",
     function: {
       name: "generate_image",
-      description: "Generate a cinematic scene background, a player portrait, or an NPC portrait. Scene images become the TV backdrop; portraits attach to the player (playerId) or NPC (npcName) they belong to. Framing is automatic: scenes are widescreen, portraits are tall. This returns IMMEDIATELY with {queued:true} and the picture arrives later on its own — never wait for it, and call it at most once per subject per turn (a repeat with the same prompt is ignored).",
+      description: "Queue an image: scene = widescreen TV backdrop; portrait/profile = square 1:1 character card. Attach characters with playerId or npcName. Returns {queued:true}, NOT an image URL. Continue the turn without waiting or inventing a URL. Request each subject at most once per turn.",
       parameters: {
         type: "object",
         required: ["prompt"],
@@ -460,7 +462,7 @@ export const toolDefinitions: AquaToolDefinition[] = [
             type: "string",
             description: "The detailed prompt for the image generator. IMPORTANT: The image generator is a text-to-image model and has NO knowledge of character names, specific campaigns, or in-game lore. Do NOT just pass a character's name like 'Agent Bravo' or 'Steve'. Instead, you MUST write a highly descriptive prompt describing their physical appearance, face features, gender, age, clothing, posture, and environmental style in detail (e.g. 'A close-up portrait of a rugged 35-year-old male secret agent, short dark hair, wearing a black trench coat, dark dramatic alleyway background, cinematic lighting, 8k resolution')."
           },
-          kind: { type: "string", enum: ["scene", "portrait", "profile"], description: "scene = TV backdrop; portrait = tall character face; profile = square character-profile image." },
+          kind: { type: "string", enum: ["scene", "portrait", "profile"], description: "scene = widescreen TV backdrop; portrait and profile = square 1:1 character image." },
           playerId: { type: "string", description: "For portraits of a player character." },
           npcName: { type: "string", description: "For portraits of an NPC/monster — attaches to that story character." }
         }
@@ -482,6 +484,12 @@ export const toolDefinitions: AquaToolDefinition[] = [
  */
 const IMAGE_JOB_DEDUP_TTL_MS = 5 * 60_000;
 const imageJobs = new Map<string, number>();
+
+export function isNpcPortraitPending(campaignId: string, npcName: string): boolean {
+  const target = npcName.trim().toLowerCase();
+  return [...imageJobs].some(([key, at]) => at === Infinity &&
+    (key.startsWith(`${campaignId}|portrait|${target}|`) || key.startsWith(`${campaignId}|profile|${target}|`)));
+}
 
 /** Stable short hash of a prompt, insensitive to case and whitespace noise. */
 function imagePromptFingerprint(prompt: string): string {
@@ -515,11 +523,12 @@ function queueImageGeneration(campaignId: string, args: Record<string, unknown>)
       kind,
       target,
       promptChars: prompt.length,
-      ageMs: now - (imageJobs.get(jobKey) || now)
+      ageMs: Number.isFinite(imageJobs.get(jobKey)) ? now - (imageJobs.get(jobKey) || now) : undefined
     });
     return { queued: false, deduplicated: true };
   }
-  imageJobs.set(jobKey, now);
+  // Pending requests must survive the TTL even with a very slow provider.
+  imageJobs.set(jobKey, Infinity);
 
   void logCampaignEvent(campaignId, "INFO", "Image", "Image job queued", {
     kind,
@@ -548,8 +557,7 @@ function queueImageGeneration(campaignId: string, args: Record<string, unknown>)
     }
     try {
       const image = await generateImage(prompt, {
-        // Scenes fill the TV; player profiles are square, NPC portraits remain tall.
-        aspect: kind === "profile" ? "1:1" : kind === "portrait" ? "9:16" : "16:9",
+        aspect: kind === "scene" ? "16:9" : "1:1",
         onRetry: ({ attempt, retries, status, error }) => {
           void logCampaignEvent(campaignId, "WARN", "Image", "Image provider retry", {
             kind,
@@ -586,6 +594,7 @@ function queueImageGeneration(campaignId: string, args: Record<string, unknown>)
               createdAt: new Date().toISOString()
             });
             await saveCampaign(campaign);
+            imageJobs.set(jobKey, Date.now());
             return;
           }
 
@@ -614,6 +623,7 @@ function queueImageGeneration(campaignId: string, args: Record<string, unknown>)
             createdAt: new Date().toISOString()
           });
           await saveCampaign(campaign);
+          imageJobs.set(jobKey, Date.now());
           return;
         }
 
@@ -645,9 +655,11 @@ function queueImageGeneration(campaignId: string, args: Record<string, unknown>)
       // immediate repeat request is suppressed but a genuine re-ask later isn't.
       imageJobs.set(jobKey, Date.now());
     } catch (err) {
+      // Release pending state even when diagnostic logging itself fails.
+      imageJobs.delete(jobKey);
       console.error(`[Tool Error] Image generation failed for ${campaignId}:`, err);
       const errMsg = err instanceof Error ? err.message : String(err);
-      await logCampaignDebug(campaignId, `[Image] Generation failed after configured retries; skipped: ${errMsg}`);
+      await logCampaignDebug(campaignId, `[Image] Generation failed after configured retries; skipped: ${errMsg}`).catch(() => undefined);
       void logCampaignEvent(campaignId, "ERROR", "Image", "Image generation failed", {
         kind,
         target,
@@ -657,9 +669,6 @@ function queueImageGeneration(campaignId: string, args: Record<string, unknown>)
         status: (err as { status?: unknown })?.status,
         code: (err as { code?: unknown })?.code
       });
-      // Failed: free the key so the model (or a later turn) may legitimately
-      // ask for this image again.
-      imageJobs.delete(jobKey);
     }
   })();
 
@@ -902,8 +911,8 @@ export async function runTool(campaignId: string, name: string, args: Record<str
       }
       const mood = rawMood as AmbienceMood;
       const rawIntensity = Number(args.intensity ?? 0.6);
-      const validSounds: AmbienceSound[] = ["none", "storm", "rain", "wind", "snow", "ocean", "water", "forest", "swamp", "desert", "insects", "birds", "cave", "dungeon", "tavern", "village", "castle", "city", "traffic", "crowd", "office", "industrial", "machinery", "electrical", "ventilation", "laboratory", "spaceship", "western-town", "wasteland", "battlefield", "fire", "supernatural", "underwater"];
-      const validAcoustics: AmbienceAcoustic[] = ["outdoors", "indoors", "small-room", "large-hall", "cave", "distant", "muffled", "underwater"];
+      const validSounds = AMBIENCE_SOUNDS;
+      const validAcoustics = AMBIENCE_ACOUSTICS;
       const sounds = Array.isArray(args.sounds)
         ? args.sounds.map(String).filter((sound): sound is AmbienceSound => validSounds.includes(sound as AmbienceSound)).slice(0, 2)
         : undefined;
@@ -933,17 +942,17 @@ export async function runTool(campaignId: string, name: string, args: Record<str
     }
 
     if (name === "trigger_effect") {
-      const validCues: SfxCue[] = ["beat", "heartbeat", "rumble", "flash", "darkness", "door-creak", "door-open", "door-close", "knock", "airlock-open", "airlock-close", "code-beep", "code-success", "code-denied", "alarm", "siren", "radio-static", "power-up", "power-down", "explosion", "gunshot", "laser", "impact", "debris", "glass-break", "sword", "arrow", "shield", "footsteps", "horse", "thunder", "fire-burst", "splash", "wind-gust", "magic", "portal", "spell-fail", "creature-roar", "whisper", "trap", "lock-click", "coin", "item-pickup", "heal"];
-      const visualKinds: StageEffectKind[] = ["shake", "flash", "embers", "fog", "rain", "snow", "darkness", "heartbeat"];
+      const validCues = SFX_CUES;
+      const visualKinds = EFFECT_KINDS;
       const cues = Array.isArray(args.cues)
         ? args.cues.map(String).filter((cue): cue is SfxCue => validCues.includes(cue as SfxCue)).slice(0, 4)
         : [];
-      if (!cues.length) return { error: `Choose at least one valid cue: ${validCues.join(", ")}.` };
       const rawVisual = String(args.visual || "none").trim().toLowerCase();
       if (rawVisual !== "none" && !visualKinds.includes(rawVisual as StageEffectKind)) {
         return { error: `Unknown visual '${String(args.visual)}'. Pick one of: none, ${visualKinds.join(", ")}.` };
       }
       const visual = rawVisual === "none" ? undefined : rawVisual as StageEffectKind;
+      if (!cues.length && !visual) return { error: "Choose at least one valid cue or visual effect." };
       const rawStrength = Number(args.strength ?? 0.6);
       const rawRepeat = Number(args.repeat ?? 1);
       const rawDelay = Number(args.delayMs ?? 0);
@@ -1114,12 +1123,20 @@ export async function runTool(campaignId: string, name: string, args: Record<str
 
     if (name === "generate_image") {
       const prompt = String(args.prompt || "").trim();
-      const kind = args.kind === "profile" ? "profile" : args.kind === "portrait" ? "portrait" : "scene";
+      const playerId = String(args.playerId || "").trim();
+      const npcName = String(args.npcName || "").trim();
+      const kind = args.kind === "profile" ? "profile" : args.kind === "portrait" || playerId || npcName ? "portrait" : "scene";
       if (!prompt) return { error: "Image generation needs a prompt." };
-      if (kind !== "scene" && !String(args.playerId || "") && !String(args.npcName || "")) {
+      if (playerId && npcName) return { error: "Use either playerId or npcName, not both." };
+      if (kind !== "scene" && !playerId && !npcName) {
         return { error: "Portraits need a target: pass playerId for a player, or npcName for an NPC/monster." };
       }
-      const outcome = queueImageGeneration(campaignId, args);
+      if (playerId) {
+        const campaign = await getCampaign(campaignId);
+        const player = campaign.players.find((p) => p.id === playerId || (p.characterName || p.name).toLowerCase() === playerId.toLowerCase());
+        if (!player) return { error: `No player '${playerId}'. Use an existing player id.` };
+      }
+      const outcome = queueImageGeneration(campaignId, { ...args, kind, playerId, npcName });
       if (outcome.deduplicated) {
         return {
           queued: true,
@@ -1139,17 +1156,6 @@ export async function runTool(campaignId: string, name: string, args: Record<str
     await logCampaignDebug(campaignId, `[Tool Error] Tool ${name} failed: ${errorMsg}`);
     return { error: `Tool ${name} failed: ${errorMsg}` };
   }
-}
-
-function normalizeActions(actions: unknown): Array<{ title: string; prompt: string }> {
-  if (!Array.isArray(actions)) return [];
-  return actions
-    .filter((item): item is Record<string, unknown> => !!item && typeof item === "object")
-    .map((item) => ({
-      title: String(item.title || "Act").slice(0, 48),
-      prompt: String(item.prompt || item.title || "I act.")
-    }))
-    .filter((item) => item.title && item.prompt);
 }
 
 function stripSuggestedActions(text: string) {

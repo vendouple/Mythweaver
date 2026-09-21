@@ -1,8 +1,30 @@
 # Mythweaver — Sound Design Guide
 
 The table finds its own music. Drop files into the folders below and the
-engine does the rest — no code changes, no restarts (the manifest is read
-on each `/api/music` call).
+engine does the rest. No code changes or server restart are needed. Refresh
+the browser after adding assets: `/api/music` reads the folders, but the client
+caches its manifest for the page session.
+
+## Stage preview lab
+
+Open `/?debug=1` for an isolated local sandbox. It does not call models or save
+campaign changes. The four tabs cover Scenes, Stage, Audio, and Dice; the theme
+selector includes every supported genre.
+
+- Scenes previews the real Worldforge intro with simulated progress and a final
+  hold, the lobby/cosmos, and all six real outro finales. Select again to replay.
+- Stage previews beat text, particle effects, and the new shockwave, restorative
+  glow, signal glitch, and spotlight accents. Paired presets use optional SFX.
+- Audio searches all cues and shows recorded, synthesized, or missing status.
+  Missing assets remain harmless. Acoustics apply to the selected environmental bed.
+- Stop preview (or Escape) clears active cinematic/effect previews, scheduled
+  repeats, SFX, BGM, and ambience. Reset all also restores theme/mood/backdrop.
+  Hide leaves the preview running; Gallery reopens the panel.
+
+New CSS accents and camera shake/pulse are suppressed under reduced motion.
+The canonical cue list is `src/lib/campaign/stageCatalog.ts`; types, tool schemas,
+save/load validation, and debug controls consume it. Stocking instructions are in
+`SFX_ASSET_CHECKLIST.md` and `AMBIENCE_ASSET_CHECKLIST.md`.
 
 ## How music is picked
 

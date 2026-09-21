@@ -26,6 +26,7 @@ import {
 import { createId, createJoinCode } from "@/lib/utils/ids";
 import { MUSIC_THEMES, MusicTheme } from "./musicTheme";
 import { isSafeTtsServerHost } from "@/lib/tts/config";
+import { AMBIENCE_SOUNDS, AMBIENCE_ACOUSTICS, EFFECT_KINDS, SFX_CUES } from "./stageCatalog";
 
 const dataRoot = path.join(process.cwd(), "data", "campaigns");
 
@@ -626,23 +627,6 @@ function normalizeCampaign(raw: Partial<Campaign> & { suggestedActions?: unknown
 }
 
 const AMBIENCE_MOODS: AmbienceMood[] = ["calm", "tense", "adrenaline", "battle", "boss", "mystery", "dread", "triumph", "wonder", "somber", "outro"];
-const AMBIENCE_SOUNDS: NonNullable<Ambience["sounds"]> = [
-  "none", "storm", "rain", "wind", "snow", "ocean", "water", "forest", "swamp", "desert", "insects", "birds",
-  "cave", "dungeon", "tavern", "village", "castle", "city", "traffic", "crowd", "office", "industrial",
-  "machinery", "electrical", "ventilation", "laboratory", "spaceship", "western-town", "wasteland",
-  "battlefield", "fire", "supernatural", "underwater"
-];
-const AMBIENCE_ACOUSTICS: NonNullable<Ambience["acoustics"]> = [
-  "outdoors", "indoors", "small-room", "large-hall", "cave", "distant", "muffled", "underwater"
-];
-const EFFECT_KINDS: StageEffectKind[] = ["shake", "flash", "embers", "fog", "rain", "snow", "darkness", "heartbeat"];
-const SFX_CUES: import("./types").SfxCue[] = [
-  "beat", "heartbeat", "rumble", "flash", "darkness", "door-creak", "door-open", "door-close", "knock",
-  "airlock-open", "airlock-close", "code-beep", "code-success", "code-denied", "alarm", "siren", "radio-static",
-  "power-up", "power-down", "explosion", "gunshot", "laser", "impact", "debris", "glass-break", "sword", "arrow",
-  "shield", "footsteps", "horse", "thunder", "fire-burst", "splash", "wind-gust", "magic", "portal", "spell-fail",
-  "creature-roar", "whisper", "trap", "lock-click", "coin", "item-pickup", "heal"
-];
 const ENDING_KINDS: EndingKind[] = ["victory", "defeat", "bittersweet", "escape", "draw", "cliffhanger"];
 
 function normalizeEndingStats(raw: unknown): CampaignEnding["stats"] {
@@ -736,8 +720,8 @@ function normalizeEffects(raw: unknown): StageEffect[] {
         kind,
         cues: cues?.length ? cues : undefined,
         strength: Math.max(0, Math.min(1, Number(item.strength ?? 0.6))) || 0.6,
-        repeat: Number.isFinite(repeatRaw) ? Math.max(1, Math.min(8, Math.round(repeatRaw))) : undefined,
-        delayMs: Number.isFinite(delayRaw) ? Math.max(0, Math.min(5000, Math.round(delayRaw))) : undefined,
+        repeat: Number.isFinite(repeatRaw) ? Math.max(1, Math.min(12, Math.round(repeatRaw))) : undefined,
+        delayMs: Number.isFinite(delayRaw) ? Math.max(0, Math.min(10000, Math.round(delayRaw))) : undefined,
         createdAt: String(item.createdAt || new Date().toISOString())
       };
     })

@@ -313,25 +313,8 @@ export type AmbienceMood =
   | "somber"
   | "outro";
 
-export type AmbienceSound =
-  | "none"
-  | "storm" | "rain" | "wind" | "snow" | "ocean" | "water"
-  | "forest" | "swamp" | "desert" | "insects" | "birds"
-  | "cave" | "dungeon" | "tavern" | "village" | "castle"
-  | "city" | "traffic" | "crowd" | "office" | "industrial"
-  | "machinery" | "electrical" | "ventilation" | "laboratory"
-  | "spaceship" | "western-town" | "wasteland" | "battlefield"
-  | "fire" | "supernatural" | "underwater";
-
-export type AmbienceAcoustic =
-  | "outdoors"
-  | "indoors"
-  | "small-room"
-  | "large-hall"
-  | "cave"
-  | "distant"
-  | "muffled"
-  | "underwater";
+export type AmbienceSound = (typeof import("./stageCatalog").AMBIENCE_SOUNDS)[number];
+export type AmbienceAcoustic = (typeof import("./stageCatalog").AMBIENCE_ACOUSTICS)[number];
 
 export type Ambience = {
   mood: AmbienceMood;
@@ -346,26 +329,8 @@ export type Ambience = {
   updatedAt: string;
 };
 
-export type StageEffectKind =
-  | "shake"
-  | "flash"
-  | "embers"
-  | "fog"
-  | "rain"
-  | "snow"
-  | "darkness"
-  | "heartbeat";
-
-export type SfxCue =
-  | "beat" | "heartbeat" | "rumble" | "flash" | "darkness"
-  | "door-creak" | "door-open" | "door-close" | "knock"
-  | "airlock-open" | "airlock-close" | "code-beep" | "code-success" | "code-denied"
-  | "alarm" | "siren" | "radio-static" | "power-up" | "power-down"
-  | "explosion" | "gunshot" | "laser" | "impact" | "debris" | "glass-break"
-  | "sword" | "arrow" | "shield" | "footsteps" | "horse"
-  | "thunder" | "fire-burst" | "splash" | "wind-gust"
-  | "magic" | "portal" | "spell-fail" | "creature-roar" | "whisper"
-  | "trap" | "lock-click" | "coin" | "item-pickup" | "heal";
+export type StageEffectKind = (typeof import("./stageCatalog").EFFECT_KINDS)[number];
+export type SfxCue = (typeof import("./stageCatalog").SFX_CUES)[number];
 
 /** Cinematic effect queued by the DM via trigger_effect. Supports repeats. */
 export type StageEffect = {

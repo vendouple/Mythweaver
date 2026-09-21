@@ -45,7 +45,7 @@ async function callStructured(
     body: JSON.stringify({
       model: config.chatModel,
       messages: [
-        { role: "system", content: systemInstruction },
+        { role: "system", content: `${systemInstruction}\n\nDelivery: call ${tool.name} exactly once with the requested fields as arguments. Do not also write JSON or prose in message content. If native tools are unavailable, return one JSON object with the same fields.` },
         { role: "user", content: userPrompt }
       ],
       tools: [{ type: "function", function: tool }],
@@ -147,6 +147,9 @@ export async function POST(request: Request) {
     const isDndCampaign = campaignType === "dnd";
     const isFullRules = isDndCampaign && rulesMode === "full";
     const tabletopGuard = "This is a standard tabletop RPG, not D&D. Preserve the user's implied genre, era, and tone. Do not add fantasy races, classes, medieval adventuring gear, spell slots, standard D&D attributes, or D&D mechanics unless the prompt explicitly includes them.";
+    const npcGenreGuard = isDndCampaign
+      ? "This is a Dungeons & Dragons campaign. Use setting-appropriate fantasy, but keep mechanics out of this description in rules-light mode."
+      : tabletopGuard;
 
     if (type === "campaign") {
       let systemInstruction = "";
@@ -160,20 +163,20 @@ export async function POST(request: Request) {
 
       if (!prompt || !prompt.trim()) {
         systemInstruction = isFullRules
-          ? "You are a professional Dungeons & Dragons adventure designer. Generate a creative, detailed starting D&D campaign scenario. Suggest a fitting Campaign Title and a detailed Starting Background Story (about 3 paragraphs) outlining the setting, initial quest/threat, and atmosphere. Return the response as a JSON object with keys 'title' and 'startingStory'. Do not include any markdown styling or extra text outside the JSON object."
+          ? "You are a professional Dungeons & Dragons adventure designer. Generate a creative starting D&D campaign scenario. Provide title and startingStory (about 3 paragraphs) outlining the setting, initial quest/threat, and atmosphere. Leave player decisions and outcomes open."
           : isDndCampaign
-            ? "You are a professional Dungeons & Dragons adventure designer. Generate a creative, detailed starting D&D campaign scenario with approachable, rules-light handling. Suggest a fitting Campaign Title and a detailed Starting Background Story (about 3 paragraphs) outlining the setting, initial quest/threat, and atmosphere. Return the response as a JSON object with keys 'title' and 'startingStory'. Do not include any markdown styling or extra text outside the JSON object."
-            : `You are a professional tabletop RPG adventure designer. Generate a creative, detailed starting campaign scenario. ${tabletopGuard} Focus on story, vibe, setting, and atmosphere. Suggest a fitting Campaign Title and a detailed Starting Background Story (about 3 paragraphs) outlining the setting, initial quest/threat, and atmosphere. Return the response as a JSON object with keys 'title' and 'startingStory'. Do not include any markdown styling or extra text outside the JSON object.`;
+            ? "You are a professional Dungeons & Dragons adventure designer. Generate a creative starting D&D campaign scenario with approachable, rules-light handling. Provide title and startingStory (about 3 paragraphs) outlining the setting, initial quest/threat, and atmosphere. Leave player decisions and outcomes open."
+            : `You are a professional tabletop RPG adventure designer. Generate a creative starting campaign scenario. ${tabletopGuard} Provide title and startingStory (about 3 paragraphs) outlining the setting, initial quest/threat, and atmosphere. Leave player decisions and outcomes open.`;
         userPrompt = seedTitle
           ? `Generate a new starting campaign for the title "${seedTitle}".`
           : "Generate a new starting campaign.";
         serverLog("API generate", `Generating new campaign title and backstory (${rulesMode} rules)${seedTitle ? ` from title "${seedTitle}"` : ""}`);
       } else {
         systemInstruction = isFullRules
-          ? "You are a professional Dungeons & Dragons adventure designer. Improve the following D&D campaign starting story draft, making it more detailed, atmospheric, descriptive, and engaging, but retaining the original core D&D elements, ideas, and setting. Also suggest an appropriate, epic Campaign Title. Return the response as a JSON object with keys 'title' and 'startingStory'. Do not include any markdown styling or extra text outside the JSON object."
+          ? "You are a professional Dungeons & Dragons adventure designer. Deepen this starting story while retaining its core D&D elements, ideas, and setting. Provide title and startingStory. Establish a playable opening without deciding the players' actions or the ending."
           : isDndCampaign
-            ? "You are a professional Dungeons & Dragons adventure designer. Improve the following D&D campaign starting story draft, making it more detailed, atmospheric, descriptive, and engaging, but keep it approachable and rules-light. Also suggest an appropriate Campaign Title. Return the response as a JSON object with keys 'title' and 'startingStory'. Do not include any markdown styling or extra text outside the JSON object."
-            : `You are a professional tabletop RPG adventure designer. Improve the following campaign starting story draft, making it more detailed, atmospheric, descriptive, and engaging, but retaining the original core ideas, genre, era, and setting. ${tabletopGuard} Return the response as a JSON object with keys 'title' and 'startingStory'. Do not include any markdown styling or extra text outside the JSON object.`;
+            ? "You are a professional Dungeons & Dragons adventure designer. Deepen this starting story while preserving its premise and keeping it approachable and rules-light. Provide title and startingStory. Establish a playable opening without deciding the players' actions or the ending."
+            : `You are a professional tabletop RPG adventure designer. Deepen this starting story while retaining its core ideas, genre, era, and setting. ${tabletopGuard} Provide title and startingStory. Establish a playable opening without deciding the players' actions or the ending.`;
         userPrompt = `Original draft to improve: "${prompt}"`;
         serverLog("API generate", `Improving campaign backstory (${rulesMode} rules): "${prompt.slice(0, 80)}..."`);
       }
@@ -197,21 +200,21 @@ export async function POST(request: Request) {
         ? `You are a professional Dungeons & Dragons adventure designer. Based on the following starting campaign background, suggest 3 to 5 interesting NPCs that fit the theme, setting, and plot. Some should be "Starting NPC" (present in the opening scene) and others should be "Future NPC" (to be met later in the adventure).
 Campaign Backstory: "${prompt || ""}"
 
-Return the response as a JSON object with a single key 'npcs', which is an array of objects. Each NPC object should have keys:
+Provide an 'npcs' array. Each NPC should have:
 - 'name': a creative name
 - 'description': a short description of who they are, their role/backstory, and how they relate to the campaign
 - 'status': either "Starting NPC" or "Future NPC"
 
-Do not include any markdown styling or extra text outside the JSON object.`
-        : `You are a professional tabletop RPG adventure designer. Based on the following starting campaign background, suggest 3 to 5 interesting NPCs that fit the theme, setting, genre, era, and plot. Some should be "Starting NPC" (present in the opening scene) and others should be "Future NPC" (to be met later in the adventure). ${tabletopGuard} NPC descriptions must focus purely on story, personality, motive, and role.
+Include a distinct voice, motive, and visible physical appearance.`
+        : `You are a professional tabletop RPG adventure designer. Based on the following starting campaign background, suggest 3 to 5 interesting NPCs that fit the theme, setting, genre, era, and plot. Some should be "Starting NPC" (present in the opening scene) and others should be "Future NPC" (to be met later in the adventure). ${npcGenreGuard} Give each NPC a distinct motive, manner of speaking, role, and visible physical appearance for their portrait.
 Campaign Backstory: "${prompt || ""}"
 
-Return the response as a JSON object with a single key 'npcs', which is an array of objects. Each NPC object should have keys:
+Provide an 'npcs' array. Each NPC should have:
 - 'name': a creative name
 - 'description': a short description of who they are, their role/backstory, and how they relate to the campaign
 - 'status': either "Starting NPC" or "Future NPC"
 
-Do not include any markdown styling or extra text outside the JSON object.`;
+Avoid interchangeable personalities or roles.`;
 
       const result = await callStructured(
         systemInstruction,
@@ -237,11 +240,11 @@ Do not include any markdown styling or extra text outside the JSON object.`;
           ? `You are a professional Dungeons & Dragons writer. Based on the following campaign backstory, write a creative name and a compelling description/backstory (1-2 paragraphs) for a D&D NPC.
 Campaign Backstory: "${startStory}"
 
-Return the response as a JSON object with keys 'name' and 'description'. Do not include any markdown styling or extra text outside the JSON object.`
-          : `You are a professional tabletop RPG writer. Based on the following campaign backstory, write a creative name and a compelling description/backstory (1-2 paragraphs) for a new NPC. ${tabletopGuard} Focus purely on story, role, personality, motive, and vibe.
+Provide name and description, including a distinct voice, motive, and visible physical appearance.`
+          : `You are a professional tabletop RPG writer. Based on the following campaign backstory, write a creative name and a compelling description/backstory (1-2 paragraphs) for a new NPC. ${npcGenreGuard} Include a distinct motive, manner of speaking, and visible physical appearance for their portrait.
 Campaign Backstory: "${startStory}"
 
-Return the response as a JSON object with keys 'name' and 'description'. Do not include any markdown styling or extra text outside the JSON object.`;
+Provide name and description.`;
         userPrompt = "Generate a new NPC name and description.";
         serverLog("API generate", `Generating new NPC name and description (${rulesMode} rules)`);
       } else {
@@ -249,11 +252,11 @@ Return the response as a JSON object with keys 'name' and 'description'. Do not 
           ? `You are a professional Dungeons & Dragons writer. Based on the following campaign backstory, improve the NPC backstory draft to make it more detailed, atmospheric, and immersive. Suggest a fitting name if none is provided or if the current one can be improved.
 Campaign Backstory: "${startStory}"
 
-Return the response as a JSON object with keys 'name' and 'description'. Do not include any markdown styling or extra text outside the JSON object.`
-          : `You are a professional tabletop RPG writer. Based on the following campaign backstory, improve the NPC backstory draft to make it more detailed, atmospheric, and immersive. ${tabletopGuard} Focus purely on story, role, personality, motive, and vibe. Suggest a fitting name if none is provided or if the current one can be improved.
+Provide name and description, including a distinct voice, motive, and visible physical appearance.`
+          : `You are a professional tabletop RPG writer. Based on the following campaign backstory, improve the NPC backstory draft to make it more detailed, atmospheric, and immersive. ${npcGenreGuard} Include a distinct motive, manner of speaking, and visible physical appearance for their portrait. Suggest a fitting name if none is provided or if the current one can be improved.
 Campaign Backstory: "${startStory}"
 
-Return the response as a JSON object with keys 'name' and 'description'. Do not include any markdown styling or extra text outside the JSON object.`;
+Provide name and description.`;
         userPrompt = `NPC name draft: "${npcName}"\nNPC description draft: "${prompt}"`;
         serverLog("API generate", `Improving NPC description draft for name: "${npcName || "Unnamed NPC"}" (${rulesMode} rules)`);
       }
@@ -321,12 +324,12 @@ Return the response as a JSON object with keys 'name' and 'description'. Do not 
 Campaign Title: "${campaignTitle}"
 Campaign Backstory: "${campaignBackstory}"${existingPartyContext}
 
-Return the response as a JSON object with keys 'characterName', 'personality', and 'background'. Do not include any markdown styling or extra text outside the JSON object.`
+Provide characterName, personality, and background. Leave future choices to the player.`
           : `You are a professional tabletop RPG writer. Based on the following campaign setting, write a compelling character name, a personality description (1 paragraph outlining traits, quirks, flaws), and a background backstory (1-2 paragraphs) for a player joining the campaign. ${tabletopGuard} Focus purely on story, role, vibe, and personality traits.
 Campaign Title: "${campaignTitle}"
 Campaign Backstory: "${campaignBackstory}"${existingPartyContext}
 
-Return the response as a JSON object with keys 'characterName', 'personality', and 'background'. Do not include any markdown styling or extra text outside the JSON object.`;
+Provide characterName, personality, and background. Leave future choices to the player.`;
         userPrompt = "Generate a new character name, personality, and backstory.";
         serverLog("API generate", `Generating starting character for campaign: "${campaignTitle}" (${rulesMode} rules)`);
       } else {
@@ -335,12 +338,12 @@ Return the response as a JSON object with keys 'characterName', 'personality', a
 Campaign Title: "${campaignTitle}"
 Campaign Backstory: "${campaignBackstory}"${existingPartyContext}
 
-Return the response as a JSON object with keys 'characterName', 'personality', and 'background'. Do not include any markdown styling or extra text outside the JSON object.`
+Provide characterName, personality, and background. Leave future choices to the player.`
           : `You are a professional tabletop RPG writer. Based on the following campaign setting, write or deepen the player's character personality and background backstory, using whatever partial drafts they provide below (they may give only a name). Make them detailed, thematic, and immersive, weaving the character into the campaign and reading the existing cast so they fit alongside them. Keep the player's core identity. ${tabletopGuard} Focus purely on story, role, vibe, and personality traits. Suggest a fitting character name only if none is provided.
 Campaign Title: "${campaignTitle}"
 Campaign Backstory: "${campaignBackstory}"${existingPartyContext}
 
-Return the response as a JSON object with keys 'characterName', 'personality', and 'background'. Do not include any markdown styling or extra text outside the JSON object.`;
+Provide characterName, personality, and background. Leave future choices to the player.`;
         userPrompt = `Character name draft: "${characterName || ""}"\nCharacter personality draft: "${body.personality || ""}"\nCharacter background draft: "${prompt || ""}"`;
         serverLog("API generate", `Weaving character for: "${characterName || "Unnamed character"}" (${rulesMode} rules)`);
       }

@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import type { Campaign } from "@/lib/campaign/types";
 import { bgmStop } from "@/lib/client/audio";
 import { ambienceStop } from "@/lib/client/ambience";
+import { sfxStop } from "@/lib/client/sfx";
 import HostStage from "@/components/HostStage";
 import MusicWidget from "@/components/MusicWidget";
 
@@ -84,6 +85,7 @@ export default function DebugShowcase({ onExit }: { onExit: () => void }) {
   useEffect(() => () => {
     bgmStop();
     ambienceStop();
+    sfxStop();
   }, []);
   return (
     <>

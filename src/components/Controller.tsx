@@ -536,7 +536,7 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
   const hp = me.stats.find((stat) => stat.name.toUpperCase() === "HP");
   const otherStats = me.stats.filter((stat) => stat.name.toUpperCase() !== "HP");
   const npcsMet = campaign.storyCharacters.filter(
-    (npc) => npc.portraitUrl || (npc.stats && npc.stats.length > 0) || (npc.status && npc.status !== "Future NPC")
+    (npc) => !npc.claimedByPlayerId && npc.status !== "Future NPC" && (npc.portraitUrl || (npc.stats && npc.stats.length > 0) || npc.status)
   );
 
   return (

@@ -17,9 +17,9 @@ import type {
   StoryCharacter
 } from "@/lib/campaign/types";
 import { api, accentColor, getTvToken, type ChatTargetOption, type HousekeepingStatus, type NarrationFailure } from "@/lib/client/api";
-import { bgmDuck, bgmIsMuted, bgmSetContext, bgmSetTheme, subscribeBgm, type BgmContext } from "@/lib/client/audio";
+import { bgmDuck, bgmIsMuted, bgmSetContext, bgmSetTheme, bgmStop, subscribeBgm, type BgmContext } from "@/lib/client/audio";
 import { ambienceSetScene, ambienceStop, ambienceAccent } from "@/lib/client/ambience";
-import { playSfx } from "@/lib/client/sfx";
+import { playSfx, sfxStop } from "@/lib/client/sfx";
 import { parseInline, plainText, renderInline, renderTokens } from "@/lib/client/markup";
 import { useTtsSpeech } from "@/lib/client/speech";
 import { ttsSidecarHealthy } from "@/lib/client/tts";
@@ -31,6 +31,8 @@ import CosmosCanvas from "@/components/three/CosmosCanvas";
 import WorldForge from "@/components/three/WorldForge";
 import OutroTheater from "@/components/three/OutroTheater";
 import { themeVisual, ThemeKey } from "@/components/three/themeVisuals";
+import Weaving from "@/components/Weaving";
+import StageDebugPanel, { type DebugScene, type DebugBeat } from "@/components/StageDebugPanel";
 
 const MOOD_GRADES: Record<string, string> = {
   calm: "linear-gradient(180deg, rgba(30,24,10,0.12), rgba(5,7,13,0.55))",
@@ -46,44 +48,7 @@ const MOOD_GRADES: Record<string, string> = {
   outro: "linear-gradient(180deg, rgba(48,36,12,0.28), rgba(8,6,4,0.7))"
 };
 
-const DEBUG_THEMES: ThemeKey[] = ["none", "fantasy", "scifi", "horror", "noir", "modern", "western", "postapoc"];
-/**
- * Mood tabs in the debug gallery: the live ambience moods plus every
- * per-ending outro score (BGM/outro-<kind>/<genre>/). Outro tabs share the
- * base "outro" visual grade; combined with the theme tabs they let every
- * shelf × genre pairing be auditioned straight from the gallery.
- */
 type DebugMoodKey = AmbienceMood | `outro-${EndingKind}`;
-const DEBUG_MOODS: DebugMoodKey[] = [
-  "calm", "tense", "adrenaline", "battle", "boss", "mystery", "dread", "triumph", "wonder", "somber",
-  "outro", "outro-victory", "outro-defeat", "outro-bittersweet", "outro-escape", "outro-draw", "outro-cliffhanger"
-];
-const DEBUG_EFFECTS: StageEffectKind[] = ["shake", "flash", "embers", "fog", "rain", "snow", "darkness", "heartbeat"];
-const DEBUG_OUTCOMES: DiceOutcome[] = [
-  "critical-success",
-  "strong-success",
-  "success",
-  "partial-success",
-  "failure",
-  "hard-failure",
-  "critical-failure"
-];
-const DEBUG_ENDINGS: EndingKind[] = ["victory", "defeat", "bittersweet", "escape", "draw", "cliffhanger"];
-const DEBUG_SFX: SfxCue[] = [
-  "beat", "heartbeat", "rumble", "flash", "darkness", "door-creak", "door-open", "door-close", "knock",
-  "airlock-open", "airlock-close", "code-beep", "code-success", "code-denied", "alarm", "siren", "radio-static",
-  "power-up", "power-down", "explosion", "gunshot", "laser", "impact", "debris", "glass-break", "sword", "arrow",
-  "shield", "footsteps", "horse", "thunder", "fire-burst", "splash", "wind-gust", "magic", "portal", "spell-fail",
-  "creature-roar", "whisper", "trap", "lock-click", "coin", "item-pickup", "heal"
-];
-const DEBUG_AMBIENCE: AmbienceSound[] = [
-  "none", "storm", "rain", "wind", "snow", "ocean", "water", "forest", "swamp", "desert", "insects", "birds",
-  "cave", "dungeon", "tavern", "village", "castle", "city", "traffic", "crowd", "office", "industrial", "machinery",
-  "electrical", "ventilation", "laboratory", "spaceship", "western-town", "wasteland", "battlefield", "fire", "supernatural"
-];
-const DEBUG_ACOUSTICS: AmbienceAcoustic[] = ["outdoors", "indoors", "small-room", "large-hall", "cave", "distant", "muffled", "underwater"];
-const DEBUG_BEATS = ["narration", "dialogue", "playerAction", "system"] as const;
-type DebugScene = "cosmos" | "loom" | "forge-lobby";
 
 /**
  * How recently an ending has to have landed for the outro to wait on the
@@ -211,18 +176,24 @@ export default function HostStage({
   const [debugMood, setDebugMood] = useState<DebugMoodKey | null>(null);
   const [debugOutro, setDebugOutro] = useState<EndingKind | null>(null);
   const [debugScene, setDebugScene] = useState<DebugScene | null>(null);
+  const [previewKey, setPreviewKey] = useState(0);
+  const [debugStopped, setDebugStopped] = useState(false);
   const [debugSigil, setDebugSigil] = useState(false);
   const [loomProgress, setLoomProgress] = useState(0.15);
   const visual = themeVisual(debugTheme || theme);
 
-  // The debug loom preview weaves itself over and over so the whole
-  // progress animation can be inspected, not just one frozen frame.
+  // Exercise the actual intro component, including its complete state and hold.
   useEffect(() => {
     if (debugScene !== "loom") return;
-    setLoomProgress(0.05);
-    const timer = setInterval(() => setLoomProgress((progress) => (progress >= 1 ? 0.05 : progress + 0.012)), 120);
+    const started = performance.now();
+    setLoomProgress(0);
+    const timer = setInterval(() => {
+      const elapsed = performance.now() - started;
+      setLoomProgress(Math.min(1, elapsed / 10000));
+      if (elapsed >= 11500) setDebugScene(null);
+    }, 100);
     return () => clearInterval(timer);
-  }, [debugScene]);
+  }, [debugScene, previewKey]);
   /* ------------------------------------------------------------------ */
   /* Backdrop crossfade                                                  */
   /* ------------------------------------------------------------------ */
@@ -303,7 +274,7 @@ export default function HostStage({
     campaign.id,
     campaign.ttsBatchId,
     tvToken,
-    campaign.ttsEnabled !== false,
+    !debugMode && campaign.ttsEnabled !== false,
     campaign.ttsVolume ?? 1
   );
 
@@ -429,11 +400,12 @@ export default function HostStage({
   // the "now idle" transition so it doesn't spam once nothing is playing.
   const presentingSentRef = useRef<boolean | null>(null);
   useEffect(() => {
+    if (debugMode) return;
     const isPresenting = !!currentBeat || queueRef.current.length > 0;
     if (!isPresenting && presentingSentRef.current === false) return;
     presentingSentRef.current = isPresenting;
     api.party({ campaignId: campaign.id, action: "presenting", active: isPresenting, hostToken: tvToken }).catch(() => undefined);
-  }, [campaign.id, currentBeat, pump, tvToken]);
+  }, [campaign.id, currentBeat, pump, tvToken, debugMode]);
 
   // Host fast-forward: flush the ENTIRE queue right now (not just the current
   // beat) and immediately tell the server playback is done, so a long turn
@@ -450,27 +422,30 @@ export default function HostStage({
     setHoldMs(0);
     setShownChars(0);
     presentingSentRef.current = false;
-    api.party({ campaignId: campaign.id, action: "presenting", active: false, hostToken: tvToken }).catch(() => undefined);
-  }, [campaign.id, tvToken, stopTts]);
+    if (!debugMode) api.party({ campaignId: campaign.id, action: "presenting", active: false, hostToken: tvToken }).catch(() => undefined);
+  }, [campaign.id, tvToken, stopTts, debugMode]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       if (target) {
         const tag = (target.tagName || "").toLowerCase();
-        if (tag === "input" || tag === "textarea" || target.isContentEditable) return;
+        if (tag === "input" || tag === "textarea" || tag === "select" || tag === "button" || target.isContentEditable) return;
       }
       if (event.code === "Space") {
         event.preventDefault();
         if (event.shiftKey) fastForwardAll();
         else skip();
       }
-      if (event.key === "d" || event.key === "D") setDrawerOpen((open) => !open);
+      if (event.key === "d" || event.key === "D") {
+        if (debugMode) setDebugOpen((open) => !open);
+        else setDrawerOpen((open) => !open);
+      }
       if (event.key === "t" || event.key === "T") setTomeOpen((open) => !open);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [skip, fastForwardAll]);
+  }, [skip, fastForwardAll, debugMode]);
 
   /* ------------------------------------------------------------------ */
   /* Ambience + stage effects                                            */
@@ -480,6 +455,12 @@ export default function HostStage({
   const [shakeKey, setShakeKey] = useState(0);
   const [shaking, setShaking] = useState(false);
   const [flashKey, setFlashKey] = useState(0);
+  const [screenEffect, setScreenEffect] = useState<{ kind: StageEffectKind; key: number; strength: number } | null>(null);
+  const effectTimers = useRef(new Set<ReturnType<typeof setTimeout>>());
+  useEffect(() => {
+    const timers = effectTimers.current;
+    return () => { for (const timer of timers) clearTimeout(timer); timers.clear(); };
+  }, []);
 
   useEffect(() => {
     if (!shakeKey) return;
@@ -494,7 +475,7 @@ export default function HostStage({
   // turn-level effects queue (campaign.effects) and beat-linked effects that
   // fire the instant their story beat performs.
   const fireEffect = useCallback((kind: StageEffectKind | undefined, strength = 0.6, repeat?: number, delayMs?: number, cues?: SfxCue[]) => {
-    const times = Math.max(1, Math.min(12, Number(repeat) || 1));
+    const times = Math.max(1, Math.min(12, Math.round(Number(repeat) || 1)));
     const gap = Math.max(0, Math.min(10000, Number(delayMs) || 0));
     const fire = () => {
       for (const cue of cues || []) playSfx(cue, strength);
@@ -505,6 +486,14 @@ export default function HostStage({
         case "flash": setFlashKey((k) => k + 1); if (useDefaultSound) playSfx("flash", strength); break;
         case "darkness": setDarkUntil(Date.now() + 4500); if (useDefaultSound) playSfx("darkness"); break;
         case "heartbeat": setPulseUntil(Date.now() + 5200); if (useDefaultSound) playSfx("heartbeat"); break;
+        case "shockwave":
+        case "heal":
+        case "glitch":
+        case "spotlight": {
+          setScreenEffect((previous) => ({ kind, strength, key: (previous?.key ?? 0) + 1 }));
+          if (useDefaultSound) playSfx(kind === "shockwave" ? "rumble" : kind === "spotlight" ? "reveal" : kind, strength);
+          break;
+        }
         default: {
           atmosphereRef.current?.burst(kind, strength);
           // The weather effects are VISUAL-ONLY particles — a downpour used to
@@ -521,7 +510,10 @@ export default function HostStage({
     };
     for (let i = 0; i < times; i += 1) {
       if (i === 0 || gap === 0) fire();
-      else setTimeout(fire, gap * i);
+      else {
+        const timer = setTimeout(() => { effectTimers.current.delete(timer); fire(); }, gap * i);
+        effectTimers.current.add(timer);
+      }
     }
   }, []);
 
@@ -588,8 +580,9 @@ export default function HostStage({
   }, [debugMode, visual.key]);
   useEffect(() => {
     if (!debugMode) return;
-    bgmSetContext(debugOutro ? `outro-${debugOutro}` : (moodKey as BgmContext));
-  }, [debugMode, debugOutro, moodKey]);
+    if (debugStopped) { bgmStop(); return; }
+    bgmSetContext(debugScene === "loom" ? "weaving" : debugScene ? "lobby" : debugOutro ? `outro-${debugOutro}` : (moodKey as BgmContext));
+  }, [debugMode, debugOutro, debugScene, moodKey, debugStopped]);
 
   /* ------------------------------------------------------------------ */
   /* Director drawer                                                     */
@@ -745,31 +738,20 @@ export default function HostStage({
   const currentTarget = chatTargets.find((t) => t.id === selectedTargetId);
   const partyLeader = campaign.players.find((player) => player.id === campaign.partyLeaderId);
 
-  const previewEffect = (kind: StageEffectKind) => {
-    switch (kind) {
-      case "shake": setShakeKey((key) => key + 1); playSfx("rumble", 0.8); break;
-      case "flash": setFlashKey((key) => key + 1); playSfx("flash", 0.8); break;
-      case "darkness": setDarkUntil(Date.now() + 4500); playSfx("darkness"); break;
-      case "heartbeat": setPulseUntil(Date.now() + 5200); playSfx("heartbeat"); break;
-      default: {
-        atmosphereRef.current?.burst(kind, 0.85);
-        const bed = EFFECT_AMBIENCE[kind];
-        if (bed) ambienceAccent(bed, 7000, 0.85);
-      }
-    }
-  };
-
   const previewAmbience = (sound: AmbienceSound, acoustics: AmbienceAcoustic[] = []) => {
     ambienceSetScene(`Gallery preview: ${sound}`, { sounds: [sound], acoustics });
   };
 
   const previewDice = (outcome: DiceOutcome, isNpc = false) => {
-    const total = outcome === "critical-success" ? 20 : outcome === "critical-failure" ? 1 : outcome.includes("failure") ? 8 : 18;
+    setDebugScene(null);
+    setDebugOutro(null);
+    const natural = outcome === "critical-success" ? 20 : outcome === "critical-failure" ? 1 : outcome.includes("failure") ? 5 : 15;
+    const total = natural + 3;
     setActiveDice({
       id: `debug-${outcome}-${Date.now()}`,
       notation: "1d20+3",
       reason: `Debug preview: ${outcome.replaceAll("-", " ")}`,
-      rolls: [Math.max(1, total - 3)],
+      rolls: [natural],
       modifier: 3,
       total,
       d20Mode: "normal",
@@ -782,11 +764,13 @@ export default function HostStage({
   };
 
   /** Queue a sample story beat so the chronicle typewriter can be tested live. */
-  const previewBeat = (type: (typeof DEBUG_BEATS)[number]) => {
+  const previewBeat = (type: DebugBeat) => {
+    setDebugScene(null);
+    setDebugOutro(null);
     const hero = campaign.players[0];
     const heroName = hero?.characterName || hero?.name || "The Hero";
     const npcName = campaign.storyCharacters[0]?.name || "The Adversary";
-    const samples: Record<(typeof DEBUG_BEATS)[number], Beat> = {
+    const samples: Record<DebugBeat, Beat> = {
       narration: {
         id: `debug-beat-${Date.now()}`,
         type: "narration",
@@ -849,14 +833,41 @@ export default function HostStage({
     setLayers((prev) => [...prev, { url, key: (prev[prev.length - 1]?.key ?? 0) + 1 }].slice(-2));
   };
 
-  const closeDebug = () => {
-    setDebugOpen(false);
-    setDebugTheme(null);
-    setDebugMood(null);
+  const stopPreview = useCallback(() => {
+    for (const timer of effectTimers.current) clearTimeout(timer);
+    effectTimers.current.clear();
+    atmosphereRef.current?.clear();
+    setShaking(false);
+    setShakeKey(0);
+    setFlashKey(0);
+    setScreenEffect(null);
+    setDarkUntil(0);
+    setPulseUntil(0);
+    setActiveDice(null);
+    fastForwardAll();
     setDebugOutro(null);
     setDebugScene(null);
     setDebugSigil(false);
+    setDebugStopped(true);
+    sfxStop();
+    ambienceStop();
+    bgmStop();
+  }, [fastForwardAll]);
+  const resetPreview = () => {
+    stopPreview();
+    setDebugTheme(null);
+    setDebugMood(null);
+    setLayers(campaign.currentImageUrl ? [{ url: campaign.currentImageUrl, key: 0 }] : []);
+    setTomeOpen(false);
   };
+  useEffect(() => {
+    if (!debugMode) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") stopPreview();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [debugMode, stopPreview]);
 
   /* ------------------------------------------------------------------ */
   /* Derived                                                             */
@@ -887,7 +898,7 @@ export default function HostStage({
       campaign.storyCharacters
         // Show a foe the moment it appears — a portrait OR any tracked stat
         // (HP) is enough; enemies shouldn't be invisible until art is painted.
-        .filter((npc) => (npc.portraitUrl || (npc.stats && npc.stats.length > 0)) && npc.status !== "Future NPC")
+        .filter((npc) => !npc.claimedByPlayerId && npc.status !== "Future NPC" && (npc.portraitUrl || (npc.stats && npc.stats.length > 0) || npc.status))
         .filter((npc) => !focusHasPlayers || !focusedId || !npc.locationId || npc.locationId === focusedId)
         .slice(-4),
     [campaign.storyCharacters, focusedId, focusHasPlayers]
@@ -1001,7 +1012,7 @@ export default function HostStage({
 
   return (
     <div
-      className={`stage screen ${shaking ? "stage-shake" : ""} ${pulsing ? "stage-pulse" : ""} ${campaign.status === "completed" ? "stage-completed" : ""}`}
+      className={`stage screen ${debugMode ? "stage-debug" : ""} ${shaking ? "stage-shake" : ""} ${pulsing ? "stage-pulse" : ""} ${campaign.status === "completed" ? "stage-completed" : ""}`}
       data-music-theme={visual.key}
       onClick={skip}
     >
@@ -1023,13 +1034,14 @@ export default function HostStage({
           leaving this up ran a second WebGL context rendering weather nobody
           can see — on a smart TV that is the difference between a smooth
           finale and a stuttering one. */}
-      {activeEnding ? null : (
+      {activeEnding || debugScene ? null : (
         <StageAtmosphere ref={atmosphereRef} mood={mood} intensity={intensity} theme={visual.key} />
       )}
 
       <div className="stage-grain" aria-hidden />
       <div className={`stage-darkness ${dark ? "on" : ""}`} aria-hidden />
       {flashKey ? <div key={`flash-${flashKey}`} className="stage-flash" aria-hidden /> : null}
+      {screenEffect ? <div key={`screen-${screenEffect.key}`} className={`stage-screen-effect effect-${screenEffect.kind}`} style={{ opacity: screenEffect.strength }} aria-hidden><span /></div> : null}
       <div className="stage-vignette" aria-hidden />
 
       {/* Top chrome */}
@@ -1180,7 +1192,7 @@ export default function HostStage({
       {/* The Grand Outro — a Three.js finale choreographed by the ending kind */}
       {activeEnding ? (
         <OutroTheater
-          key={`${activeEnding.kind}-${visual.key}`}
+          key={`${activeEnding.kind}-${visual.key}-${debugOutro ? previewKey : "live"}`}
           ending={activeEnding}
           players={campaign.players}
           campaignTitle={campaign.title}
@@ -1196,7 +1208,7 @@ export default function HostStage({
       {/* Utility chrome */}
       <div className="stage-tools" onClick={(event) => event.stopPropagation()}>
         <button className="tool-chip" onClick={() => setTomeOpen((open) => !open)}>Tome</button>
-        <button className="tool-chip" onClick={() => setDrawerOpen((open) => !open)}>Director</button>
+        {!debugMode ? <button className="tool-chip" onClick={() => setDrawerOpen((open) => !open)}>Director</button> : null}
         {debugMode ? <button className={`tool-chip ${debugOpen ? "attention" : ""}`} onClick={() => setDebugOpen((open) => !open)}>Gallery</button> : null}
       </div>
 
@@ -1208,135 +1220,31 @@ export default function HostStage({
           ) : debugScene === "forge-lobby" ? (
             <WorldForge mode="lobby" drama={0.75} accent={visual.accent} theme={visual.key} />
           ) : (
-            <WorldForge mode="weaving" progress={loomProgress} accent={visual.accent} theme={visual.key} />
+            <Weaving key={previewKey} title={campaign.title} progress={loomProgress} complete={loomProgress >= 1} theme={visual.key} />
           )}
-          <button className="ghost-button debug-scene-close" onClick={() => setDebugScene(null)}>
+          <button className="ghost-button debug-scene-close" onClick={stopPreview}>
             ✕ Close {debugScene === "cosmos" ? "cosmos" : debugScene === "forge-lobby" ? "forge (lobby)" : `forge (${Math.round(loomProgress * 100)}%)`}
           </button>
         </div>
       ) : null}
 
       {debugMode && debugOpen ? (
-        <aside className="debug-menu panel" onClick={(event) => event.stopPropagation()}>
-          <div className="tome-head">
-            <h3 className="panel-subtitle">UI Debug Gallery</h3>
-            <span className="debug-menu-actions">
-              <button className="ghost-button" onClick={closeDebug}>Hide</button>
-              <button className="ghost-button" onClick={onExit}>Title screen</button>
-            </span>
-          </div>
-
-          <label className="director-label">Menus</label>
-          <div className="debug-grid menus">
-            <button className="chip-toggle tiny" onClick={() => setTomeOpen(true)}>Tome</button>
-            <button className="chip-toggle tiny" onClick={() => setDrawerOpen(true)}>Director</button>
-            <button className={`chip-toggle tiny ${debugSigil ? "selected" : ""}`} onClick={() => setDebugSigil((shown) => !shown)}>Oracle sigil</button>
-          </div>
-
-          <label className="director-label">Three.js scenes</label>
-          <div className="debug-grid menus">
-            <button className={`chip-toggle tiny ${debugScene === "cosmos" ? "selected" : ""}`} onClick={() => setDebugScene((scene) => (scene === "cosmos" ? null : "cosmos"))}>Cosmos</button>
-            <button className={`chip-toggle tiny ${debugScene === "loom" ? "selected" : ""}`} onClick={() => setDebugScene((scene) => (scene === "loom" ? null : "loom"))}>Worldforge</button>
-            <button className={`chip-toggle tiny ${debugScene === "forge-lobby" ? "selected" : ""}`} onClick={() => setDebugScene((scene) => (scene === "forge-lobby" ? null : "forge-lobby"))}>Forge lobby</button>
-            <button className="chip-toggle tiny" onClick={() => previewDice("success")}>Dice Theater</button>
-          </div>
-
-          <label className="director-label">Outro finales (Three.js)</label>
-          <div className="debug-grid">
-            {DEBUG_ENDINGS.map((endingKind) => (
-              <button
-                key={endingKind}
-                className={`chip-toggle tiny ${debugOutro === endingKind ? "selected" : ""}`}
-                onClick={() => {
-                  if (debugOutro === endingKind) {
-                    setDebugOutro(null);
-                  } else {
-                    setDebugOutro(endingKind);
-                    setDebugMood("outro");
-                  }
-                }}
-              >
-                {endingKind}
-              </button>
-            ))}
-          </div>
-
-          <label className="director-label">Themes</label>
-          <div className="debug-grid">
-            {DEBUG_THEMES.map((themeKey) => (
-              <button key={themeKey} className={`chip-toggle tiny ${visual.key === themeKey ? "selected" : ""}`} onClick={() => setDebugTheme(themeKey)}>
-                {themeKey}
-              </button>
-            ))}
-          </div>
-
-          <label className="director-label">Atmosphere moods & scores (per genre)</label>
-          <div className="debug-grid">
-            {DEBUG_MOODS.map((moodOption) => (
-              <button
-                key={moodOption}
-                className={`chip-toggle tiny ${!debugOutro && moodKey === moodOption ? "selected" : ""}`}
-                onClick={() => {
-                  // A mood/score tab takes over the bard — drop any finale
-                  // overlay so what you hear is what you clicked.
-                  setDebugOutro(null);
-                  setDebugMood(moodOption);
-                }}
-              >
-                {moodOption}
-              </button>
-            ))}
-          </div>
-
-          <label className="director-label">Stage effects</label>
-          <div className="debug-grid">
-            {DEBUG_EFFECTS.map((effect) => <button key={effect} className="chip-toggle tiny" onClick={() => previewEffect(effect)}>{effect}</button>)}
-            <button className="chip-toggle tiny" onClick={() => previewBackdrop()}>backdrop fade</button>
-          </div>
-
-          <label className="director-label">Chronicle beats</label>
-          <div className="debug-grid">
-            {DEBUG_BEATS.map((beatType) => (
-              <button key={beatType} className="chip-toggle tiny" onClick={() => previewBeat(beatType)}>
-                {beatType === "playerAction" ? "player action" : beatType}
-              </button>
-            ))}
-          </div>
-
-          <label className="director-label">SFX cues</label>
-          <div className="debug-grid">
-            {DEBUG_SFX.map((cue) => <button key={cue} className="chip-toggle tiny" onClick={() => playSfx(cue)}>{cue}</button>)}
-          </div>
-
-          <label className="director-label">Combined effect presets</label>
-          <div className="debug-grid">
-            <button className="chip-toggle tiny" onClick={() => fireEffect("shake", 0.9, 1, 0, ["explosion", "debris"])}>explosion + debris</button>
-            <button className="chip-toggle tiny" onClick={() => fireEffect("flash", 0.8, 3, 180, ["gunshot"])}>rapid gunfire</button>
-            <button className="chip-toggle tiny" onClick={() => fireEffect("darkness", 0.8, 4, 850, ["heartbeat"])}>slow heartbeat</button>
-            <button className="chip-toggle tiny" onClick={() => fireEffect(undefined, 0.75, 3, 600, ["knock"])}>three knocks</button>
-            <button className="chip-toggle tiny" onClick={() => fireEffect("flash", 0.85, 1, 0, ["magic", "portal"])}>magic portal</button>
-            <button className="chip-toggle tiny" onClick={() => fireEffect("shake", 0.8, 1, 0, ["airlock-open", "alarm"])}>airlock alarm</button>
-          </div>
-
-          <label className="director-label">Environmental beds</label>
-          <div className="debug-grid">
-            {DEBUG_AMBIENCE.map((sound) => <button key={sound} className="chip-toggle tiny" onClick={() => previewAmbience(sound)}>{sound}</button>)}
-          </div>
-
-          <label className="director-label">Acoustic previews</label>
-          <div className="debug-grid">
-            {DEBUG_ACOUSTICS.map((acoustic) => <button key={acoustic} className="chip-toggle tiny" onClick={() => previewAmbience("water", [acoustic])}>{acoustic}</button>)}
-            <button className="chip-toggle tiny" onClick={() => previewAmbience("water", ["cave", "distant"])}>distant cave water</button>
-            <button className="chip-toggle tiny" onClick={() => previewAmbience("machinery", ["underwater", "muffled"])}>submerged machinery</button>
-            <button className="chip-toggle tiny" onClick={() => ambienceStop()}>stop world</button>
-          </div>
-
-          <label className="director-label">Dice outcomes</label>
-          <div className="debug-grid">
-            {DEBUG_OUTCOMES.map((outcome) => <button key={outcome} className="chip-toggle tiny" onClick={() => previewDice(outcome)}>{outcome.replaceAll("-", " ")}</button>)}
-            <button className="chip-toggle tiny" onClick={() => previewDice("hard-failure", true)}>NPC roll</button>
-          </div>
-        </aside>
+        <StageDebugPanel theme={visual.key} mood={moodKey} scene={debugScene} outro={debugOutro} sigil={debugSigil}
+          onTheme={setDebugTheme}
+          onMood={(next) => { setDebugStopped(false); setDebugScene(null); setDebugOutro(null); setDebugMood(next as DebugMoodKey); }}
+          onScene={(scene) => { stopPreview(); setDebugStopped(false); setDebugScene(scene); setPreviewKey((key) => key + 1); if (scene === "loom") playSfx("intro-rise"); }}
+          onOutro={(kind) => { stopPreview(); setDebugStopped(false); setDebugOutro(kind); setPreviewKey((key) => key + 1); playSfx("outro-resolve"); }}
+          onEffect={(...args) => {
+            if (debugScene || debugOutro) {
+              stopPreview();
+              const timer = setTimeout(() => { effectTimers.current.delete(timer); fireEffect(...args); }, 0);
+              effectTimers.current.add(timer);
+            } else fireEffect(...args);
+          }}
+          onDice={previewDice} onBeat={previewBeat} onAmbience={previewAmbience} onBackdrop={previewBackdrop}
+          onSigil={() => setDebugSigil((shown) => !shown)} onTome={() => setTomeOpen(true)}
+          onStop={stopPreview} onReset={resetPreview} onHide={() => setDebugOpen(false)} onExit={onExit}
+        />
       ) : null}
 
       {/* The Tome — scrollback */}

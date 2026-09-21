@@ -30,6 +30,12 @@ type CategoryRule = {
 };
 
 const CATEGORY_RULES: CategoryRule[] = [
+  { category: "library", pattern: /\b(library|archives|reading room)\b/i, group: "place" },
+  { category: "cafe", pattern: /\b(cafe|coffee shop|tearoom)\b/i, group: "place" },
+  { category: "train", pattern: /\b(train|railway|railcar|subway)\b/i, group: "place" },
+  { category: "harbor", pattern: /\b(harbor|harbour|dockside|wharf|marina)\b/i, group: "place" },
+  { category: "temple", pattern: /\b(temple|shrine|monastery|cathedral)\b/i, group: "place" },
+  { category: "hospital", pattern: /\b(hospital|clinic|infirmary)\b/i, group: "place" },
   { category: "storm", pattern: /\b(thunder|lightning|tempest|storm)\b/i, group: "weather" },
   { category: "rain", pattern: /\b(rain|rainy|downpour|drizzle|monsoon)\b/i, group: "weather" },
   { category: "wind", pattern: /\b(wind|windy|gale|blizzard|snowstorm|howling)\b/i, group: "weather" },
@@ -79,7 +85,10 @@ const state: AmbienceState = { categories: [], acoustics: [], muted: false, volu
 const listeners = new Set<(next: AmbienceState) => void>();
 const active = new Map<string, ActiveLayer>();
 /** Beds currently playing as a one-shot stage accent (see ambienceAccent). */
-const accents = new Set<string>();
+const accents = new Map<string, { element: HTMLAudioElement; timer?: ReturnType<typeof setTimeout>; strength: number }>();
+const fades = new Map<HTMLAudioElement, ReturnType<typeof setInterval>>();
+const retiring = new Set<HTMLAudioElement>();
+let accentGeneration = 0;
 let desiredText = "";
 let desiredOptions: AmbienceOptions = {};
 let changeToken = 0;
@@ -95,14 +104,17 @@ function targetVolume(layerCount = Math.max(active.size, 1)) {
 }
 
 function fade(element: HTMLAudioElement, from: number, to: number, onDone?: () => void) {
+  clearInterval(fades.get(element));
   const started = performance.now();
   const timer = setInterval(() => {
     const progress = Math.min((performance.now() - started) / FADE_MS, 1);
     element.volume = Math.max(0, Math.min(1, from + (to - from) * progress));
     if (progress < 1) return;
     clearInterval(timer);
+    fades.delete(element);
     onDone?.();
   }, 80);
+  fades.set(element, timer);
 }
 
 function audioContext() {
@@ -200,10 +212,12 @@ async function applyScene(text: string, options: AmbienceOptions) {
     if (wanted.has(category)) continue;
     active.delete(category);
     const element = layer.element;
+    retiring.add(element);
     fade(element, element.volume, 0, () => {
       element.pause();
       element.removeAttribute("src");
       element.load();
+      retiring.delete(element);
     });
   }
 
@@ -219,7 +233,9 @@ async function applyScene(text: string, options: AmbienceOptions) {
     element.preload = "auto";
     element.volume = 0;
     active.set(category, routeLayer(element, acoustics));
-    element.play().then(() => fade(element, 0, volume)).catch(() => undefined);
+    element.play().then(() => {
+      if (active.get(category)?.element === element) fade(element, element.volume, targetVolume());
+    }).catch(() => undefined);
   }
 
   state.categories = categories;
@@ -253,26 +269,34 @@ export async function ambienceAccent(sound: AmbienceSound, holdMs = 6000, streng
   if (sound === "none" || state.muted || userVolume <= 0) return;
   if (active.has(sound)) return;
   if (accents.has(sound)) return;
+  const generation = accentGeneration;
   try {
     const library = await loadAmbienceManifest();
+    if (generation !== accentGeneration || state.muted || active.has(sound) || accents.has(sound)) return;
     const tracks = library[sound];
     if (!tracks?.length) return;
     const element = new Audio(randomTrack(tracks));
     element.loop = true;
     element.preload = "auto";
     element.volume = 0;
-    accents.add(sound);
+    const accent: { element: HTMLAudioElement; timer?: ReturnType<typeof setTimeout>; strength: number } = {
+      element, strength: Math.max(0.2, Math.min(1, strength))
+    };
+    accents.set(sound, accent);
     // A touch under the standing beds: an accent should color the moment, not
     // take over the room.
-    const peak = targetVolume(Math.max(active.size, 1) + 1) * 0.8 * Math.max(0.2, Math.min(1, strength));
     await element.play().catch(() => undefined);
+    if (accents.get(sound) !== accent) return;
+    const peak = targetVolume(Math.max(active.size, 1) + 1) * 0.8 * accent.strength;
     fade(element, 0, peak);
-    window.setTimeout(() => {
+    accent.timer = setTimeout(() => {
+      accents.delete(sound);
+      retiring.add(element);
       fade(element, element.volume, 0, () => {
         element.pause();
         element.removeAttribute("src");
         element.load();
-        accents.delete(sound);
+        retiring.delete(element);
       });
     }, Math.max(500, holdMs));
   } catch {
@@ -285,7 +309,24 @@ export function ambienceSetVolume(next: number) {
   state.volume = userVolume;
   if (typeof window !== "undefined") window.localStorage.setItem(AMBIENCE_VOLUME_KEY, String(userVolume));
   const volume = targetVolume();
-  for (const layer of active.values()) layer.element.volume = volume;
+  for (const layer of active.values()) {
+    clearInterval(fades.get(layer.element));
+    fades.delete(layer.element);
+    layer.element.volume = volume;
+  }
+  for (const accent of accents.values()) {
+    clearInterval(fades.get(accent.element));
+    fades.delete(accent.element);
+    accent.element.volume = targetVolume(Math.max(active.size, 1) + 1) * 0.8 * accent.strength;
+  }
+  for (const element of retiring) {
+    clearInterval(fades.get(element));
+    fades.delete(element);
+    element.pause();
+    element.removeAttribute("src");
+    element.load();
+  }
+  retiring.clear();
   notify();
 }
 
@@ -295,9 +336,7 @@ export function ambienceGetVolume() {
 
 export function ambienceSetMuted(muted: boolean) {
   state.muted = muted;
-  const volume = targetVolume();
-  for (const layer of active.values()) layer.element.volume = volume;
-  notify();
+  ambienceSetVolume(userVolume);
 }
 
 export function subscribeAmbience(listener: (next: AmbienceState) => void) {
@@ -315,15 +354,21 @@ export function ambienceResume() {
 
 export function ambienceStop() {
   changeToken += 1;
+  accentGeneration += 1;
   desiredText = "";
   desiredOptions = {};
-  for (const layer of active.values()) {
-    const element = layer.element;
+  for (const timer of fades.values()) clearInterval(timer);
+  fades.clear();
+  for (const accent of accents.values()) clearTimeout(accent.timer);
+  const elements = new Set([...retiring, ...Array.from(active.values(), (layer) => layer.element), ...Array.from(accents.values(), (accent) => accent.element)]);
+  for (const element of elements) {
     element.pause();
     element.removeAttribute("src");
     element.load();
   }
   active.clear();
+  retiring.clear();
+  accents.clear();
   state.categories = [];
   state.acoustics = [];
   notify();

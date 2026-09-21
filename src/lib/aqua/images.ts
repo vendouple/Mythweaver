@@ -7,11 +7,8 @@ type ImageResponse = {
 };
 
 /**
- * Framing for a generated image. Scene backdrops fill a TV (16:9); portraits
- * are shown in tall phone/talisman frames (9:16); square suits anything that
- * shouldn't be cropped either way. Without this, a square image stretched
- * across the TV or letterboxed into a portrait frame wastes most of the
- * generation.
+ * Scene backdrops fill a TV (16:9); player and NPC cards use square portraits.
+ * Keep framing in the prompt too for providers that do not accept dimensions.
  */
 export type ImageAspect = "16:9" | "9:16" | "1:1";
 
@@ -34,14 +31,22 @@ const ASPECT_SIZES: Record<ImageAspect, string> = {
  * unrelated 400 (a content-policy refusal on a model-authored prompt, say)
  * silently cost every later image its framing, with only a restart to recover.
  */
-let sizeRejected = false;
+const rejectedSizes = new Set<string>();
 
 export async function generateImage(
   prompt: string,
   opts: { aspect?: ImageAspect; onRetry?: AquaFetchOptions["onRetry"] } = {}
 ) {
   const config = aquaConfig();
-  const size = !sizeRejected && opts.aspect ? ASPECT_SIZES[opts.aspect] : undefined;
+  const requestedSize = opts.aspect ? ASPECT_SIZES[opts.aspect] : undefined;
+  const sizeKey = `${config.imageBaseUrl}|${config.imageModel}|${requestedSize}`;
+  const size = rejectedSizes.has(sizeKey) ? undefined : requestedSize;
+  const framing = opts.aspect === "1:1"
+    ? "Square 1:1 character portrait, centered head and shoulders, face fully visible with space around the head, no text or borders."
+    : opts.aspect === "16:9"
+      ? "Wide landscape composition for a 16:9 cinematic backdrop, no text or borders."
+      : opts.aspect === "9:16" ? "Tall 9:16 portrait composition, no text or borders." : "";
+  const framedPrompt = [prompt.trim(), framing].filter(Boolean).join("\n\n");
 
   const fetchOptions: AquaFetchOptions = {
     baseUrl: config.imageBaseUrl,
@@ -54,27 +59,28 @@ export async function generateImage(
   const send = async (withSize?: string) =>
     (await aquaFetch("/images/generations", {
       method: "POST",
-      body: JSON.stringify({ model: config.imageModel, prompt, ...(withSize ? { size: withSize } : {}) })
+      body: JSON.stringify({ model: config.imageModel, prompt: framedPrompt, ...(withSize ? { size: withSize } : {}) })
     }, fetchOptions)) as ImageResponse;
 
   let data: ImageResponse;
   try {
     data = await send(size);
   } catch (err) {
-    // A sized request that failed might have failed BECAUSE of the size, so try
-    // once more without it — an unsized image still beats no image, and a
-    // provider that dislikes the parameter (or these particular dimensions)
-    // must not be able to take image generation down entirely. Deliberately not
-    // restricted to 400: providers disagree about which status a rejected
-    // parameter earns. If the unsized attempt fails too, the original error
-    // propagates and `size` is NOT blamed.
-    if (!size) throw err;
+    // Authentication, rate limits and outages say nothing about size support.
+    // Only downgrade framing on an explicit invalid/unsupported size response.
+    const status = (err as { status?: number })?.status;
+    const message = err instanceof Error ? err.message : String(err);
+    if (!size || ![400, 422].includes(status || 0) || !/\b(size|dimensions?|resolution|aspect[ _-]?ratio)\b/i.test(message)) throw err;
     console.warn(`[Image] Sized request (size=${size}) failed; retrying without size. Cause: ${err instanceof Error ? err.message : String(err)}`);
-    data = await send(undefined);
+    try {
+      data = await send(undefined);
+    } catch {
+      throw err;
+    }
     // The unsized retry worked where the sized one didn't — that's the evidence
     // needed to stop asking for a size at all.
-    sizeRejected = true;
-    console.warn(`[Image] Provider does not accept size=${size}; dropping the size parameter for the rest of this process.`);
+    rejectedSizes.add(sizeKey);
+    console.warn(`[Image] Provider does not accept size=${size}; omitting that size for this endpoint/model.`);
   }
 
   const first = data.data?.[0];

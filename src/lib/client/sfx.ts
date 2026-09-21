@@ -4,8 +4,8 @@ import { loadSfxManifest } from "@/lib/client/audio";
 import type { SfxCue } from "@/lib/campaign/types";
 
 /**
- * Table foley. Every cue has a hand-rolled WebAudio synth fallback so the
- * game sounds alive with zero assets; drop a matching file into
+ * Table foley. Core UI cues have WebAudio fallbacks; other missing cues
+ * stay silent. Drop a matching file into
  * public/music/SFX/ (e.g. "join.mp3", "beat.mp3") and it is used instead.
  */
 
@@ -19,6 +19,9 @@ let sfxMuted = false;
 let fileMap: Record<string, string> | null = null;
 let manifestPromise: Promise<void> | null = null;
 let ctx: AudioContext | null = null;
+const playingFiles = new Set<HTMLAudioElement>();
+const playingSynths = new Map<GainNode, ReturnType<typeof setTimeout>>();
+let playbackGeneration = 0;
 
 const SFX_VOLUME_KEY = "mythweaver-sfx-volume";
 
@@ -32,6 +35,23 @@ if (typeof window !== "undefined") {
 
 export function sfxSetMuted(muted: boolean) {
   sfxMuted = muted;
+  if (muted) sfxStop();
+}
+
+/** Cancel active cues and cues still waiting for the manifest. */
+export function sfxStop() {
+  playbackGeneration += 1;
+  for (const element of playingFiles) {
+    element.pause();
+    element.removeAttribute("src");
+    element.load();
+  }
+  playingFiles.clear();
+  for (const [master, timer] of playingSynths) {
+    clearTimeout(timer);
+    master.disconnect();
+  }
+  playingSynths.clear();
 }
 
 /** Set the user SFX volume (0..1). Persists across sessions. */
@@ -190,19 +210,34 @@ const SYNTHS: Partial<Record<SfxName, (context: AudioContext, master: GainNode) 
   }
 };
 
+export type SfxSource = "recorded" | "synthesized" | "missing";
+
+/** Describes available assets, not whether browser autoplay permits playback. */
+export async function sfxSources(names: readonly SfxName[]): Promise<Record<string, SfxSource>> {
+  await ensureManifest();
+  return Object.fromEntries(names.map((name) => [name, fileMap?.[name] ? "recorded" : SYNTHS[name] ? "synthesized" : "missing"]));
+}
+
 /** Fire a cue. Silently does nothing if audio is unavailable or muted. */
 export function playSfx(name: SfxName, volume = 1) {
   if (sfxMuted || sfxVolume <= 0) return;
   if (!fileMap) {
-    ensureManifest().then(() => playSfx(name, volume));
+    const generation = playbackGeneration;
+    ensureManifest().then(() => {
+      if (generation === playbackGeneration) playSfx(name, volume);
+    });
     return;
   }
   try {
     const fileUrl = fileMap?.[name];
     if (fileUrl) {
       const el = new Audio(fileUrl);
-      el.volume = Math.min(1, 0.55 * volume * sfxVolume);
-      el.play().catch(() => undefined);
+      el.volume = Math.max(0, Math.min(1, 0.55 * volume * sfxVolume));
+      playingFiles.add(el);
+      const release = () => playingFiles.delete(el);
+      el.addEventListener("ended", release, { once: true });
+      el.addEventListener("error", release, { once: true });
+      el.play().catch(release);
       return;
     }
     const synth = SYNTHS[name];
@@ -213,6 +248,10 @@ export function playSfx(name: SfxName, volume = 1) {
     master.gain.value = 0.16 * volume * sfxVolume;
     master.connect(context.destination);
     synth(context, master);
+    playingSynths.set(master, setTimeout(() => {
+      master.disconnect();
+      playingSynths.delete(master);
+    }, 2200));
   } catch {
     // Foley is decoration; never let it break the game.
   }

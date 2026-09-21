@@ -68,6 +68,19 @@ missing — do not treat them as complete.
 - [x] `battlefield.mp3` - Distant combat, artillery, and debris; keep foreground shots sparse enough to loop. *(from WWI Trenches)*
 - [x] `supernatural.mp3` - Low spectral drone, faint whispers, or occult resonance without a melody. *(from HoMM3 Necropolis)*
 
+## Additional supported places
+
+These categories are wired into scene inference, model tools, and the preview
+lab. They remain silent until matching files are added. Refresh the browser
+after adding files to reload the cached manifest.
+
+- [ ] `library.mp3` - Quiet room tone, paper, and distant restrained movement.
+- [ ] `cafe.mp3` - Cups and indistinct low conversation, without music.
+- [ ] `train.mp3` - Steady rail movement and carriage rattle.
+- [ ] `harbor.mp3` - Water against pilings, rigging, and distant dock work.
+- [ ] `temple.mp3` - Spacious stillness and subtle distant movement, no score.
+- [ ] `hospital.mp3` - Restrained ventilation and distant equipment activity.
+
 ## Optional / not stocked
 
 These remain missing. Do not mark complete until a real file is on disk.

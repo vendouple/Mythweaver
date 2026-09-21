@@ -9,6 +9,7 @@ import { createThemeLayer, themeGutter } from "@/components/three/themeLayers";
 export type AtmosphereHandle = {
   /** Fire a one-shot particle surge (embers burst, rain squall, fog roll…). */
   burst: (kind: StageEffectKind, strength: number) => void;
+  clear: () => void;
 };
 
 type MoodRecipe = {
@@ -95,7 +96,8 @@ const StageAtmosphere = forwardRef<AtmosphereHandle, { mood: AmbienceMood; inten
     useImperativeHandle(handle, () => ({
       burst: (kind, strength) => {
         burstRef.current = { kind, strength, at: performance.now() };
-      }
+      },
+      clear: () => { burstRef.current = null; }
     }));
 
     useEffect(() => {

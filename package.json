@@ -8,6 +8,7 @@
     "start": "next start -H 0.0.0.0",
     "tts": "python TTS/main.py",
     "lint": "next lint",
+    "test": "node --require ./tests/register.cjs --test tests/*.test.cjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
