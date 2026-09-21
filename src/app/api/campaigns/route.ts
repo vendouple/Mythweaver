@@ -29,7 +29,7 @@ export async function POST(request: Request) {
     const created = await createCampaign(
       title,
       String(body.startingStory || body.premise || ""),
-      Array.isArray(body.storyCharacters) ? body.storyCharacters : [],
+      Array.isArray(body.castPlan) ? body.castPlan : [],
       randomized,
       length,
       rulesMode,

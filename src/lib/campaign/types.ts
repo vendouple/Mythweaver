@@ -123,6 +123,29 @@ export type StoryCharacter = {
   zoneId?: string;
 };
 
+export type PlannedNpcDisposition = "friendly" | "neutral" | "suspicious" | "hostile" | "conflicted";
+export type PlannedNpcArrival = "opening" | "early" | "middle" | "late";
+
+/**
+ * A private NPC concept prepared during campaign setup. Planned characters do
+ * not enter the player-visible roster or receive a portrait until the DM
+ * introduces them through an npcUpdate.
+ */
+export type PlannedNpc = {
+  id: string;
+  name: string;
+  biography: string;
+  traits: string[];
+  motive: string;
+  disposition: PlannedNpcDisposition;
+  role: string;
+  arrival: PlannedNpcArrival;
+  introductionTrigger: string;
+  appearance: string;
+  introduced?: boolean;
+  introducedAt?: string;
+};
+
 export type SuggestedAction = {
   title: string;
   prompt: string;
@@ -453,6 +476,8 @@ export type Campaign = {
   players: Player[];
   startingStory: string;
   storyCharacters: StoryCharacter[];
+  /** Server-private setup plan, persisted outside campaign.json. */
+  castPlan?: PlannedNpc[];
   currentScene: string;
   overview: string;
   displayEvents: DisplayEvent[];

@@ -78,38 +78,31 @@ const CAMPAIGN_TOOL = {
   }
 };
 
-const NPCS_TOOL = {
-  name: "compose_npcs",
-  description: "Return the suggested cast of NPCs for the campaign.",
+const CAST_PLAN_TOOL = {
+  name: "compose_cast_plan",
+  description: "Return a private, paced cast plan for the campaign.",
   parameters: {
     type: "object",
-    required: ["npcs"],
+    required: ["cast"],
     properties: {
-      npcs: {
+      cast: {
         type: "array",
         items: {
           type: "object",
-          required: ["name", "description", "status"],
+          required: ["name", "biography", "traits", "motive", "disposition", "role", "arrival", "introductionTrigger", "appearance"],
           properties: {
             name: { type: "string" },
-            description: { type: "string", description: "Who they are, their role/backstory, and how they relate to the campaign." },
-            status: { type: "string", enum: ["Starting NPC", "Future NPC"] }
+            biography: { type: "string", description: "Who they are, their relevant history, and their place in the setting." },
+            traits: { type: "array", items: { type: "string" }, description: "Distinct personality traits, quirks, flaws, and mannerisms." },
+            motive: { type: "string", description: "What this character currently wants." },
+            disposition: { type: "string", enum: ["friendly", "neutral", "suspicious", "hostile", "conflicted"] },
+            role: { type: "string", description: "Concise story role such as ally, rival, enemy, contact, authority, or wildcard." },
+            arrival: { type: "string", enum: ["opening", "early", "middle", "late"] },
+            introductionTrigger: { type: "string", description: "A flexible fictional situation that could bring this character into play, never a fixed turn number." },
+            appearance: { type: "string", description: "Visible physical details reserved for portrait generation when the character appears." }
           }
         }
       }
-    }
-  }
-};
-
-const NPC_TOOL = {
-  name: "compose_npc",
-  description: "Return a single NPC's name and description.",
-  parameters: {
-    type: "object",
-    required: ["name", "description"],
-    properties: {
-      name: { type: "string" },
-      description: { type: "string", description: "A compelling description/backstory (1-2 paragraphs)." }
     }
   }
 };
@@ -194,80 +187,33 @@ export async function POST(request: Request) {
       serverLog("API generate", `Successfully generated/improved campaign title: "${result.title}"`);
       return NextResponse.json({ result });
 
-    } else if (type === "suggest_npcs") {
-      serverLog("API generate", `Suggesting NPCs for campaign backstory (${rulesMode} rules): "${(prompt || "").slice(0, 80)}..."`);
-      const systemInstruction = isFullRules
-        ? `You are a professional Dungeons & Dragons adventure designer. Based on the following starting campaign background, suggest 3 to 5 interesting NPCs that fit the theme, setting, and plot. Some should be "Starting NPC" (present in the opening scene) and others should be "Future NPC" (to be met later in the adventure).
-Campaign Backstory: "${prompt || ""}"
+    } else if (type === "plan_cast") {
+      const length = ["short", "medium", "long", "infinite"].includes(String(body.campaignLength || ""))
+        ? String(body.campaignLength)
+        : "auto";
+      const sizeGuide = length === "short" ? "3 to 4" : length === "long" ? "6 to 8" : length === "infinite" ? "4 to 6 for the first arc" : "4 to 6";
+      serverLog("API generate", `Planning private NPC cast (${rulesMode} rules, ${length} length): "${(prompt || "").slice(0, 80)}..."`);
+      const systemInstruction = `You are a professional ${isDndCampaign ? "Dungeons & Dragons" : "tabletop RPG"} adventure designer. Build a PRIVATE cast plan for the campaign below. ${npcGenreGuard}
+Campaign title: "${seedTitle || "Untitled Adventure"}"
+Campaign premise: "${prompt || ""}"
+Campaign length: ${length}
 
-Provide an 'npcs' array. Each NPC should have:
-- 'name': a creative name
-- 'description': a short description of who they are, their role/backstory, and how they relate to the campaign
-- 'status': either "Starting NPC" or "Future NPC"
+Create ${sizeGuide} distinct recurring or consequential NPCs across the planned arc. Include a useful mix of allies, enemies, neutral figures, rivals, contacts, authorities, and wildcards as the premise needs. At least one should suit the opening, but not every NPC should appear immediately.
+${prompt ? "" : "The premise is intentionally sealed. Invent a coherent implied setting and conflict through this cast so the opening can grow around them without exposing it during setup."}
 
-Include a distinct voice, motive, and visible physical appearance.`
-        : `You are a professional tabletop RPG adventure designer. Based on the following starting campaign background, suggest 3 to 5 interesting NPCs that fit the theme, setting, genre, era, and plot. Some should be "Starting NPC" (present in the opening scene) and others should be "Future NPC" (to be met later in the adventure). ${npcGenreGuard} Give each NPC a distinct motive, manner of speaking, role, and visible physical appearance for their portrait.
-Campaign Backstory: "${prompt || ""}"
-
-Provide an 'npcs' array. Each NPC should have:
-- 'name': a creative name
-- 'description': a short description of who they are, their role/backstory, and how they relate to the campaign
-- 'status': either "Starting NPC" or "Future NPC"
-
-Avoid interchangeable personalities or roles.`;
+For each character provide name, biography, traits, current motive, initial disposition, story role, broad arrival window, a flexible fictional introduction trigger, and visible physical appearance. Disposition is only an initial attitude and can change through play. Arrival is guidance, not a railroad: never use fixed turn numbers, and allow player choices to delay, advance, transform, or prevent an appearance. Do not reveal hidden identities, allegiances, betrayals, or future events in visible dialogue before they are earned.`;
 
       const result = await callStructured(
         systemInstruction,
-        `Suggest NPCs for this ${isDndCampaign ? "D&D" : "tabletop RPG"} campaign.`,
-        NPCS_TOOL
+        `Plan the private NPC cast for this ${isDndCampaign ? "D&D" : "tabletop RPG"} campaign.`,
+        CAST_PLAN_TOOL
       );
-      if (!result || !Array.isArray(result.npcs)) {
-        serverError("API generate", "AI did not return a valid NPC suggestions array.");
-        throw new Error("AI did not return a valid NPC suggestions array");
+      if (!result || !Array.isArray(result.cast)) {
+        serverError("API generate", "AI did not return a valid cast plan.");
+        throw new Error("AI did not return a valid cast plan");
       }
 
-      serverLog("API generate", `Successfully suggested ${result.npcs.length} NPCs`);
-      return NextResponse.json({ result });
-
-    } else if (type === "npc") {
-      const startStory = body.startingStory || "";
-      const npcName = body.name || "";
-      let systemInstruction = "";
-      let userPrompt = "";
-
-      if (!prompt || !prompt.trim()) {
-        systemInstruction = isFullRules
-          ? `You are a professional Dungeons & Dragons writer. Based on the following campaign backstory, write a creative name and a compelling description/backstory (1-2 paragraphs) for a D&D NPC.
-Campaign Backstory: "${startStory}"
-
-Provide name and description, including a distinct voice, motive, and visible physical appearance.`
-          : `You are a professional tabletop RPG writer. Based on the following campaign backstory, write a creative name and a compelling description/backstory (1-2 paragraphs) for a new NPC. ${npcGenreGuard} Include a distinct motive, manner of speaking, and visible physical appearance for their portrait.
-Campaign Backstory: "${startStory}"
-
-Provide name and description.`;
-        userPrompt = "Generate a new NPC name and description.";
-        serverLog("API generate", `Generating new NPC name and description (${rulesMode} rules)`);
-      } else {
-        systemInstruction = isFullRules
-          ? `You are a professional Dungeons & Dragons writer. Based on the following campaign backstory, improve the NPC backstory draft to make it more detailed, atmospheric, and immersive. Suggest a fitting name if none is provided or if the current one can be improved.
-Campaign Backstory: "${startStory}"
-
-Provide name and description, including a distinct voice, motive, and visible physical appearance.`
-          : `You are a professional tabletop RPG writer. Based on the following campaign backstory, improve the NPC backstory draft to make it more detailed, atmospheric, and immersive. ${npcGenreGuard} Include a distinct motive, manner of speaking, and visible physical appearance for their portrait. Suggest a fitting name if none is provided or if the current one can be improved.
-Campaign Backstory: "${startStory}"
-
-Provide name and description.`;
-        userPrompt = `NPC name draft: "${npcName}"\nNPC description draft: "${prompt}"`;
-        serverLog("API generate", `Improving NPC description draft for name: "${npcName || "Unnamed NPC"}" (${rulesMode} rules)`);
-      }
-
-      const result = await callStructured(systemInstruction, userPrompt, NPC_TOOL);
-      if (!result || !result.name || !result.description) {
-        serverError("API generate", "AI did not return a valid NPC structure.");
-        throw new Error("AI did not return a valid NPC JSON structure");
-      }
-
-      serverLog("API generate", `Successfully generated/improved NPC name: "${result.name}"`);
+      serverLog("API generate", `Successfully planned ${result.cast.length} NPCs`);
       return NextResponse.json({ result });
 
     } else if (type === "character") {

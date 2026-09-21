@@ -107,17 +107,87 @@ test("DM rejects empty and premature narration, then preserves separate effects 
   assert.equal(campaign.narrationFailure, undefined);
 });
 
-test("rules-light D&D cast generation does not receive the non-D&D guard", async (t) => {
+test("rules-light D&D cast planning is private, paced, and does not receive the non-D&D guard", async (t) => {
   t.mock.method(client, "aquaFetch", async (_path, init) => {
     const request = JSON.parse(init.body);
     const prompt = request.messages[0].content;
     assert.match(prompt, /This is a Dungeons & Dragons campaign/);
     assert.doesNotMatch(prompt, /not D&D|Return the response as a JSON object/);
-    assert.match(prompt, /call compose_npcs exactly once/);
-    return { message: { tool_calls: [{ function: { arguments: JSON.stringify({ npcs: [{ name: "Mara", description: "An elven archivist", status: "Starting NPC" }] }) } }] } };
+    assert.match(prompt, /call compose_cast_plan exactly once/);
+    assert.match(prompt, /PRIVATE cast plan/);
+    assert.match(prompt, /flexible fictional introduction trigger/);
+    return { message: { tool_calls: [{ function: { arguments: JSON.stringify({ cast: [{ name: "Mara", biography: "An elven archivist", traits: ["watchful"], motive: "Protect the archive", disposition: "suspicious", role: "contact", arrival: "early", introductionTrigger: "The party seeks a forbidden record", appearance: "Silver spectacles and ink-stained gloves" }] }) } }] } };
   });
   const { POST } = require("../src/app/api/generate/route.ts");
-  const response = await POST(new Request("http://localhost/api/generate", { method: "POST", body: JSON.stringify({ type: "suggest_npcs", campaignType: "dnd", rulesMode: "casual", prompt: "An elven library" }) }));
+  const response = await POST(new Request("http://localhost/api/generate", { method: "POST", body: JSON.stringify({ type: "plan_cast", campaignType: "dnd", rulesMode: "casual", campaignLength: "medium", prompt: "An elven library" }) }));
   assert.equal(response.status, 200);
-  assert.equal((await response.json()).result.npcs[0].name, "Mara");
+  assert.equal((await response.json()).result.cast[0].name, "Mara");
+});
+
+test("planned NPCs stay private until one idempotent promotion", () => {
+  const campaign = campaignFixture();
+  campaign.castPlan = [{
+    id: "planned-mara",
+    name: "Mara",
+    biography: "The archive's guarded keeper.",
+    traits: ["watchful"],
+    motive: "Protect the archive",
+    disposition: "suspicious",
+    role: "contact",
+    arrival: "early",
+    introductionTrigger: "The party seeks a forbidden record",
+    appearance: "Silver spectacles and ink-stained gloves"
+  }];
+
+  assert.equal(campaign.storyCharacters.length, 0);
+  const promoted = store.resolveOrPromoteNpc(campaign, { plannedNpcId: "planned-mara", name: "Mara" }, "room");
+  assert.equal(promoted.id, "planned-mara");
+  assert.match(promoted.description, /ink-stained gloves/);
+  assert.doesNotMatch(promoted.description, /archive's guarded keeper|Protect the archive/);
+  assert.equal(promoted.status, "Present");
+  assert.equal(campaign.castPlan[0].introduced, true);
+  assert.equal(campaign.storyCharacters.length, 1);
+
+  const sameNpc = store.resolveOrPromoteNpc(campaign, { plannedNpcId: "planned-mara", name: "Mara" }, "room");
+  assert.equal(sameNpc, promoted);
+  assert.equal(campaign.storyCharacters.length, 1);
+});
+
+test("cast plans normalize invalid model values to safe defaults", () => {
+  const normalized = store.normalizeCastPlan([{
+    name: "Mara",
+    biography: "Archivist",
+    traits: [" watchful ", ""],
+    disposition: "unknown",
+    arrival: "turn 8"
+  }]);
+  assert.equal(normalized.length, 1);
+  assert.equal(normalized[0].disposition, "neutral");
+  assert.equal(normalized[0].arrival, "early");
+  assert.deepEqual(normalized[0].traits, ["watchful"]);
+});
+
+test("private cast plans persist without serializing into campaign responses", async (t) => {
+  const plan = [{
+    id: "planned-secret",
+    name: "Secret",
+    biography: "Hidden biography",
+    traits: ["quiet"],
+    motive: "Wait",
+    disposition: "neutral",
+    role: "wildcard",
+    arrival: "late",
+    introductionTrigger: "The last door opens",
+    appearance: "A mirrored mask"
+  }];
+  const campaign = await store.createCampaign("Private Cast Test", "A sealed premise", plan);
+  t.after(() => store.deleteCampaign(campaign.id));
+
+  assert.equal(JSON.stringify(campaign).includes("Hidden biography"), false);
+  const loaded = await store.getCampaign(campaign.id);
+  assert.equal(loaded.castPlan[0].id, "planned-secret");
+  assert.equal(JSON.stringify(loaded).includes("planned-secret"), false);
+  await assert.rejects(store.readCampaignTextFile(campaign.id, "cast-plan.json"), /Private campaign file/);
+  await assert.rejects(store.readCampaignTextFile(campaign.id, ".//cast-plan.json"), /Private campaign file/);
+  await assert.rejects(store.writeCampaignTextFile(campaign.id, ".\\cast-plan.json", "[]"), /Private campaign file/);
 });

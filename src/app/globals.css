@@ -807,6 +807,28 @@ button:focus-visible, a:focus-visible, select:focus-visible {
 .npc-fields { display: flex; flex-direction: column; }
 .npc-row-top { display: flex; gap: 0.5rem; align-items: center; }
 .npc-row-top .field { flex: 1; min-width: 0; margin: 0; }
+.cast-privacy-grid { margin-top: 1rem; }
+.cast-weaving { margin: 0.8rem 0 0; color: var(--gold-bright); text-align: center; font-style: italic; }
+.spoiler-confirm {
+  border: 1px solid rgba(201, 163, 92, 0.45);
+  border-radius: 12px;
+  padding: 1rem 1.1rem;
+  background: rgba(201, 163, 92, 0.08);
+}
+.spoiler-confirm strong { color: var(--parchment); }
+.spoiler-confirm p { color: var(--mist); line-height: 1.5; }
+.sealed-cast-state { display: flex; gap: 0.9rem; align-items: flex-start; border: 1px dashed rgba(123, 108, 255, 0.45); border-radius: 12px; padding: 1rem 1.1rem; margin: 0.5rem 0 1rem; background: rgba(123, 108, 255, 0.08); }
+.sealed-cast-state .surprise-rune { color: var(--arcane); font-size: 1.5rem; }
+.sealed-cast-state strong { color: var(--parchment); }
+.sealed-cast-state p { color: var(--mist); line-height: 1.5; margin: 0.25rem 0 0; }
+.cast-plan-list { max-height: min(58vh, 660px); overflow-y: auto; padding-right: 0.3rem; }
+.cast-plan-card { display: flex; flex-direction: column; gap: 0.7rem; }
+.cast-plan-card .npc-row-top .field:first-child { flex: 1.4; }
+.cast-plan-card select.field { flex: 0.75; }
+.cast-plan-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.6rem; }
+.cast-plan-grid label { display: flex; flex-direction: column; gap: 0.25rem; color: var(--gold); font-size: 0.68rem; letter-spacing: 0.13em; text-transform: uppercase; }
+.cast-plan-grid label.wide { grid-column: 1 / -1; }
+.cast-plan-grid .field { margin: 0; color: var(--parchment); font-size: 0.88rem; letter-spacing: normal; text-transform: none; }
 
 .summons-review { display: flex; flex-direction: column; gap: 0.65rem; margin: 0.6rem 0 0.4rem; }
 .summons-line {
@@ -2863,6 +2885,8 @@ button:focus-visible, a:focus-visible, select:focus-visible {
   .npc-row-top { flex-wrap: wrap; }
   .npc-row-top .field { flex-basis: 100%; }
   .npc-row-top .archive-delete { margin-left: auto; }
+  .cast-plan-grid { grid-template-columns: minmax(0, 1fr); }
+  .cast-plan-grid label.wide { grid-column: auto; }
   .summons-line { flex-wrap: wrap; gap: 0.25rem; }
   .summons-line span { flex-basis: 100%; }
 }

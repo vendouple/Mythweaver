@@ -1,5 +1,5 @@
 import { buildCampaignContext } from "@/lib/campaign/context";
-import { getCampaign, getCampaignLock, saveCampaign, downloadAndSaveImage, logCampaignDebug, logCampaignEvent, scrubLogText, safePushDisplayEvent, isValidImageUrl, startCampaignDraft, finishCampaignDraft, reconcilePresence, normalizeBeatEffect, ensureLocations, getFocusedLocation, persistFocusedLocation, applyFocus, type CampaignLogCategory } from "@/lib/campaign/store";
+import { getCampaign, getCampaignLock, saveCampaign, downloadAndSaveImage, logCampaignDebug, logCampaignEvent, scrubLogText, safePushDisplayEvent, isValidImageUrl, startCampaignDraft, finishCampaignDraft, reconcilePresence, normalizeBeatEffect, ensureLocations, getFocusedLocation, persistFocusedLocation, applyFocus, resolveOrPromoteNpc, type CampaignLogCategory } from "@/lib/campaign/store";
 import { createId } from "@/lib/utils/ids";
 import { aquaConfig, aquaFetch, fastModelTarget, resolveChatTarget, DEFAULT_CHAT_TARGET_ID, AquaFetchOptions, AquaMessage, AquaToolCall, AquaToolDefinition } from "./client";
 import { runTool, toolDefinitions, applyNpcGroupFields, applyConditionFields, isNpcPortraitPending } from "@/lib/tools/registry";
@@ -162,6 +162,7 @@ Continuity & assets:
 - Seed every foe with HP via npcUpdates the moment it enters the scene, so the TV shows an enemy HP bar and hits have something to subtract.
 - Group handling: a NAMED or role foe (leader, lieutenant, champion — anyone who speaks or matters) is ALWAYS its own npcUpdates entry with its own HP. Only faceless rank-and-file (e.g. "Iron Warrens Thugs") are pooled into ONE entry with isGroup:true, count (how many stand), and maxCount. Decrement count as they drop; don't flood the UI with a card per mook.
 - Reuse the SAME NPC entry (its id, or its exact existing name) across turns — do not re-introduce an already-tracked character under a new descriptive title (e.g. giving "Mara" a fuller name like "Mara — The Drowned Light" later) or you'll spawn a duplicate card. If a character's title genuinely evolves, use renameFrom to relabel the EXISTING entry rather than creating a new one.
+- The PRIVATE CAST PLAN is hidden guidance, not established public knowledge. Never mention an unintroduced planned character, motive, role, trigger, or future event in narration, dialogue, playerActions, partyActions, or quest_log.md. Introduce a planned character only when the fiction earns it: include their exact plannedNpcId and name in npcUpdates. Their initial disposition may change through play, and their suggested arrival can move or be skipped. Once promoted into the visible roster, queue their portrait; never request a portrait for an unintroduced plan entry.
 
 Story planning (keep a private outline in storyline.md — never shown to players):
 - On the opening turn, write storyline.md via write_campaign_file: a high-level arc with the number of chapters (scale to the Campaign Length setting — short 2-3, medium 4-6, long 7+; infinite = open-ended arcs), a one-line beat per chapter, the intended ENDING, and a 'Current: Chapter 1' marker.
@@ -367,6 +368,7 @@ const narrateTurnTool: AquaToolDefinition = {
             required: ["name"],
             properties: {
               id: { type: "string" },
+              plannedNpcId: { type: "string", description: "When introducing a character from the private cast plan, pass its exact plan id to promote it into the visible roster." },
               renameFrom: { type: "string" },
               name: { type: "string" },
               description: { type: "string" },
@@ -964,9 +966,7 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
 
       if (Array.isArray(parsedJson.npcUpdates)) {
         for (const update of parsedJson.npcUpdates) {
-          let char = latestCampaign.storyCharacters.find((c) => c.id === String(update.id || "")) ||
-                     (update.renameFrom && latestCampaign.storyCharacters.find((c) => c.name.trim().toLowerCase() === String(update.renameFrom).trim().toLowerCase())) ||
-                     latestCampaign.storyCharacters.find((c) => c.name.trim().toLowerCase() === String(update.name || "").trim().toLowerCase());
+          let char = resolveOrPromoteNpc(latestCampaign, update, getFocusedLocation(latestCampaign).id);
           if (char) {
             if (typeof update.name === "string") char.name = update.name;
             if (typeof update.description === "string") char.description = update.description;
@@ -2243,7 +2243,8 @@ async function aiPickTheme(campaign: Campaign): Promise<MusicTheme | null> {
     `Premise: ${campaign.startingStory || campaign.memory || ""}`,
     `Overview: ${campaign.overview || ""}`,
     `Current scene: ${campaign.currentScene || ""}`,
-    ...(campaign.storyCharacters || []).map((npc) => `NPC: ${npc.name} — ${npc.description}`)
+    ...(campaign.storyCharacters || []).map((npc) => `Introduced NPC: ${npc.name} — ${npc.description}`),
+    ...(campaign.castPlan || []).map((npc) => `Private planned NPC: ${npc.name} — ${npc.biography}; role=${npc.role}; appearance=${npc.appearance}`)
   ].join("\n");
 
   const messages: AquaMessage[] = [

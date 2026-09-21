@@ -56,7 +56,8 @@ export function buildCampaignContext(campaign: Campaign) {
       ? `ENDING (campaign completed): kind=${campaign.ending.kind}; title="${campaign.ending.title}"; summary="${campaign.ending.summary}"`
       : `Ending: not yet — call end_campaign when the saga reaches a decisive win/loss/bittersweet/escape/draw/cliffhanger (early endings allowed).`,
     `Starting background story: ${campaign.startingStory || "None provided"}`,
-    `Story characters from setup: ${JSON.stringify(campaign.storyCharacters)}`,
+    `Introduced story characters visible to the party: ${JSON.stringify(campaign.storyCharacters)}`,
+    `PRIVATE CAST PLAN (DM-only; never reveal an unintroduced name, biography, motive, role, arrival, trigger, or existence in narration, dialogue, choices, quest_log.md, or other player-facing output): ${JSON.stringify(campaign.castPlan || [])}`,
     `Player-controlled characters that you must not speak or decide for: ${JSON.stringify(playerState.map((player) => player.characterName || player.name))}`,
     `Players (include stats/HP): ${JSON.stringify(playerState)}`,
     `Current scene: ${campaign.currentScene}`,

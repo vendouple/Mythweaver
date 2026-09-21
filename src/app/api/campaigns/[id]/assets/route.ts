@@ -13,12 +13,15 @@ export async function GET(request: Request, { params }: { params: { id: string }
     }
 
     const cleanPath = filePath.replace(/\\/g, "/").replace(/^\/+/, "");
-    if (cleanPath.includes("..") || path.isAbsolute(cleanPath)) {
+    const isImageAsset = /^(?:backgrounds\/[a-zA-Z0-9_.-]+|(?:players|npcs)\/[a-zA-Z0-9_-]+\/[a-zA-Z0-9_.-]+)\.(?:png|jpe?g|gif|webp)$/i.test(cleanPath);
+    if (cleanPath.includes("..") || path.isAbsolute(cleanPath) || !isImageAsset) {
       return NextResponse.json({ error: "Unsafe path" }, { status: 400 });
     }
 
     const dataRoot = path.join(process.cwd(), "data", "campaigns");
-    const campaignDir = path.join(dataRoot, params.id.replace(/[^a-zA-Z0-9_-]/g, ""));
+    const safeId = params.id.replace(/[^a-zA-Z0-9_-]/g, "");
+    if (!safeId) return NextResponse.json({ error: "Invalid campaign id" }, { status: 400 });
+    const campaignDir = path.join(dataRoot, safeId);
     const fullPath = path.join(campaignDir, cleanPath);
 
     if (!fullPath.startsWith(campaignDir)) {

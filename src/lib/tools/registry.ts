@@ -1,4 +1,4 @@
-﻿import { getCampaign, getCampaignLock, readCampaignTextFile, saveCampaign, writeCampaignTextFile, downloadAndSaveImage, logCampaignDebug, logCampaignEvent, safePushDisplayEvent, isValidImageUrl, pushStageSfx, endCampaign, ensureLocations, getFocusedLocation, applyFocus } from "@/lib/campaign/store";
+﻿import { getCampaign, getCampaignLock, readCampaignTextFile, saveCampaign, writeCampaignTextFile, downloadAndSaveImage, logCampaignDebug, logCampaignEvent, safePushDisplayEvent, isValidImageUrl, pushStageSfx, endCampaign, ensureLocations, getFocusedLocation, applyFocus, resolveOrPromoteNpc } from "@/lib/campaign/store";
 import { createId } from "@/lib/utils/ids";
 import { generateImage } from "@/lib/aqua/images";
 import { normalizeActions } from "@/lib/aqua/turnPayload";
@@ -181,6 +181,7 @@ export const toolDefinitions: AquaToolDefinition[] = [
               required: ["name"],
               properties: {
                 id: { type: "string" },
+                plannedNpcId: { type: "string", description: "When introducing a character from the private cast plan, pass its exact plan id to promote it into the visible roster." },
                 renameFrom: { type: "string" },
                 name: { type: "string" },
                 description: { type: "string" },
@@ -598,20 +599,8 @@ function queueImageGeneration(campaignId: string, args: Record<string, unknown>)
             return;
           }
 
-          let npc = campaign.storyCharacters.find((character) => character.name.toLowerCase() === npcName.toLowerCase());
-          if (!npc) {
-            ensureLocations(campaign);
-            npc = {
-              id: createId("character"),
-              name: npcName,
-              description: "",
-              locationId: getFocusedLocation(campaign).id,
-              inventory: [],
-              abilities: [],
-              stats: []
-            };
-            campaign.storyCharacters.push(npc);
-          }
+          const npc = campaign.storyCharacters.find((character) => character.name.toLowerCase() === npcName.toLowerCase());
+          if (!npc) throw new Error(`No introduced NPC '${npcName}'. Add them with npcUpdates before requesting a portrait.`);
           const localUrl = await downloadAndSaveImage(campaignId, image.url, "npcs", npc.id);
           npc.portraitUrl = localUrl;
           if (!campaign.portraits) campaign.portraits = [];
@@ -1074,11 +1063,7 @@ export async function runTool(campaignId: string, name: string, args: Record<str
       }
       if (Array.isArray(args.npcUpdates)) {
         for (const update of args.npcUpdates as Array<Record<string, any>>) {
-          let char =
-            campaign.storyCharacters.find((c) => c.id === String(update.id || "")) ||
-            (update.renameFrom &&
-              campaign.storyCharacters.find((c) => c.name.trim().toLowerCase() === String(update.renameFrom).trim().toLowerCase())) ||
-            campaign.storyCharacters.find((c) => c.name.trim().toLowerCase() === String(update.name || "").trim().toLowerCase());
+          let char = resolveOrPromoteNpc(campaign, update, focusedLocation.id);
           if (char) {
             if (typeof update.name === "string") char.name = update.name;
             if (typeof update.description === "string") char.description = update.description;
@@ -1135,6 +1120,11 @@ export async function runTool(campaignId: string, name: string, args: Record<str
         const campaign = await getCampaign(campaignId);
         const player = campaign.players.find((p) => p.id === playerId || (p.characterName || p.name).toLowerCase() === playerId.toLowerCase());
         if (!player) return { error: `No player '${playerId}'. Use an existing player id.` };
+      }
+      if (npcName) {
+        const campaign = await getCampaign(campaignId);
+        const npc = campaign.storyCharacters.find((character) => character.name.toLowerCase() === npcName.toLowerCase());
+        if (!npc) return { error: `No introduced NPC '${npcName}'. Add them with npcUpdates before requesting a portrait.` };
       }
       const outcome = queueImageGeneration(campaignId, { ...args, kind, playerId, npcName });
       if (outcome.deduplicated) {

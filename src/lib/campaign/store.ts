@@ -14,6 +14,9 @@ import {
   EndingKind,
   Location,
   PendingAction,
+  PlannedNpc,
+  PlannedNpcArrival,
+  PlannedNpcDisposition,
   Player,
   RollMode,
   SceneObject,
@@ -160,7 +163,7 @@ const locks: Map<string, Mutex> = ((globalThis as any).locks ??= new Map<string,
 const activeDrafts: Map<string, Campaign> = ((globalThis as any).activeDrafts ??= new Map<string, Campaign>());
 
 export function startCampaignDraft(campaignId: string, campaign: Campaign) {
-  activeDrafts.set(campaignId, JSON.parse(JSON.stringify(campaign)));
+  activeDrafts.set(campaignId, cloneCampaignWithPrivateState(campaign));
 }
 
 export function getCampaignDraft(campaignId: string): Campaign | undefined {
@@ -193,15 +196,36 @@ function environmentFile(id: string) {
   return path.join(campaignDir(id), "environment.json");
 }
 
+function castPlanFile(id: string) {
+  return path.join(campaignDir(id), "cast-plan.json");
+}
+
+function setPrivateCastPlan(campaign: Campaign, castPlan: PlannedNpc[]) {
+  Object.defineProperty(campaign, "castPlan", {
+    value: castPlan,
+    writable: true,
+    configurable: true,
+    enumerable: false
+  });
+}
+
+function cloneCampaignWithPrivateState(campaign: Campaign): Campaign {
+  const clone = JSON.parse(JSON.stringify(campaign)) as Campaign;
+  setPrivateCastPlan(clone, JSON.parse(JSON.stringify(campaign.castPlan || [])) as PlannedNpc[]);
+  return clone;
+}
+
 function safeSegment(value: string) {
   return value.replace(/[^a-zA-Z0-9_-]/g, "");
 }
 
 export function safeCampaignRelativePath(filePath: string) {
-  const clean = filePath.replace(/\\/g, "/").replace(/^\/+/, "");
-  if (!clean || clean.includes("..") || path.isAbsolute(clean)) {
+  const candidate = filePath.replace(/\\/g, "/").replace(/^\/+/, "");
+  if (!candidate || candidate.split("/").includes("..") || path.win32.isAbsolute(candidate)) {
     throw new Error("Unsafe campaign file path");
   }
+  const clean = path.posix.normalize(candidate).replace(/^(\.\/)+/, "");
+  if (!clean || clean === ".") throw new Error("Unsafe campaign file path");
   return clean;
 }
 
@@ -248,7 +272,7 @@ export async function listCampaigns(): Promise<CampaignSummary[]> {
 export async function createCampaign(
   title: string,
   startingStory: string,
-  storyCharacters: Array<{ name: string; description: string; status?: string }> | string[],
+  castPlan?: PlannedNpc[],
   isRandomized?: boolean,
   campaignLength?: string,
   rulesMode?: "casual" | "full",
@@ -259,18 +283,6 @@ export async function createCampaign(
   await ensureDataRoot();
   const now = new Date().toISOString();
   const cleanStory = startingStory.trim();
-
-  const normalizedStoryCharacters = (storyCharacters || []).map((char) => {
-    if (typeof char === "string") {
-      return { id: createId("character"), name: char.trim(), description: "", status: "Starting NPC" };
-    }
-    return {
-      id: createId("character"),
-      name: (char.name || "NPC").trim(),
-      description: (char.description || "").trim(),
-      status: char.status || "Starting NPC"
-    };
-  }).filter((c) => c.name);
 
   const validDifficulty: Difficulty[] = ["easy", "medium", "hard", "insane"];
   const validRollMode: RollMode[] = ["light", "standard", "heavy", "all"];
@@ -289,7 +301,7 @@ export async function createCampaign(
     hostStartedAt: now,
     players: [],
     startingStory: cleanStory,
-    storyCharacters: normalizedStoryCharacters,
+    storyCharacters: [],
     rulesMode: rulesMode || "casual",
     difficulty: resolvedDifficulty,
     rollMode: resolvedRollMode,
@@ -332,6 +344,8 @@ export async function createCampaign(
     updatedAt: now
   };
 
+  setPrivateCastPlan(campaign, normalizeCastPlan(castPlan));
+
   // D&D is always fantasy. Non-D&D campaigns leave the theme unset here and
   // let the DM AI pick the score before the lobby opens (see chooseCampaignTheme).
   campaign.musicTheme = campaignType === "dnd" ? "fantasy" : undefined;
@@ -354,7 +368,7 @@ export async function createCampaign(
 export async function getCampaign(id: string): Promise<Campaign> {
   const draft = activeDrafts.get(id);
   if (draft) {
-    return JSON.parse(JSON.stringify(draft)) as Campaign;
+    return cloneCampaignWithPrivateState(draft);
   }
   const raw = await readFile(campaignFile(id), "utf8");
   let parsed: Partial<Campaign> & { suggestedActions?: unknown[]; playerActions?: unknown; partyActions?: unknown[]; displayEvents?: unknown[] };
@@ -379,7 +393,14 @@ export async function getCampaign(id: string): Promise<Campaign> {
   } catch {
     // Legacy saves keep environment state in campaign.json and migrate on save.
   }
+  let castPlan: unknown = (parsed as Campaign).castPlan;
+  try {
+    castPlan = JSON.parse(await readFile(castPlanFile(id), "utf8"));
+  } catch {
+    // Older campaigns have no private cast-plan file.
+  }
   const campaign = normalizeCampaign(parsed);
+  setPrivateCastPlan(campaign, normalizeCastPlan(castPlan));
   if (campaign.dmStatus) {
     const updatedAt = Date.parse(campaign.updatedAt || "");
     if (!Number.isFinite(updatedAt) || Date.now() - updatedAt > DM_STATUS_STALE_MS) {
@@ -405,27 +426,28 @@ export async function saveCampaign(campaign: Campaign) {
 
   const draft = activeDrafts.get(campaign.id);
   if (draft) {
-    activeDrafts.set(campaign.id, JSON.parse(JSON.stringify(campaign)));
+    activeDrafts.set(campaign.id, cloneCampaignWithPrivateState(campaign));
     try {
       const raw = await readFile(campaignFile(campaign.id), "utf8");
       const diskCampaign = JSON.parse(raw) as Campaign;
       diskCampaign.dmStatus = campaign.dmStatus;
       diskCampaign.dmPhase = campaign.dmPhase;
       diskCampaign.updatedAt = campaign.updatedAt;
-      await writeCampaignStateFiles(diskCampaign, false);
+      await writeCampaignStateFiles(diskCampaign, false, false);
     } catch (err) {
       await mkdir(campaignDir(campaign.id), { recursive: true });
-      await writeCampaignStateFiles(campaign, false);
+      await writeCampaignStateFiles(campaign, false, false);
     }
     return;
   }
 
   await mkdir(campaignDir(campaign.id), { recursive: true });
-  await writeCampaignStateFiles(campaign, true);
+  await writeCampaignStateFiles(campaign, true, true);
 }
 
-async function writeCampaignStateFiles(campaign: Campaign, writeEnvironment: boolean) {
+async function writeCampaignStateFiles(campaign: Campaign, writeEnvironment: boolean, writeCastPlan: boolean) {
   const campaignState = JSON.parse(JSON.stringify(campaign)) as Campaign;
+  delete campaignState.castPlan;
   delete campaignState.locations;
   delete campaignState.focusedLocationId;
   delete campaignState.activeLocationId;
@@ -438,6 +460,9 @@ async function writeCampaignStateFiles(campaign: Campaign, writeEnvironment: boo
     delete npc.zoneId;
   }
   await writeFile(campaignFile(campaign.id), JSON.stringify(campaignState, null, 2), "utf8");
+  if (writeCastPlan) {
+    await writeFile(castPlanFile(campaign.id), JSON.stringify(campaign.castPlan || [], null, 2), "utf8");
+  }
   if (!writeEnvironment) return;
   const environment = {
     version: 1,
@@ -906,6 +931,79 @@ function normalizeStoryCharacter(char: any): StoryCharacter {
   };
 }
 
+const PLANNED_NPC_DISPOSITIONS: PlannedNpcDisposition[] = ["friendly", "neutral", "suspicious", "hostile", "conflicted"];
+const PLANNED_NPC_ARRIVALS: PlannedNpcArrival[] = ["opening", "early", "middle", "late"];
+
+export function normalizeCastPlan(value: unknown): PlannedNpc[] {
+  if (!Array.isArray(value)) return [];
+  const text = (input: unknown, max: number) => String(input || "").trim().slice(0, max);
+  return value.map((entry: any) => {
+    const disposition = String(entry?.disposition || "neutral").toLowerCase() as PlannedNpcDisposition;
+    const arrival = String(entry?.arrival || "early").toLowerCase() as PlannedNpcArrival;
+    const requestedId = text(entry?.id, 160);
+    return {
+      id: /^[a-zA-Z0-9_-]+$/.test(requestedId) ? requestedId : createId("planned-npc"),
+      name: text(entry?.name || "Stranger", 100) || "Stranger",
+      biography: text(entry?.biography || entry?.description, 1_500),
+      traits: Array.isArray(entry?.traits) ? entry.traits.map((trait: unknown) => text(trait, 120)).filter(Boolean).slice(0, 8) : [],
+      motive: text(entry?.motive, 600),
+      disposition: PLANNED_NPC_DISPOSITIONS.includes(disposition) ? disposition : "neutral",
+      role: text(entry?.role || "wildcard", 100) || "wildcard",
+      arrival: PLANNED_NPC_ARRIVALS.includes(arrival) ? arrival : "early",
+      introductionTrigger: text(entry?.introductionTrigger, 600),
+      appearance: text(entry?.appearance, 600),
+      introduced: entry?.introduced === true || undefined,
+      introducedAt: typeof entry?.introducedAt === "string" ? entry.introducedAt : undefined
+    };
+  }).slice(0, 16);
+}
+
+/**
+ * Resolve a public NPC, or promote a matching private plan entry into the live
+ * roster. The plan metadata remains private so the DM keeps motives and future
+ * intent after the character appears.
+ */
+export function resolveOrPromoteNpc(
+  campaign: Campaign,
+  update: Record<string, any>,
+  fallbackLocationId: string
+): StoryCharacter | undefined {
+  const updateId = String(update.id || update.plannedNpcId || "").trim();
+  const renameFrom = String(update.renameFrom || "").trim().toLowerCase();
+  const updateName = String(update.name || "").trim();
+  const normalizedName = updateName.toLowerCase();
+  const existing =
+    (updateId ? campaign.storyCharacters.find((npc) => npc.id === updateId) : undefined) ||
+    (renameFrom ? campaign.storyCharacters.find((npc) => npc.name.trim().toLowerCase() === renameFrom) : undefined) ||
+    (normalizedName ? campaign.storyCharacters.find((npc) => npc.name.trim().toLowerCase() === normalizedName) : undefined);
+  if (existing) return existing;
+
+  const plannedId = String(update.plannedNpcId || update.id || "").trim();
+  const planned = (campaign.castPlan || []).find((npc) =>
+    !npc.introduced && ((plannedId && npc.id === plannedId) || (normalizedName && npc.name.trim().toLowerCase() === normalizedName))
+  );
+  if (!planned) return undefined;
+
+  planned.introduced = true;
+  planned.introducedAt = new Date().toISOString();
+  const npc: StoryCharacter = {
+    id: planned.id,
+    name: updateName || planned.name,
+    description: typeof update.description === "string" && update.description.trim()
+      ? update.description.trim()
+      : planned.appearance,
+    status: typeof update.status === "string" && update.status.trim() ? update.status : "Present",
+    locationId: typeof update.locationId === "string" && update.locationId.trim()
+      ? update.locationId.trim()
+      : fallbackLocationId,
+    inventory: [],
+    abilities: [],
+    stats: []
+  };
+  campaign.storyCharacters.push(npc);
+  return npc;
+}
+
 function normalizePlayer(player: Partial<Player>, now: string): Player {
   return {
     id: String(player.id || createId("player")),
@@ -1198,6 +1296,7 @@ function normalizePendingActions(raw: any): Record<string, PendingAction> | unde
 
 export async function readCampaignTextFile(campaignId: string, filePath: string) {
   const safePath = safeCampaignRelativePath(filePath);
+  if (safePath.toLowerCase() === "cast-plan.json") throw new Error("Private campaign file");
   const fullPath = path.join(campaignDir(campaignId), safePath);
   const root = campaignDir(campaignId);
   if (!fullPath.startsWith(root)) throw new Error("Unsafe campaign file path");
@@ -1206,6 +1305,7 @@ export async function readCampaignTextFile(campaignId: string, filePath: string)
 
 export async function writeCampaignTextFile(campaignId: string, filePath: string, content: string) {
   const safePath = safeCampaignRelativePath(filePath);
+  if (safePath.toLowerCase() === "cast-plan.json") throw new Error("Private campaign file");
   const fullPath = path.join(campaignDir(campaignId), safePath);
   const root = campaignDir(campaignId);
   if (!fullPath.startsWith(root)) throw new Error("Unsafe campaign file path");

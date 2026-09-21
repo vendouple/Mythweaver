@@ -5,8 +5,20 @@ import { api, Campaign } from "@/lib/client/api";
 import CosmosCanvas from "@/components/three/CosmosCanvas";
 import { createId } from "@/lib/utils/ids";
 
-type Npc = { id: string; name: string; description: string; status: string };
+type PlannedNpc = {
+  id: string;
+  name: string;
+  biography: string;
+  traits: string[];
+  motive: string;
+  disposition: "friendly" | "neutral" | "suspicious" | "hostile" | "conflicted";
+  role: string;
+  arrival: "opening" | "early" | "middle" | "late";
+  introductionTrigger: string;
+  appearance: string;
+};
 type Step = 0 | 1 | 2 | 3;
+type CastVisibility = "sealed" | "revealed";
 
 const LENGTHS: Array<{ value: string; label: string; sub: string }> = [
   { value: "auto", label: "Let Fate Decide", sub: "The Weaver paces the tale" },
@@ -16,11 +28,11 @@ const LENGTHS: Array<{ value: string; label: string; sub: string }> = [
   { value: "infinite", label: "Endless", sub: "It ends when you stop" }
 ];
 
-const STEP_NAMES = ["The Discipline", "The Premise", "The Cast", "The Summons"];
+const STEP_NAMES = ["The Discipline", "The Premise", "The Summons"];
 
 /**
- * Four incantations to raise a table: pick the discipline, write (or let the
- * Oracle write) the premise, assemble the cast, and speak the summons.
+ * Three visible phases raise a table. Private cast planning happens behind the
+ * premise before the host speaks the summons.
  */
 export default function CreateWizard({
   onBack,
@@ -40,9 +52,12 @@ export default function CreateWizard({
   const [surprise, setSurprise] = useState(false);
   const [title, setTitle] = useState("");
   const [story, setStory] = useState("");
-  const [npcs, setNpcs] = useState<Npc[]>([]);
+  const [castPlan, setCastPlan] = useState<PlannedNpc[]>([]);
+  const [castVisibility, setCastVisibility] = useState<CastVisibility | null>(null);
+  const [confirmReveal, setConfirmReveal] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const visibleStep = step === 0 ? 0 : step === 3 ? 2 : 1;
 
   const oracle = async (label: string, task: () => Promise<void>) => {
     setBusy(label);
@@ -72,35 +87,37 @@ export default function CreateWizard({
       setStory(String(result.startingStory || ""));
     });
 
-  const suggestCast = () =>
+  const planCast = (visibility: CastVisibility) =>
     oracle("cast", async () => {
       const { result } = await api.generate({
-        type: "suggest_npcs",
+        type: "plan_cast",
         prompt: story,
+        title,
+        campaignLength,
         campaignType,
         rulesMode
       });
-      const suggested = (result.npcs as Npc[]).map((npc) => ({
-        id: createId("draft-npc"),
+      const planned = (Array.isArray(result.cast) ? result.cast : []).map((npc: Record<string, unknown>) => ({
+        id: createId("planned-npc"),
         name: String(npc.name || "Stranger"),
-        description: String(npc.description || ""),
-        status: npc.status === "Future NPC" ? "Future NPC" : "Starting NPC"
+        biography: String(npc.biography || ""),
+        traits: Array.isArray(npc.traits) ? npc.traits.map(String).filter(Boolean) : [],
+        motive: String(npc.motive || ""),
+        disposition: (["friendly", "neutral", "suspicious", "hostile", "conflicted"].includes(String(npc.disposition))
+          ? String(npc.disposition)
+          : "neutral") as PlannedNpc["disposition"],
+        role: String(npc.role || "wildcard"),
+        arrival: (["opening", "early", "middle", "late"].includes(String(npc.arrival))
+          ? String(npc.arrival)
+          : "early") as PlannedNpc["arrival"],
+        introductionTrigger: String(npc.introductionTrigger || ""),
+        appearance: String(npc.appearance || "")
       }));
-      setNpcs((prev) => [...prev, ...suggested]);
-    });
-
-  const conjureNpc = () =>
-    oracle("npc", async () => {
-      const { result } = await api.generate({
-        type: "npc",
-        startingStory: story,
-        campaignType,
-        rulesMode
-      });
-      setNpcs((prev) => [
-        ...prev,
-        { id: createId("draft-npc"), name: String(result.name || "Stranger"), description: String(result.description || ""), status: "Starting NPC" }
-      ]);
+      if (!planned.length) throw new Error("The Oracle returned an empty cast plan. Try again.");
+      setCastPlan(planned);
+      setCastVisibility(visibility);
+      setConfirmReveal(false);
+      if (visibility === "sealed") setStep(3);
     });
 
   const summon = () =>
@@ -108,7 +125,7 @@ export default function CreateWizard({
       const { campaign } = await api.createCampaign({
         title: surprise ? "" : title,
         startingStory: surprise ? "" : story,
-        storyCharacters: surprise ? [] : npcs.map(({ name, description, status }) => ({ name, description, status })),
+        castPlan,
         isRandomized: surprise,
         campaignLength,
         campaignType,
@@ -125,20 +142,20 @@ export default function CreateWizard({
   const canAdvance =
     step === 0 ? true :
     step === 1 ? (surprise || story.trim().length > 0 || title.trim().length > 0) :
+    step === 2 ? castVisibility !== null && castPlan.length > 0 :
     true;
 
   const next = () => {
-    if (step === 1 && surprise) {
-      setStep(3);
-    } else {
-      setStep((s) => Math.min(3, s + 1) as Step);
+    if (step === 1) {
+      setCastPlan([]);
+      setCastVisibility(null);
+      setConfirmReveal(false);
     }
+    setStep((s) => Math.min(3, s + 1) as Step);
   };
   const back = () => {
     if (step === 0) {
       onBack();
-    } else if (step === 3 && surprise) {
-      setStep(1);
     } else {
       setStep((s) => Math.max(0, s - 1) as Step);
     }
@@ -154,7 +171,7 @@ export default function CreateWizard({
           <button className="ghost-button" aria-label="Back" disabled={busy !== null} onClick={back}>←</button>
           <div className="wizard-steps">
             {STEP_NAMES.map((name, index) => (
-              <span key={name} className={`wizard-step ${index === step ? "current" : index < step ? "done" : ""} ${surprise && index === 2 ? "skipped" : ""}`}>
+              <span key={name} className={`wizard-step ${index === visibleStep ? "current" : index < visibleStep ? "done" : ""}`}>
                 {name}
               </span>
             ))}
@@ -283,50 +300,88 @@ export default function CreateWizard({
 
         {step === 2 ? (
           <section className="wizard-body">
-            <h2 className="panel-title">The cast</h2>
-            <p className="panel-hint">Figures the Weaver will keep in play — allies, villains, and those yet to arrive. Optional but potent.</p>
-            <div className="npc-list">
-              {npcs.map((npc, index) => (
-                <div key={npc.id} className="npc-row">
-                  <div className="npc-fields">
-                    <div className="npc-row-top">
-                      <input
-                        className="field slim"
-                        aria-label={`NPC ${index + 1} name`}
-                        value={npc.name}
-                        onChange={(event) => setNpcs((prev) => prev.map((item, i) => i === index ? { ...item, name: event.target.value } : item))}
-                      />
-                      <button
-                        className={`chip-toggle tiny ${npc.status === "Starting NPC" ? "selected" : ""}`}
-                        aria-pressed={npc.status === "Starting NPC"}
-                        onClick={() => setNpcs((prev) => prev.map((item, i) => i === index ? { ...item, status: item.status === "Starting NPC" ? "Future NPC" : "Starting NPC" } : item))}
-                      >
-                        {npc.status === "Starting NPC" ? "Opens the tale" : "Arrives later"}
-                      </button>
-                      <button className="archive-delete" aria-label={`Remove ${npc.name || `NPC ${index + 1}`}`} onClick={() => setNpcs((prev) => prev.filter((_, i) => i !== index))}>✕</button>
+            <h2 className="panel-title">Behind the curtain</h2>
+            {!castVisibility ? (
+              <>
+                <p className="panel-hint">The Weaver will plan the allies, enemies, and uncertain souls who may cross the party&apos;s path. Choose whether their identities remain hidden.</p>
+                <div className="choice-grid cast-privacy-grid">
+                  <button className="choice-card selected" disabled={busy !== null} onClick={() => planCast("sealed")}>
+                    <span className="choice-title">Keep the cast sealed</span>
+                    <span className="choice-sub">Recommended. The plan stays behind the curtain and characters reveal themselves naturally in play.</span>
+                  </button>
+                  <button className="choice-card" disabled={busy !== null} onClick={() => setConfirmReveal(true)}>
+                    <span className="choice-title">Reveal and edit the cast</span>
+                    <span className="choice-sub">Review biographies, traits, loyalties, and likely arrival points before the campaign begins.</span>
+                  </button>
+                </div>
+                {confirmReveal ? (
+                  <div className="spoiler-confirm" role="alertdialog" aria-labelledby="cast-spoiler-title">
+                    <strong id="cast-spoiler-title">This opens the sealed plan.</strong>
+                    <p>You may see future allies, enemies, hidden motives, and arrivals before the party meets them.</p>
+                    <div className="choice-row">
+                      <button className="primary-button" disabled={busy !== null} onClick={() => planCast("revealed")}>Reveal and generate</button>
+                      <button className="ghost-button" disabled={busy !== null} onClick={() => setConfirmReveal(false)}>Keep it sealed</button>
                     </div>
-                    <textarea
-                      className="field textarea slim"
-                      aria-label={`NPC ${index + 1} description`}
-                      rows={2}
-                      value={npc.description}
-                      onChange={(event) => setNpcs((prev) => prev.map((item, i) => i === index ? { ...item, description: event.target.value } : item))}
-                    />
+                  </div>
+                ) : null}
+                {busy === "cast" ? <p className="cast-weaving">The Weaver is plotting entrances, loyalties, and hidden motives…</p> : null}
+              </>
+            ) : castVisibility === "sealed" ? (
+              <>
+                <div className="sealed-cast-state">
+                  <span className="surprise-rune" aria-hidden>✦</span>
+                  <div>
+                    <strong>The cast is sealed.</strong>
+                    <p>{castPlan.length} figures are waiting behind the curtain. They have no portraits and will enter only when the story calls for them.</p>
                   </div>
                 </div>
-              ))}
-            </div>
-            <div className="choice-row">
-              <button className="oracle-button" disabled={busy !== null || !story.trim()} onClick={suggestCast}>
-                {busy === "cast" ? "Summoning the cast…" : "✦ Suggest a cast"}
-              </button>
-              <button className="ghost-button" disabled={busy !== null} onClick={conjureNpc}>
-                {busy === "npc" ? "Conjuring…" : "+ Conjure one"}
-              </button>
-              <button className="ghost-button" disabled={busy !== null} onClick={() => setNpcs((prev) => [...prev, { id: createId("draft-npc"), name: "", description: "", status: "Starting NPC" }])}>
-                + Write your own
-              </button>
-            </div>
+                <button className="ghost-button" disabled={busy !== null} onClick={() => setConfirmReveal(true)}>Reveal the plan instead</button>
+                {confirmReveal ? (
+                  <div className="spoiler-confirm" role="alertdialog" aria-labelledby="sealed-cast-spoiler-title">
+                    <strong id="sealed-cast-spoiler-title">This cannot restore the surprise.</strong>
+                    <p>You will see future allies, enemies, hidden motives, and likely arrivals.</p>
+                    <div className="choice-row">
+                      <button className="primary-button" onClick={() => { setCastVisibility("revealed"); setConfirmReveal(false); }}>Reveal the cast</button>
+                      <button className="ghost-button" onClick={() => setConfirmReveal(false)}>Leave it sealed</button>
+                    </div>
+                  </div>
+                ) : null}
+              </>
+            ) : castVisibility === "revealed" ? (
+              <>
+                <p className="panel-hint">These are private possibilities, not a fixed script. Change any detail; portraits wait until each character enters the story.</p>
+                <div className="npc-list cast-plan-list">
+                  {castPlan.map((npc, index) => (
+                    <article key={npc.id} className="npc-row cast-plan-card">
+                      <div className="npc-row-top">
+                        <input className="field slim" aria-label={`Planned NPC ${index + 1} name`} value={npc.name} onChange={(event) => setCastPlan((prev) => prev.map((item, i) => i === index ? { ...item, name: event.target.value } : item))} />
+                        <select className="field slim" aria-label={`${npc.name} disposition`} value={npc.disposition} onChange={(event) => setCastPlan((prev) => prev.map((item, i) => i === index ? { ...item, disposition: event.target.value as PlannedNpc["disposition"] } : item))}>
+                          <option value="friendly">Friendly</option>
+                          <option value="neutral">Neutral</option>
+                          <option value="suspicious">Suspicious</option>
+                          <option value="hostile">Hostile</option>
+                          <option value="conflicted">Conflicted</option>
+                        </select>
+                        <select className="field slim" aria-label={`${npc.name} arrival`} value={npc.arrival} onChange={(event) => setCastPlan((prev) => prev.map((item, i) => i === index ? { ...item, arrival: event.target.value as PlannedNpc["arrival"] } : item))}>
+                          <option value="opening">Opening</option>
+                          <option value="early">Early</option>
+                          <option value="middle">Middle</option>
+                          <option value="late">Late</option>
+                        </select>
+                      </div>
+                      <div className="cast-plan-grid">
+                        <label><span>Role</span><input className="field slim" value={npc.role} onChange={(event) => setCastPlan((prev) => prev.map((item, i) => i === index ? { ...item, role: event.target.value } : item))} /></label>
+                        <label><span>Traits</span><input className="field slim" value={npc.traits.join(", ")} onChange={(event) => setCastPlan((prev) => prev.map((item, i) => i === index ? { ...item, traits: event.target.value.split(",").map((trait) => trait.trim()).filter(Boolean) } : item))} /></label>
+                        <label className="wide"><span>Biography</span><textarea className="field textarea slim" rows={3} value={npc.biography} onChange={(event) => setCastPlan((prev) => prev.map((item, i) => i === index ? { ...item, biography: event.target.value } : item))} /></label>
+                        <label className="wide"><span>Motive</span><textarea className="field textarea slim" rows={2} value={npc.motive} onChange={(event) => setCastPlan((prev) => prev.map((item, i) => i === index ? { ...item, motive: event.target.value } : item))} /></label>
+                        <label className="wide"><span>Introduction trigger</span><textarea className="field textarea slim" rows={2} value={npc.introductionTrigger} onChange={(event) => setCastPlan((prev) => prev.map((item, i) => i === index ? { ...item, introductionTrigger: event.target.value } : item))} /></label>
+                        <label className="wide"><span>Appearance</span><textarea className="field textarea slim" rows={2} value={npc.appearance} onChange={(event) => setCastPlan((prev) => prev.map((item, i) => i === index ? { ...item, appearance: event.target.value } : item))} /></label>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </>
+            ) : null}
           </section>
         ) : null}
 
@@ -344,21 +399,26 @@ export default function CreateWizard({
                 <>
                   <div className="summons-line"><span>Title</span><strong>{title.trim() || "The Oracle will name it"}</strong></div>
                   <div className="summons-line"><span>Premise</span><strong>{story.trim() ? `${story.trim().slice(0, 160)}${story.trim().length > 160 ? "…" : ""}` : "Woven from the party's characters"}</strong></div>
-                  <div className="summons-line"><span>Cast</span><strong>{npcs.length ? npcs.map((npc) => npc.name || "Unnamed").join(", ") : "The Weaver's own"}</strong></div>
                 </>
               )}
+              <div className="summons-line"><span>Cast</span><strong>{castVisibility === "revealed" ? `${castPlan.length} planned figures reviewed` : "Sealed — revealed through play"}</strong></div>
             </div>
-            <button className="summon-button" disabled={busy !== null} onClick={summon}>
+            <button className="summon-button" disabled={busy !== null || !castPlan.length} onClick={summon}>
               {busy === "summon" ? "Raising the table…" : "⟡ Raise the Table"}
             </button>
           </section>
         ) : null}
 
-        {step < 3 ? (
+        {step < 3 && step !== 2 ? (
           <footer className="wizard-foot">
             <button className="primary-button" disabled={!canAdvance || busy !== null} onClick={next}>
               Continue →
             </button>
+          </footer>
+        ) : null}
+        {step === 2 && castVisibility !== null ? (
+          <footer className="wizard-foot">
+            <button className="primary-button" disabled={!canAdvance || busy !== null} onClick={next}>Continue →</button>
           </footer>
         ) : null}
       </div>

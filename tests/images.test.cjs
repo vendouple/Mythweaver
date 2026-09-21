@@ -58,6 +58,21 @@ test("portrait tools refuse ambiguous or missing subjects before starting work",
   assert.match((await runTool("unused", "generate_image", { prompt: "Clerk", playerId: "hero", npcName: "Clerk" })).error, /not both/);
 });
 
+test("portrait generation cannot introduce a private planned NPC", async (t) => {
+  const campaign = {
+    id: "private-cast-image-test",
+    players: [],
+    storyCharacters: [],
+    castPlan: [{ id: "planned-clerk", name: "Clerk", biography: "Hidden", traits: [], motive: "Observe", disposition: "neutral", role: "contact", arrival: "early", introductionTrigger: "Later", appearance: "Grey coat" }],
+    portraits: []
+  };
+  t.mock.method(store, "getCampaign", async () => campaign);
+  t.mock.method(store, "logCampaignEvent", async () => {});
+  const result = await runTool(campaign.id, "generate_image", { prompt: "A clerk in a grey coat", npcName: "Clerk" });
+  assert.match(result.error, /No introduced NPC/);
+  assert.equal(campaign.storyCharacters.length, 0);
+});
+
 test("slow NPC jobs stay pending, use square framing, and deduplicate until completion", async (t) => {
   const campaign = { id: "image-test-only", players: [], storyCharacters: [{ id: "clerk", name: "Clerk" }], portraits: [] };
   t.mock.method(store, "getCampaign", async () => campaign);

@@ -164,7 +164,7 @@ export async function POST(request: Request) {
           "2. Call write_campaign_file for quest_log.md with only the first active objective and immediate tasks, and write_campaign_file for storyline.md with your private arc (chapters, intended ending, 'Current: Chapter 1').",
           "3. If no ending/goal exists, decide hidden high-level win/loss conditions in storyline.md but do not put them in quest_log.md.",
           "4. Preserve the generated player profiles. Fill only missing inventory, abilities, status, and stats; do not replace their established identities or gear. Put phone choices in narrate_turn playerActions.",
-          "5. Add starting NPCs in npcUpdates, with distinct motives and visible appearance. Queue square portraits using generate_image kind portrait and npcName; continue without waiting for images. Do not reveal Future NPCs yet.",
+          "5. Read the PRIVATE CAST PLAN. Introduce only opening characters whose triggers fit this scene, using npcUpdates with their exact plannedNpcId and name. This promotes them into the visible roster; unintroduced cast members must remain completely secret. Portraits are generated only after promotion.",
           "6. Call set_ambience for the opening scene's mood" + (campaign.musicTheme ? "." : ", and call set_theme ONCE with the campaign's genre score."),
           "7. END by calling narrate_turn EXACTLY ONCE with the opening story beats, title, currentScene, overview, playerActions, and partyActions. Do not write prose or JSON outside of narrate_turn.",
           campaign.isRandomized ? "Surprise campaign: invent a creative campaign title and pass it as narrate_turn's title." : "",
