@@ -4,7 +4,9 @@ import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import * as THREE from "three";
 import type { AmbienceMood, StageEffectKind } from "@/lib/campaign/types";
 import { themeVisual, ThemeKey } from "@/components/three/themeVisuals";
-import { createThemeLayer, themeGutter } from "@/components/three/themeLayers";
+import { themeGutter } from "@/components/three/themeLayers";
+import { createThemeEnvironment } from "@/components/three/themeEnvironments";
+import { createMusicPulse } from "@/lib/client/musicPulse";
 
 export type AtmosphereHandle = {
   /** Fire a one-shot particle surge (embers burst, rain squall, fog roll…). */
@@ -190,10 +192,12 @@ const StageAtmosphere = forwardRef<AtmosphereHandle, { mood: AmbienceMood; inten
 
       // Beyond the tint, each genre gets motion of its own: a constant wind
       // carried by the theme's dust spec (western sand streams sideways,
-      // fantasy embers rise), plus a signature layer — auroras, warp-lines,
-      // wisps, rain, bokeh, dust, ash — shared with the outro finale.
+      // fantasy embers rise), plus the theme's environment as a light additive
+      // overlay (no opaque skylines — the painted backdrop stays the scene),
+      // synced to the score through the music pulse.
       const themeWind: [number, number] = [visual.dust.flow[0] * 1.6, visual.dust.flow[1] * 1.2];
-      const themeLayer = createThemeLayer(scene, visual, { width: 26, height: 18, z: -5 });
+      const themeLayer = createThemeEnvironment(scene, visual, { width: 26, height: 18, z: -5, full: false });
+      const pulseReader = createMusicPulse();
 
       const applyMoodColors = () => {
         const recipe = MOODS[moodRef.current.mood] || MOODS.calm;
@@ -235,6 +239,7 @@ const StageAtmosphere = forwardRef<AtmosphereHandle, { mood: AmbienceMood; inten
         const { mood: activeMood, intensity: rawIntensity } = moodRef.current;
         const recipe = MOODS[activeMood] || MOODS.calm;
         const level = 0.35 + Math.max(0, Math.min(1, rawIntensity)) * 0.85;
+        const pulse = pulseReader.read(dt, t);
 
         if (activeMood !== lastMood) {
           lastMood = activeMood;
@@ -297,7 +302,13 @@ const StageAtmosphere = forwardRef<AtmosphereHandle, { mood: AmbienceMood; inten
           ray.mesh.rotation.z = -0.3 - index * 0.07 + Math.sin(t * 0.08 + ray.seed) * 0.03;
         });
 
-        themeLayer?.update(t, dt, Math.min(1, 0.35 + level * 0.65) * (0.7 + gutter * 0.3));
+        themeLayer?.update({
+          t,
+          dt,
+          envelope: Math.min(1, 0.35 + level * 0.65) * (0.7 + gutter * 0.3),
+          drive: level,
+          pulse
+        });
 
         const fogBoost = surgeKind === "fog" ? surge * 0.5 : 0;
         fogSheets.forEach((sheet, index) => {

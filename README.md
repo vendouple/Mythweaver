@@ -4,9 +4,11 @@ Couch co-op tabletop RPG: the **TV is the stage**, phones are **player controlle
 
 ## How to run
 
-1. Copy `.env.example` to `.env` (or fill in your existing `.env`) with your model API keys.
+1. Copy `.env.example` to `.env` and fill in **Section 1** (API key, base URL, chat model, image model). Every other section is optional and documented inline — including reasoning effort for the chat and housekeeping models (`CHAT_REASONING_EFFORT`, `FAST_REASONING_EFFORT`).
 2. `npm install`
-3. Optional voice narration (beta): the self-contained `TTS` folder can stay here or be copied to another PC. Copy `TTS/.env.example` to `TTS/.env`, select the device, then double-click `TTS/run_tts.bat`. It creates a virtual environment, installs the CPU/CUDA/ROCm profile you selected, and starts `TTS/main.py`.
+3. Optional voice narration (beta), pick one backend with `TTS_PROVIDER` in `.env`:
+   - `local` (free, self-hosted): the self-contained `TTS` folder can stay here or be copied to another PC. Copy `TTS/.env.example` to `TTS/.env`, select the device, then double-click `TTS/run_tts.bat`. It creates a virtual environment, installs the CPU/CUDA/ROCm profile you selected, and starts `TTS/main.py`.
+   - `api` (paid, nothing to install): set `TTS_API_KEY` (and optionally the model, voice list and style instructions). Any OpenAI-compatible `/audio/speech` endpoint works; the defaults target OpenAI.
 4. `npm run dev`
 5. Open **http://localhost:3000** on the host (TV/PC) and on phones on the same network (use the machine's LAN IP if needed).
 

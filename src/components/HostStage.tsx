@@ -22,7 +22,7 @@ import { ambienceSetScene, ambienceStop, ambienceAccent } from "@/lib/client/amb
 import { playSfx, sfxStop } from "@/lib/client/sfx";
 import { parseInline, plainText, renderInline, renderTokens } from "@/lib/client/markup";
 import { useTtsSpeech } from "@/lib/client/speech";
-import { ttsSidecarHealthy } from "@/lib/client/tts";
+import { ttsServerStatus, ttsSidecarHealthy } from "@/lib/client/tts";
 import { ACCENT_THEMES, applyAccent, currentAccent, initAccent } from "@/lib/client/theme";
 import { expandDisplayEvent } from "@/lib/campaign/beats";
 import StageAtmosphere, { AtmosphereHandle } from "@/components/three/StageAtmosphere";
@@ -31,6 +31,7 @@ import CosmosCanvas from "@/components/three/CosmosCanvas";
 import WorldForge from "@/components/three/WorldForge";
 import OutroTheater from "@/components/three/OutroTheater";
 import { themeVisual, ThemeKey } from "@/components/three/themeVisuals";
+import { useThemeSkin } from "@/lib/client/skin";
 import Weaving from "@/components/Weaving";
 import StageDebugPanel, { type DebugScene, type DebugBeat } from "@/components/StageDebugPanel";
 
@@ -181,6 +182,7 @@ export default function HostStage({
   const [debugSigil, setDebugSigil] = useState(false);
   const [loomProgress, setLoomProgress] = useState(0.15);
   const visual = themeVisual(debugTheme || theme);
+  useThemeSkin(visual.key);
 
   // Exercise the actual intro component, including its complete state and hold.
   useEffect(() => {
@@ -600,6 +602,7 @@ export default function HostStage({
   const [ttsBusy, setTtsBusy] = useState(false);
   const [ttsMsg, setTtsMsg] = useState<string | null>(null);
   const [ttsHealth, setTtsHealth] = useState<"checking" | "online" | "offline">("checking");
+  const [ttsApi, setTtsApi] = useState<{ model?: string } | null>(null);
   const [ttsHostInput, setTtsHostInput] = useState("");
   const [ttsPortInput, setTtsPortInput] = useState("");
   useEffect(() => { setTtsHostInput(campaign.ttsServerHost ?? "127.0.0.1"); }, [campaign.ttsServerHost]);
@@ -674,7 +677,9 @@ export default function HostStage({
       const healthy = await ttsSidecarHealthy(campaign.ttsServerHost, campaign.ttsServerPort);
       setTtsBusy(false);
       if (!healthy) {
-        setTtsMsg("Voice server isn't running — start TTS/run_tts.bat and try again.");
+        setTtsMsg(ttsApi
+          ? "The hosted voice API isn't configured — set TTS_API_KEY in .env and restart."
+          : "Voice server isn't running — start TTS/run_tts.bat and try again.");
         return;
       }
     }
@@ -694,8 +699,10 @@ export default function HostStage({
     let cancelled = false;
     const check = async () => {
       if (!cancelled) setTtsHealth("checking");
-      const online = await ttsSidecarHealthy(campaign.ttsServerHost, campaign.ttsServerPort);
-      if (!cancelled) setTtsHealth(online ? "online" : "offline");
+      const status = await ttsServerStatus(campaign.ttsServerHost, campaign.ttsServerPort);
+      if (cancelled) return;
+      setTtsApi(status.provider === "api" ? { model: status.model } : null);
+      setTtsHealth(status.online ? "online" : "offline");
     };
     void check();
     const interval = window.setInterval(() => { void check(); }, 10_000);
@@ -1373,10 +1380,17 @@ export default function HostStage({
           </div>
 
           <label className="director-label">Table voice <span className="beta-tag">beta</span></label>
+          {ttsApi ? (
+            <p className="panel-hint small">
+              Hosted voice API{ttsApi.model ? ` (${ttsApi.model})` : ""}: <strong>{ttsHealth === "online" ? "ready" : ttsHealth === "offline" ? "not configured" : "checking…"}</strong>.
+            </p>
+          ) : (
           <p className="panel-hint small">
             Voice server: <strong>{ttsHealth === "online" ? "online" : ttsHealth === "offline" ? "offline" : "checking…"}</strong> at {campaign.ttsServerHost ?? "127.0.0.1"}:{campaign.ttsServerPort ?? 5123}.
             {ttsHealth === "offline" ? <> Set the server below, then start TTS/run_tts.bat if needed.</> : null}
           </p>
+          )}
+          {ttsApi ? null : <>
           <div className="portal-voice-fields">
             <input className="field slim" value={ttsHostInput} onChange={(event) => setTtsHostInput(event.target.value)} placeholder="Voice server host" aria-label="Voice server host" />
             <input className="field slim" type="number" min="1" max="65535" value={ttsPortInput} onChange={(event) => setTtsPortInput(event.target.value)} aria-label="Voice server port" />
@@ -1395,6 +1409,7 @@ export default function HostStage({
           >
             Save voice server
           </button>
+          </>}
           <div className="director-toggles">
             <button
               className={`chip-toggle tiny ${campaign.ttsEnabled !== false ? "selected" : ""}`}

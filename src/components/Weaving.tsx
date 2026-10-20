@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import WorldForge from "@/components/three/WorldForge";
 import { themeVisual, ThemeKey } from "@/components/three/themeVisuals";
+import { useThemeSkin } from "@/lib/client/skin";
 
 /**
  * Full-screen interlude between the lobby and the living stage — and it is
@@ -32,6 +33,7 @@ export default function Weaving({
   theme?: ThemeKey | string | null;
 }) {
   const visual = themeVisual(theme);
+  useThemeSkin(visual.key);
   const [joinUrl, setJoinUrl] = useState("");
 
   useEffect(() => {

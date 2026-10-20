@@ -1,0 +1,506 @@
+/* ==========================================================================
+   MYTHWEAVER — campaign skins
+   <html data-skin="…"> (src/lib/client/skin.ts) re-dresses the whole UI for
+   the campaign's world: palette, typefaces, panel frames, button shapes and
+   a full-screen texture. Every rule in globals.css reads the tokens below,
+   so a skin only has to set tokens plus the few frames that are its own.
+
+   Palette blocks are guarded by :not([data-accent]) so a table accent the
+   host picked by hand still wins; type, shape and texture always apply.
+   Palettes mirror src/components/three/themeVisuals.ts.
+   ========================================================================== */
+
+:root {
+  --noise: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 2.2 0 0 0 -1.25'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  --fibers: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='320' height='320'%3E%3Cfilter id='f'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.035' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .55 0 0 0 0 .38 0 0 0 0 .2 .9 0 0 0 -.38'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23f)'/%3E%3C/svg%3E");
+  --title-case: uppercase;
+  --title-track: 0.22em;
+  --label-track: 0.18em;
+}
+
+/* The texture veil: one fixed, click-through layer over everything. */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  pointer-events: none;
+  background: var(--texture, none);
+  background-size: var(--texture-size, auto);
+  mix-blend-mode: var(--texture-blend, normal);
+  opacity: var(--texture-opacity, 0);
+  transition: opacity 0.8s ease;
+}
+
+/* Single-weight display faces must not be smeared into fake bold. */
+:root[data-skin] { font-synthesis-weight: none; }
+
+/* Skin-aware wordmarks. */
+.brand-title,
+.lobby-title,
+.stage-title {
+  text-transform: var(--title-case);
+}
+.brand-title { letter-spacing: var(--title-track); }
+.director-label,
+.panel-subtitle { letter-spacing: var(--label-track); }
+
+/* --------------------------------------------------------------------------
+   Fantasy — Aurora Vale: the illuminated grimoire, gilt and lapis.
+   -------------------------------------------------------------------------- */
+:root[data-skin="fantasy"]:not([data-accent]) {
+  --gold: #e0b25f; --gold-bright: #ffe2a1; --gold-rgb: 224, 178, 95; --gold-bright-rgb: 255, 226, 161;
+  --arcane: #8d7fff; --arcane-rgb: 141, 127, 255;
+  --hairline: rgba(224, 178, 95, 0.3); --hairline-strong: rgba(224, 178, 95, 0.6);
+}
+:root[data-skin="fantasy"] {
+  --ink-rgb: 10, 11, 30; --abyss-rgb: 5, 6, 16; --abyss: #050610;
+  --texture: radial-gradient(ellipse at 50% 50%, transparent 55%, rgba(0, 0, 0, 0.45) 100%);
+  --texture-opacity: 1;
+}
+:root[data-skin="fantasy"] .panel::before,
+:root[data-skin="fantasy"] .panel::after { width: 30px; height: 30px; border-width: 2px 0 0 2px; filter: drop-shadow(0 0 6px rgba(var(--gold-rgb), 0.5)); }
+:root[data-skin="fantasy"] .panel::after { border-width: 0 2px 2px 0; }
+
+/* --------------------------------------------------------------------------
+   Sci-fi — Hyperlane: clean HUD glass, chamfered, scanlined.
+   -------------------------------------------------------------------------- */
+:root[data-skin="scifi"]:not([data-accent]) {
+  --gold: #4fd8ff; --gold-bright: #a8ecff; --gold-rgb: 79, 216, 255; --gold-bright-rgb: 168, 236, 255;
+  --arcane: #ff4fa8; --arcane-rgb: 255, 79, 168;
+  --hairline: rgba(79, 216, 255, 0.28); --hairline-strong: rgba(79, 216, 255, 0.6);
+}
+:root[data-skin="scifi"] {
+  --font-display: var(--ff-orbitron); --font-serif: var(--ff-exo);
+  --parchment: #dcf3ff; --parch-rgb: 220, 243, 255;
+  --ink-rgb: 3, 12, 24; --abyss-rgb: 2, 6, 16; --abyss: #020610;
+  --r-lg: 3px; --r-md: 2px; --r-sm: 2px; --r-pill: 3px;
+  --title-track: 0.3em; --label-track: 0.24em;
+  --texture: repeating-linear-gradient(0deg, rgba(120, 220, 255, 0.06) 0 1px, transparent 1px 3px);
+  --texture-opacity: 1;
+}
+
+/* --------------------------------------------------------------------------
+   Cyberpunk — Neon Grid: hard edges, magenta/cyan split, glitch type.
+   -------------------------------------------------------------------------- */
+:root[data-skin="cyberpunk"]:not([data-accent]) {
+  --gold: #ff2fb9; --gold-bright: #ff9ae0; --gold-rgb: 255, 47, 185; --gold-bright-rgb: 255, 154, 224;
+  --arcane: #2ff5ff; --arcane-rgb: 47, 245, 255;
+  --hairline: rgba(255, 47, 185, 0.32); --hairline-strong: rgba(255, 47, 185, 0.65);
+}
+:root[data-skin="cyberpunk"] {
+  --font-display: var(--ff-audiowide); --font-serif: var(--ff-rajdhani);
+  --parchment: #f6eaff; --parch-rgb: 246, 234, 255;
+  --ink-rgb: 14, 5, 24; --abyss-rgb: 7, 2, 14; --abyss: #07020e;
+  --r-lg: 0; --r-md: 0; --r-sm: 0; --r-pill: 0;
+  --title-track: 0.16em; --label-track: 0.2em;
+  --texture:
+    repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.22) 0 1px, transparent 1px 3px),
+    linear-gradient(90deg, rgba(255, 47, 185, 0.05), transparent 30%, transparent 70%, rgba(47, 245, 255, 0.05));
+  --texture-opacity: 1;
+}
+:root[data-skin="cyberpunk"] .beat-narrator .beat-text,
+:root[data-skin="cyberpunk"] .beat-text { font-weight: 500; font-style: normal; }
+:root[data-skin="cyberpunk"] .brand-title,
+:root[data-skin="cyberpunk"] .stage-title,
+:root[data-skin="cyberpunk"] .lobby-title,
+:root[data-skin="cyberpunk"] .panel-title { text-shadow: -2px 0 rgba(47, 245, 255, 0.55), 2px 0 rgba(255, 47, 185, 0.55); }
+
+/* Shared HUD frame for the three "screen glass" skins. */
+:root[data-skin="scifi"] .panel::before,
+:root[data-skin="scifi"] .panel::after,
+:root[data-skin="cyberpunk"] .panel::before,
+:root[data-skin="cyberpunk"] .panel::after,
+:root[data-skin="modern"] .panel::before,
+:root[data-skin="modern"] .panel::after {
+  width: 18px; height: 18px; border-color: var(--gold-bright); border-radius: 0;
+  filter: drop-shadow(0 0 4px rgba(var(--gold-rgb), 0.8));
+}
+:root[data-skin="scifi"] .panel::before,
+:root[data-skin="cyberpunk"] .panel::before,
+:root[data-skin="modern"] .panel::before { border-width: 2px 0 0 2px; top: -2px; left: -2px; }
+:root[data-skin="scifi"] .panel::after,
+:root[data-skin="cyberpunk"] .panel::after,
+:root[data-skin="modern"] .panel::after { border-width: 0 2px 2px 0; bottom: -2px; right: -2px; }
+:root[data-skin="cyberpunk"] .panel::before { width: 46px; height: 3px; border: 0; background: var(--gold); top: -2px; }
+:root[data-skin="cyberpunk"] .panel::after { width: 46px; height: 3px; border: 0; background: var(--arcane); bottom: -2px; filter: drop-shadow(0 0 4px rgba(var(--arcane-rgb), 0.8)); }
+
+/* Chamfered buttons — focus ring drawn inside so the cut does not hide it. */
+:root[data-skin="scifi"] :is(.primary-button, .summon-button, .portal-card, .oracle-button),
+:root[data-skin="cyberpunk"] :is(.primary-button, .summon-button, .portal-card, .oracle-button),
+:root[data-skin="spaceopera"] :is(.primary-button, .summon-button) {
+  clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px);
+}
+:root[data-skin="scifi"] :is(.primary-button, .summon-button, .portal-card, .oracle-button):focus-visible,
+:root[data-skin="cyberpunk"] :is(.primary-button, .summon-button, .portal-card, .oracle-button):focus-visible,
+:root[data-skin="spaceopera"] :is(.primary-button, .summon-button):focus-visible { outline-offset: -4px; }
+:root[data-skin="scifi"] .primary-button,
+:root[data-skin="cyberpunk"] .primary-button,
+:root[data-skin="modern"] .primary-button { text-transform: uppercase; letter-spacing: 0.16em; }
+:root[data-skin="cyberpunk"] .summon-button { background: linear-gradient(90deg, var(--gold), #b32fff 60%, var(--arcane)); color: #fff; text-shadow: 0 0 8px rgba(0, 0, 0, 0.6); }
+
+/* --------------------------------------------------------------------------
+   Modern — Night Ops: tactical, condensed, a faint ops grid.
+   -------------------------------------------------------------------------- */
+:root[data-skin="modern"]:not([data-accent]) {
+  --gold: #4fe0c4; --gold-bright: #9df2e1; --gold-rgb: 79, 224, 196; --gold-bright-rgb: 157, 242, 225;
+  --arcane: #ff9a3c; --arcane-rgb: 255, 154, 60;
+  --hairline: rgba(79, 224, 196, 0.26); --hairline-strong: rgba(79, 224, 196, 0.55);
+}
+:root[data-skin="modern"] {
+  --font-display: var(--ff-oswald); --font-serif: var(--font-ui);
+  --parchment: #e4f2ee; --parch-rgb: 228, 242, 238;
+  --ink-rgb: 6, 14, 16; --abyss-rgb: 3, 8, 9; --abyss: #030809;
+  --r-lg: 3px; --r-md: 2px; --r-sm: 2px; --r-pill: 2px;
+  --title-track: 0.28em; --label-track: 0.26em;
+  --texture:
+    linear-gradient(rgba(79, 224, 196, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(79, 224, 196, 0.035) 1px, transparent 1px);
+  --texture-size: 48px 48px;
+  --texture-opacity: 1;
+}
+:root[data-skin="modern"] .beat-text { font-style: normal; }
+
+/* --------------------------------------------------------------------------
+   Horror — The Hollow: rotten candlelight, uneven edges, heavy vignette.
+   -------------------------------------------------------------------------- */
+:root[data-skin="horror"]:not([data-accent]) {
+  --gold: #9fb86a; --gold-bright: #c9dd8f; --gold-rgb: 159, 184, 106; --gold-bright-rgb: 201, 221, 143;
+  --arcane: #b3202a; --arcane-rgb: 179, 32, 42;
+  --hairline: rgba(159, 184, 106, 0.24); --hairline-strong: rgba(159, 184, 106, 0.5);
+}
+:root[data-skin="horror"] {
+  --font-display: var(--ff-fell-sc); --font-serif: var(--ff-fell);
+  --parchment: #dcd8c4; --parch-rgb: 220, 216, 196;
+  --ink-rgb: 7, 8, 5; --abyss-rgb: 3, 4, 2; --abyss: #030402;
+  --r-lg: 3px 11px 4px 13px; --r-md: 2px 7px 3px 6px; --r-sm: 2px 5px 2px 4px; --r-pill: 4px 9px 5px 10px;
+  --title-track: 0.12em; --title-case: none;
+  --texture:
+    radial-gradient(ellipse at 50% 45%, transparent 35%, rgba(0, 0, 0, 0.72) 100%),
+    var(--noise);
+  --texture-blend: normal;
+  --texture-opacity: 0.6;
+}
+:root[data-skin="horror"] .panel { box-shadow: var(--shadow), inset 0 0 50px rgba(0, 0, 0, 0.75); }
+:root[data-skin="horror"] .panel::before,
+:root[data-skin="horror"] .panel::after { display: none; }
+:root[data-skin="horror"] .brand-title,
+:root[data-skin="horror"] .stage-title { animation: horror-gutter 7s steps(1) infinite; }
+@keyframes horror-gutter {
+  0%, 100% { opacity: 1; }
+  41% { opacity: 0.55; }
+  42% { opacity: 1; }
+  43% { opacity: 0.7; }
+  44% { opacity: 1; }
+}
+
+/* --------------------------------------------------------------------------
+   Gothic — cathedral: lancet-arched panels, blackletter, wine and silver.
+   -------------------------------------------------------------------------- */
+:root[data-skin="gothic"]:not([data-accent]) {
+  --gold: #c43a54; --gold-bright: #f0a0b0; --gold-rgb: 196, 58, 84; --gold-bright-rgb: 240, 160, 176;
+  --arcane: #9aa8c4; --arcane-rgb: 154, 168, 196;
+  --hairline: rgba(196, 58, 84, 0.3); --hairline-strong: rgba(196, 58, 84, 0.6);
+}
+:root[data-skin="gothic"] {
+  --font-display: var(--ff-grenze);
+  --parchment: #ecdfe4; --parch-rgb: 236, 223, 228;
+  --ink-rgb: 14, 7, 13; --abyss-rgb: 6, 3, 7; --abyss: #060307;
+  --r-lg: 26px 26px 4px 4px; --r-md: 12px 12px 3px 3px; --r-sm: 8px 8px 2px 2px;
+  --title-case: none; --title-track: 0.08em;
+  --texture: radial-gradient(ellipse at 50% 40%, transparent 40%, rgba(0, 0, 0, 0.6) 100%), var(--noise);
+  --texture-opacity: 0.45;
+}
+:root[data-skin="gothic"] .panel::before {
+  content: "✠"; width: auto; height: auto; border: 0; left: 50%; top: -0.75rem; transform: translateX(-50%);
+  color: var(--gold-bright); font-size: 1.1rem; line-height: 1; text-shadow: 0 0 10px rgba(var(--gold-rgb), 0.8);
+}
+:root[data-skin="gothic"] .panel::after { display: none; }
+:root[data-skin="gothic"] .panel { box-shadow: var(--shadow), inset 0 0 0 4px rgba(var(--ink-rgb), 0.9), inset 0 0 0 5px rgba(var(--arcane-rgb), 0.18); }
+
+/* --------------------------------------------------------------------------
+   Noir — Rain City: art-deco double rules, typewriter prose, film grain.
+   -------------------------------------------------------------------------- */
+:root[data-skin="noir"]:not([data-accent]) {
+  --gold: #d9c69a; --gold-bright: #f2e3bb; --gold-rgb: 217, 198, 154; --gold-bright-rgb: 242, 227, 187;
+  --arcane: #7d93a8; --arcane-rgb: 125, 147, 168;
+  --hairline: rgba(217, 198, 154, 0.24); --hairline-strong: rgba(217, 198, 154, 0.5);
+}
+:root[data-skin="noir"] {
+  --font-display: var(--ff-limelight); --font-serif: var(--ff-typewriter);
+  --parchment: #e8e5dc; --parch-rgb: 232, 229, 220;
+  --ink-rgb: 10, 10, 12; --abyss-rgb: 4, 4, 6; --abyss: #040406;
+  --r-lg: 0; --r-md: 0; --r-sm: 0; --r-pill: 0;
+  --title-track: 0.26em;
+  --texture: var(--noise), radial-gradient(ellipse at 50% 40%, transparent 45%, rgba(0, 0, 0, 0.55) 100%);
+  --texture-opacity: 0.4;
+}
+:root[data-skin="noir"] .beat-text { font-style: normal; font-size: 0.94em; }
+
+/* Double-rule frames: noir (deco), western (wanted poster), spaceopera (trim),
+   pulp (serial poster). */
+:root[data-skin="noir"] .panel,
+:root[data-skin="western"] .panel,
+:root[data-skin="spaceopera"] .panel,
+:root[data-skin="pulp"] .panel {
+  box-shadow: var(--shadow), inset 0 0 0 5px rgba(var(--ink-rgb), 0.95), inset 0 0 0 6px var(--hairline-strong);
+}
+:root[data-skin="noir"] .panel::before,
+:root[data-skin="noir"] .panel::after { width: 14px; height: 14px; border-width: 0; background: linear-gradient(45deg, transparent 45%, var(--gold) 46% 54%, transparent 55%); }
+:root[data-skin="noir"] .panel::before { top: 3px; left: 3px; transform: rotate(90deg); }
+:root[data-skin="noir"] .panel::after { bottom: 3px; right: 3px; transform: rotate(90deg); }
+
+/* --------------------------------------------------------------------------
+   Western — High Noon: wanted-poster paper, slab woodtype, sun-bleached.
+   -------------------------------------------------------------------------- */
+:root[data-skin="western"]:not([data-accent]) {
+  --gold: #ffb35c; --gold-bright: #ffd9a0; --gold-rgb: 255, 179, 92; --gold-bright-rgb: 255, 217, 160;
+  --arcane: #d0603f; --arcane-rgb: 208, 96, 63;
+  --hairline: rgba(255, 179, 92, 0.3); --hairline-strong: rgba(255, 179, 92, 0.58);
+}
+:root[data-skin="western"] {
+  --font-display: var(--ff-rye);
+  --parchment: #f4e4c8; --parch-rgb: 244, 228, 200;
+  --ink-rgb: 26, 14, 7; --abyss-rgb: 12, 6, 3; --abyss: #0c0603;
+  --r-lg: 4px; --r-md: 3px; --r-sm: 3px; --r-pill: 4px;
+  --title-track: 0.12em; --label-track: 0.2em;
+  --texture: var(--fibers), linear-gradient(180deg, rgba(255, 170, 80, 0.05), rgba(120, 50, 10, 0.08));
+  --texture-opacity: 0.2;
+}
+:root[data-skin="western"] .panel::before,
+:root[data-skin="western"] .panel::after {
+  content: "✶"; width: auto; height: auto; border: 0; color: var(--gold); font-size: 0.85rem; line-height: 1; top: 0.55rem; left: 0.6rem;
+}
+:root[data-skin="western"] .panel::after { top: auto; left: auto; bottom: 0.55rem; right: 0.6rem; }
+
+/* --------------------------------------------------------------------------
+   Post-apocalypse — Ashfall: stencil type, hazard tape, grit.
+   -------------------------------------------------------------------------- */
+:root[data-skin="postapoc"]:not([data-accent]) {
+  --gold: #e09440; --gold-bright: #ffc27a; --gold-rgb: 224, 148, 64; --gold-bright-rgb: 255, 194, 122;
+  --arcane: #a8d23c; --arcane-rgb: 168, 210, 60;
+  --hairline: rgba(224, 148, 64, 0.28); --hairline-strong: rgba(224, 148, 64, 0.56);
+}
+:root[data-skin="postapoc"] {
+  --font-display: var(--ff-blackops); --font-serif: var(--ff-typewriter);
+  --parchment: #ebe0cf; --parch-rgb: 235, 224, 207;
+  --ink-rgb: 18, 14, 10; --abyss-rgb: 8, 6, 4; --abyss: #080604;
+  --r-lg: 0; --r-md: 0; --r-sm: 0; --r-pill: 0;
+  --title-track: 0.14em;
+  --texture: var(--noise), radial-gradient(ellipse at 50% 120%, rgba(224, 120, 40, 0.08), transparent 60%);
+  --texture-opacity: 0.45;
+}
+:root[data-skin="postapoc"] .beat-text { font-style: normal; font-size: 0.94em; }
+:root[data-skin="postapoc"] .panel::before {
+  left: 0; right: 0; top: 0; width: auto; height: 5px; border: 0; border-radius: 0; opacity: 0.85;
+  background: repeating-linear-gradient(-45deg, #e8b030 0 9px, #15110b 9px 18px);
+}
+:root[data-skin="postapoc"] .panel::after { display: none; }
+:root[data-skin="postapoc"] .primary-button,
+:root[data-skin="postapoc"] .ghost-button { border-width: 2px; text-transform: uppercase; letter-spacing: 0.14em; }
+
+/* --------------------------------------------------------------------------
+   Space opera — imperial trim: wide geometric type, gold-on-navy, insignia.
+   -------------------------------------------------------------------------- */
+:root[data-skin="spaceopera"]:not([data-accent]) {
+  --gold: #ffd76a; --gold-bright: #fff2c4; --gold-rgb: 255, 215, 106; --gold-bright-rgb: 255, 242, 196;
+  --arcane: #6a88ff; --arcane-rgb: 106, 136, 255;
+  --hairline: rgba(255, 215, 106, 0.3); --hairline-strong: rgba(255, 215, 106, 0.6);
+}
+:root[data-skin="spaceopera"] {
+  --font-display: var(--ff-michroma); --font-serif: var(--ff-exo);
+  --parchment: #eef0ff; --parch-rgb: 238, 240, 255;
+  --ink-rgb: 7, 9, 28; --abyss-rgb: 3, 4, 14; --abyss: #03040e;
+  --r-lg: 6px; --r-md: 4px; --r-sm: 3px; --r-pill: 4px;
+  --title-track: 0.34em; --label-track: 0.26em;
+  --texture: radial-gradient(ellipse at 50% 50%, transparent 50%, rgba(0, 0, 20, 0.5) 100%);
+  --texture-opacity: 1;
+}
+:root[data-skin="spaceopera"] .panel::before {
+  content: "◆"; width: auto; height: auto; border: 0; left: 50%; top: -0.55rem; transform: translateX(-50%);
+  color: var(--gold); font-size: 0.8rem; line-height: 1; text-shadow: 0 0 8px rgba(var(--gold-rgb), 0.9);
+}
+:root[data-skin="spaceopera"] .panel::after { display: none; }
+:root[data-skin="spaceopera"] .brand-title { font-weight: 400; font-size: clamp(2rem, 5.4vw, 4rem); }
+
+/* --------------------------------------------------------------------------
+   Urban fantasy — ley-lit glass: violet sigils glowing in the corners.
+   -------------------------------------------------------------------------- */
+:root[data-skin="urbanfantasy"]:not([data-accent]) {
+  --gold: #a86cff; --gold-bright: #d9bcff; --gold-rgb: 168, 108, 255; --gold-bright-rgb: 217, 188, 255;
+  --arcane: #ffb04f; --arcane-rgb: 255, 176, 79;
+  --hairline: rgba(168, 108, 255, 0.3); --hairline-strong: rgba(168, 108, 255, 0.6);
+}
+:root[data-skin="urbanfantasy"] {
+  --font-display: var(--ff-marcellus);
+  --parchment: #ece6ff; --parch-rgb: 236, 230, 255;
+  --ink-rgb: 11, 7, 22; --abyss-rgb: 5, 3, 11; --abyss: #05030b;
+  --r-lg: 12px; --r-md: 8px; --r-sm: 6px;
+  --title-track: 0.18em;
+  --texture: radial-gradient(ellipse at 20% 100%, rgba(168, 108, 255, 0.08), transparent 50%), radial-gradient(ellipse at 90% 0%, rgba(255, 176, 79, 0.05), transparent 45%);
+  --texture-opacity: 1;
+}
+:root[data-skin="urbanfantasy"] .panel { box-shadow: var(--shadow), 0 0 28px rgba(var(--gold-rgb), 0.14), inset 0 0 22px rgba(var(--gold-rgb), 0.07); }
+:root[data-skin="urbanfantasy"] .panel::before,
+:root[data-skin="urbanfantasy"] .panel::after {
+  content: "✧"; width: auto; height: auto; border: 0; color: var(--gold-bright); font-size: 0.95rem; line-height: 1;
+  top: -0.55rem; left: -0.4rem; text-shadow: 0 0 10px var(--gold);
+}
+:root[data-skin="urbanfantasy"] .panel::after { content: "✦"; color: var(--arcane); top: auto; left: auto; bottom: -0.55rem; right: -0.4rem; text-shadow: 0 0 10px var(--arcane); }
+
+/* --------------------------------------------------------------------------
+   Steampunk — brass plate: riveted frames, engraved small caps.
+   -------------------------------------------------------------------------- */
+:root[data-skin="steampunk"]:not([data-accent]) {
+  --gold: #d9a04a; --gold-bright: #ffdca0; --gold-rgb: 217, 160, 74; --gold-bright-rgb: 255, 220, 160;
+  --arcane: #4fb8a8; --arcane-rgb: 79, 184, 168;
+  --hairline: rgba(217, 160, 74, 0.32); --hairline-strong: rgba(217, 160, 74, 0.62);
+}
+:root[data-skin="steampunk"] {
+  --font-display: var(--ff-playfair-sc);
+  --parchment: #f2e2c4; --parch-rgb: 242, 226, 196;
+  --ink-rgb: 22, 13, 7; --abyss-rgb: 10, 6, 3; --abyss: #0a0603;
+  --r-lg: 6px; --r-md: 4px; --r-sm: 3px; --r-pill: 5px;
+  --title-track: 0.16em;
+  --texture: var(--fibers), radial-gradient(ellipse at 50% 50%, transparent 50%, rgba(30, 15, 0, 0.45) 100%);
+  --texture-opacity: 0.18;
+}
+:root[data-skin="steampunk"] .panel {
+  border-width: 2px;
+  box-shadow: var(--shadow), inset 0 0 0 3px rgba(var(--ink-rgb), 0.9), inset 0 0 0 4px rgba(var(--gold-rgb), 0.35);
+}
+:root[data-skin="steampunk"] .panel::before {
+  inset: 7px; width: auto; height: auto; border: 0; border-radius: 0;
+  background:
+    radial-gradient(circle, var(--gold-bright) 0 1.5px, var(--gold) 2px, rgba(0, 0, 0, 0.6) 3px, transparent 3.5px) top left / 9px 9px no-repeat,
+    radial-gradient(circle, var(--gold-bright) 0 1.5px, var(--gold) 2px, rgba(0, 0, 0, 0.6) 3px, transparent 3.5px) top right / 9px 9px no-repeat,
+    radial-gradient(circle, var(--gold-bright) 0 1.5px, var(--gold) 2px, rgba(0, 0, 0, 0.6) 3px, transparent 3.5px) bottom left / 9px 9px no-repeat,
+    radial-gradient(circle, var(--gold-bright) 0 1.5px, var(--gold) 2px, rgba(0, 0, 0, 0.6) 3px, transparent 3.5px) bottom right / 9px 9px no-repeat;
+}
+:root[data-skin="steampunk"] .panel::after { display: none; }
+:root[data-skin="steampunk"] .primary-button,
+:root[data-skin="steampunk"] .summon-button { background: linear-gradient(180deg, #ffe2a8, #c98d3c 55%, #7a4d1a); color: #2a1606; border: 1px solid #5a3610; text-shadow: 0 1px 0 rgba(255, 235, 190, 0.6); }
+
+/* --------------------------------------------------------------------------
+   Pirate — charts and rope: blackletter-lite, sea-green ink, rope inlay.
+   -------------------------------------------------------------------------- */
+:root[data-skin="pirate"]:not([data-accent]) {
+  --gold: #f2c15c; --gold-bright: #ffe8a8; --gold-rgb: 242, 193, 92; --gold-bright-rgb: 255, 232, 168;
+  --arcane: #2fb0bc; --arcane-rgb: 47, 176, 188;
+  --hairline: rgba(242, 193, 92, 0.3); --hairline-strong: rgba(242, 193, 92, 0.58);
+}
+:root[data-skin="pirate"] {
+  --font-display: var(--ff-pirata); --font-serif: var(--ff-fell);
+  --parchment: #f0e2c0; --parch-rgb: 240, 226, 192;
+  --ink-rgb: 5, 16, 20; --abyss-rgb: 2, 8, 10; --abyss: #02080a;
+  --r-lg: 6px; --r-md: 4px; --r-sm: 3px; --r-pill: 6px;
+  --title-case: none; --title-track: 0.08em;
+  --texture: var(--fibers), radial-gradient(ellipse at 50% 50%, transparent 50%, rgba(0, 20, 25, 0.45) 100%);
+  --texture-opacity: 0.16;
+}
+:root[data-skin="pirate"] .panel { outline: 1px dashed rgba(var(--gold-rgb), 0.35); outline-offset: -7px; }
+:root[data-skin="pirate"] .panel::before {
+  content: "✥"; width: auto; height: auto; border: 0; top: 0.5rem; right: 0.65rem; left: auto;
+  color: var(--gold); opacity: 0.6; font-size: 1rem; line-height: 1;
+}
+:root[data-skin="pirate"] .panel::after { display: none; }
+
+/* --------------------------------------------------------------------------
+   East Asian — lacquer and scroll: vermilion rods, brush serif, rice paper.
+   -------------------------------------------------------------------------- */
+:root[data-skin="eastasian"]:not([data-accent]) {
+  --gold: #e8563c; --gold-bright: #ffab8f; --gold-rgb: 232, 86, 60; --gold-bright-rgb: 255, 171, 143;
+  --arcane: #4fc99a; --arcane-rgb: 79, 201, 154;
+  --hairline: rgba(232, 86, 60, 0.3); --hairline-strong: rgba(232, 86, 60, 0.6);
+}
+:root[data-skin="eastasian"] {
+  --font-display: var(--ff-zen); --font-serif: var(--ff-mincho);
+  --parchment: #f5ebd9; --parch-rgb: 245, 235, 217;
+  --ink-rgb: 16, 8, 8; --abyss-rgb: 7, 3, 3; --abyss: #070303;
+  --r-lg: 2px; --r-md: 2px; --r-sm: 2px; --r-pill: 2px;
+  --title-track: 0.3em;
+  --texture: var(--fibers);
+  --texture-opacity: 0.12;
+}
+:root[data-skin="eastasian"] .beat-text { font-style: normal; }
+:root[data-skin="eastasian"] .panel::before,
+:root[data-skin="eastasian"] .panel::after {
+  left: -6px; right: -6px; width: auto; height: 5px; border: 0; border-radius: 3px;
+  background: linear-gradient(180deg, #ff7a5c, #a8281a); box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+}
+:root[data-skin="eastasian"] .panel::before { top: -3px; }
+:root[data-skin="eastasian"] .panel::after { bottom: -3px; top: auto; }
+
+/* --------------------------------------------------------------------------
+   Superhero — comic panel: ink outlines, hard drop shadows, halftone.
+   -------------------------------------------------------------------------- */
+:root[data-skin="superhero"]:not([data-accent]) {
+  --gold: #ff4f3c; --gold-bright: #ffd23c; --gold-rgb: 255, 79, 60; --gold-bright-rgb: 255, 210, 60;
+  --arcane: #2f9cff; --arcane-rgb: 47, 156, 255;
+  --hairline: rgba(255, 79, 60, 0.4); --hairline-strong: rgba(255, 210, 60, 0.75);
+}
+:root[data-skin="superhero"] {
+  --font-display: var(--ff-bangers); --font-serif: var(--ff-comic);
+  --parchment: #fffaf0; --parch-rgb: 255, 250, 240;
+  --ink-rgb: 10, 14, 34; --abyss-rgb: 4, 6, 16; --abyss: #040610;
+  --r-lg: 4px; --r-md: 3px; --r-sm: 3px; --r-pill: 4px;
+  --title-track: 0.08em; --label-track: 0.12em;
+  --texture: radial-gradient(circle, rgba(255, 255, 255, 0.07) 1px, transparent 1.4px);
+  --texture-size: 7px 7px;
+  --texture-opacity: 1;
+}
+:root[data-skin="superhero"] .panel { border: 3px solid #05060c; box-shadow: 7px 7px 0 rgba(0, 0, 0, 0.85), 0 0 0 1px var(--hairline-strong); }
+:root[data-skin="superhero"] .panel::before,
+:root[data-skin="superhero"] .panel::after { display: none; }
+:root[data-skin="superhero"] .beat-text { font-style: normal; font-weight: 700; }
+:root[data-skin="superhero"] :is(.primary-button, .summon-button) {
+  background: var(--gold-bright); color: #0a0a12; border: 3px solid #05060c; box-shadow: 4px 4px 0 #05060c;
+  font-family: var(--font-display), sans-serif; font-size: 1.15rem; letter-spacing: 0.08em;
+}
+:root[data-skin="superhero"] :is(.primary-button, .summon-button):hover:not(:disabled) { transform: translate(-2px, -2px); box-shadow: 6px 6px 0 #05060c; }
+:root[data-skin="superhero"] .portal-card { border: 3px solid #05060c; box-shadow: 6px 6px 0 rgba(0, 0, 0, 0.85); }
+:root[data-skin="superhero"] .brand-title { -webkit-text-stroke: 2px #05060c; filter: drop-shadow(5px 5px 0 #05060c); letter-spacing: 0.08em; }
+
+/* --------------------------------------------------------------------------
+   Pulp — 1930s serial: slab poster type, typewriter captions, aged paper.
+   -------------------------------------------------------------------------- */
+:root[data-skin="pulp"]:not([data-accent]) {
+  --gold: #e8a33c; --gold-bright: #ffd48f; --gold-rgb: 232, 163, 60; --gold-bright-rgb: 255, 212, 143;
+  --arcane: #6aa85a; --arcane-rgb: 106, 168, 90;
+  --hairline: rgba(232, 163, 60, 0.3); --hairline-strong: rgba(232, 163, 60, 0.58);
+}
+:root[data-skin="pulp"] {
+  --font-display: var(--ff-alfa); --font-serif: var(--ff-typewriter);
+  --parchment: #f6e7c6; --parch-rgb: 246, 231, 198;
+  --ink-rgb: 24, 14, 6; --abyss-rgb: 11, 6, 2; --abyss: #0b0602;
+  --r-lg: 3px; --r-md: 2px; --r-sm: 2px; --r-pill: 3px;
+  --title-track: 0.1em;
+  --texture: var(--fibers), radial-gradient(circle, rgba(255, 220, 160, 0.05) 1px, transparent 1.5px) 0 0 / 5px 5px;
+  --texture-opacity: 0.2;
+}
+:root[data-skin="pulp"] .beat-text { font-style: normal; font-size: 0.94em; }
+:root[data-skin="pulp"] .panel::before,
+:root[data-skin="pulp"] .panel::after { display: none; }
+
+/* --------------------------------------------------------------------------
+   Cozy — hearthside: round friendly type, soft cushions, stitched seams.
+   -------------------------------------------------------------------------- */
+:root[data-skin="cozy"]:not([data-accent]) {
+  --gold: #f2b46a; --gold-bright: #ffe0b8; --gold-rgb: 242, 180, 106; --gold-bright-rgb: 255, 224, 184;
+  --arcane: #8fcf8a; --arcane-rgb: 143, 207, 138;
+  --hairline: rgba(242, 180, 106, 0.3); --hairline-strong: rgba(242, 180, 106, 0.58);
+}
+:root[data-skin="cozy"] {
+  --font-display: var(--ff-fredoka); --font-serif: var(--ff-nunito);
+  --parchment: #fff2e2; --parch-rgb: 255, 242, 226;
+  --ink-rgb: 30, 19, 14; --abyss-rgb: 14, 8, 6; --abyss: #0e0806;
+  --r-lg: 22px; --r-md: 16px; --r-sm: 12px;
+  --title-case: none; --title-track: 0.04em; --label-track: 0.12em;
+  --texture: radial-gradient(ellipse at 50% 110%, rgba(255, 170, 90, 0.1), transparent 60%);
+  --texture-opacity: 1;
+}
+:root[data-skin="cozy"] .panel::before {
+  inset: 6px; width: auto; height: auto; border: 1.5px dashed rgba(var(--gold-rgb), 0.3); border-radius: 16px;
+}
+:root[data-skin="cozy"] .panel::after { display: none; }
+:root[data-skin="cozy"] .beat-narrator .beat-text { font-style: normal; }

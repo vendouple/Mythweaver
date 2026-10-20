@@ -47,8 +47,6 @@ export type ThemeVisual = {
   dust: { color: string; size: number; flow: [number, number] };
   /** Three nebula glows, back of the scene. */
   nebulae: [string, string, string];
-  /** Signature full-scene layer, one per theme. */
-  effect: "aurora" | "warp" | "haunt" | "rain" | "bokeh" | "frontier" | "none";
   /** Drifting dice-moon materials. */
   dice: { body: string; roughness: number; metalness: number; opacity: number; edge: string; edgeOpacity: number };
   /** Glyph alphabet worn by the loom's great rings. */
@@ -78,7 +76,6 @@ export const THEME_VISUALS: Record<ThemeKey, ThemeVisual> = {
     ambient: "#2a3350",
     dust: { color: "#c9a35c", size: 0.045, flow: [0, 0] },
     nebulae: ["#7b6cff", "#c9a35c", "#4c8cb4"],
-    effect: "none",
     dice: { body: "#0d1322", roughness: 0.35, metalness: 0.75, opacity: 1, edge: "#c9a35c", edgeOpacity: 0.5 },
     glyphs: "ᚠᚢᚦᚨᚱᚲᚷᚹᚺᚾᛁᛃᛇᛈᛉᛊᛏᛒᛖᛗᛚᛜᛞᛟ",
     glyphFont: "44px serif",
@@ -105,7 +102,6 @@ export const THEME_VISUALS: Record<ThemeKey, ThemeVisual> = {
     ambient: "#2e3252",
     dust: { color: "#ffd98a", size: 0.05, flow: [0, 0.12] },
     nebulae: ["#8d7fff", "#e0b25f", "#4fd8a8"],
-    effect: "aurora",
     dice: { body: "#141126", roughness: 0.3, metalness: 0.8, opacity: 1, edge: "#ffd98a", edgeOpacity: 0.65 },
     glyphs: "ᚠᚢᚦᚨᚱᚲᚷᚹᚺᚾᛁᛃᛇᛈᛉᛊᛏᛒᛖᛗᛚᛜᛞᛟ",
     glyphFont: "44px serif",
@@ -133,7 +129,6 @@ export const THEME_VISUALS: Record<ThemeKey, ThemeVisual> = {
     ambient: "#16324a",
     dust: { color: "#7fe2ff", size: 0.042, flow: [0, 0] },
     nebulae: ["#2450c8", "#ff4fa8", "#4fd8ff"],
-    effect: "warp",
     dice: { body: "#04101c", roughness: 0.15, metalness: 0.4, opacity: 0.22, edge: "#4fd8ff", edgeOpacity: 0.95 },
     glyphs: "0123456789ABCDEF∆◇",
     glyphFont: "40px monospace",
@@ -161,7 +156,6 @@ export const THEME_VISUALS: Record<ThemeKey, ThemeVisual> = {
     ambient: "#1c2418",
     dust: { color: "#8a9a6a", size: 0.04, flow: [0, 0.22] },
     nebulae: ["#3d0f14", "#41501f", "#20262c"],
-    effect: "haunt",
     dice: { body: "#160f0d", roughness: 0.9, metalness: 0.1, opacity: 1, edge: "#9fb86a", edgeOpacity: 0.4 },
     glyphs: "†‡☽☾ΨΦΘΞΔϟζξ",
     glyphFont: "44px serif",
@@ -189,7 +183,6 @@ export const THEME_VISUALS: Record<ThemeKey, ThemeVisual> = {
     ambient: "#242a34",
     dust: { color: "#aebdd6", size: 0.032, flow: [0.05, -0.05] },
     nebulae: ["#2a3542", "#d9c69a", "#141a22"],
-    effect: "rain",
     dice: { body: "#0c0d12", roughness: 0.2, metalness: 0.9, opacity: 1, edge: "#d9c69a", edgeOpacity: 0.42 },
     glyphs: "?!•§¶†×—",
     glyphFont: "42px monospace",
@@ -217,7 +210,6 @@ export const THEME_VISUALS: Record<ThemeKey, ThemeVisual> = {
     ambient: "#183434",
     dust: { color: "#7fe8d4", size: 0.038, flow: [0.08, 0] },
     nebulae: ["#0f3c3c", "#ff9a3c", "#274a6a"],
-    effect: "bokeh",
     dice: { body: "#0a1014", roughness: 0.15, metalness: 0.65, opacity: 1, edge: "#4fe0c4", edgeOpacity: 0.55 },
     glyphs: "0123456789°′″NSEW·",
     glyphFont: "40px monospace",
@@ -244,7 +236,6 @@ export const THEME_VISUALS: Record<ThemeKey, ThemeVisual> = {
     ambient: "#3a2414",
     dust: { color: "#d9a976", size: 0.05, flow: [0.55, 0.04] },
     nebulae: ["#c4573a", "#ffb35c", "#4a2a1a"],
-    effect: "frontier",
     dice: { body: "#170f0a", roughness: 0.6, metalness: 0.4, opacity: 1, edge: "#d9964a", edgeOpacity: 0.55 },
     glyphs: "★✶✦☆♠♦†$",
     glyphFont: "42px serif",
@@ -272,7 +263,6 @@ export const THEME_VISUALS: Record<ThemeKey, ThemeVisual> = {
     ambient: "#2e2a20",
     dust: { color: "#b09a7a", size: 0.055, flow: [0.4, 0.08] },
     nebulae: ["#5a3a1a", "#9fd23c", "#3a3430"],
-    effect: "frontier",
     dice: { body: "#141210", roughness: 0.85, metalness: 0.3, opacity: 1, edge: "#d98a3c", edgeOpacity: 0.5 },
     glyphs: "☢☣▲✚Ø×∅≡",
     glyphFont: "42px monospace",
@@ -301,7 +291,6 @@ export const THEME_VISUALS: Record<ThemeKey, ThemeVisual> = {
     ambient: "#2a1240",
     dust: { color: "#ff6fd0", size: 0.036, flow: [0.06, -0.5] },
     nebulae: ["#7a0fbf", "#2ff5ff", "#ff2fb9"],
-    effect: "rain",
     dice: { body: "#0b0416", roughness: 0.12, metalness: 0.55, opacity: 0.3, edge: "#ff2fb9", edgeOpacity: 0.95 },
     glyphs: "01∎▚▞◤◥╱╲ｱｲｳﬁ",
     glyphFont: "38px monospace",
@@ -330,7 +319,6 @@ export const THEME_VISUALS: Record<ThemeKey, ThemeVisual> = {
     ambient: "#1b2452",
     dust: { color: "#cfd8ff", size: 0.04, flow: [0.02, 0.05] },
     nebulae: ["#3a3ac8", "#ffd76a", "#a03ad0"],
-    effect: "warp",
     dice: { body: "#070b1c", roughness: 0.2, metalness: 0.85, opacity: 1, edge: "#ffd76a", edgeOpacity: 0.7 },
     glyphs: "✦✧★⬡⬢◈❖⟡ΑΩΣΛ",
     glyphFont: "42px serif",
@@ -359,7 +347,6 @@ export const THEME_VISUALS: Record<ThemeKey, ThemeVisual> = {
     ambient: "#241a2c",
     dust: { color: "#c9a8bc", size: 0.042, flow: [0.03, -0.14] },
     nebulae: ["#3e0f22", "#5a4a70", "#b8324a"],
-    effect: "haunt",
     dice: { body: "#12080f", roughness: 0.55, metalness: 0.35, opacity: 1, edge: "#b8324a", edgeOpacity: 0.6 },
     glyphs: "✝♰♱☩⚜❦❧☙⁂†",
     glyphFont: "46px serif",
@@ -388,7 +375,6 @@ export const THEME_VISUALS: Record<ThemeKey, ThemeVisual> = {
     ambient: "#2a2246",
     dust: { color: "#c9a6ff", size: 0.044, flow: [0.05, 0.1] },
     nebulae: ["#5a2ab0", "#ffb04f", "#2a4a8a"],
-    effect: "bokeh",
     dice: { body: "#100b1e", roughness: 0.3, metalness: 0.6, opacity: 1, edge: "#a86cff", edgeOpacity: 0.7 },
     glyphs: "✷✸❋⟠⟁⧉⧗ᛝᛞ☾",
     glyphFont: "42px serif",
@@ -417,7 +403,6 @@ export const THEME_VISUALS: Record<ThemeKey, ThemeVisual> = {
     ambient: "#3a2c1c",
     dust: { color: "#d9bc8a", size: 0.048, flow: [0.16, 0.14] },
     nebulae: ["#7a4a1a", "#4fb8a8", "#4a3520"],
-    effect: "frontier",
     dice: { body: "#1a120a", roughness: 0.4, metalness: 0.95, opacity: 1, edge: "#d9a04a", edgeOpacity: 0.7 },
     glyphs: "⚙⚗⌘✜⊕⊗№℧Ω",
     glyphFont: "42px serif",
@@ -446,7 +431,6 @@ export const THEME_VISUALS: Record<ThemeKey, ThemeVisual> = {
     ambient: "#1a3a42",
     dust: { color: "#a8d8dc", size: 0.046, flow: [0.35, 0.06] },
     nebulae: ["#1a5a68", "#f2c15c", "#0f3040"],
-    effect: "frontier",
     dice: { body: "#0d1418", roughness: 0.5, metalness: 0.55, opacity: 1, edge: "#f2c15c", edgeOpacity: 0.65 },
     glyphs: "☠⚓✠❈✷⊛†×∴",
     glyphFont: "42px serif",
@@ -475,7 +459,6 @@ export const THEME_VISUALS: Record<ThemeKey, ThemeVisual> = {
     ambient: "#22323a",
     dust: { color: "#ffc4c9", size: 0.05, flow: [0.12, 0.06] },
     nebulae: ["#8a1f2a", "#4fc99a", "#2a3a54"],
-    effect: "aurora",
     dice: { body: "#120c0c", roughness: 0.35, metalness: 0.6, opacity: 1, edge: "#e8563c", edgeOpacity: 0.7 },
     glyphs: "道天龍氣心風雷山水火月",
     glyphFont: "40px serif",
@@ -504,7 +487,6 @@ export const THEME_VISUALS: Record<ThemeKey, ThemeVisual> = {
     ambient: "#1f3a5a",
     dust: { color: "#ffe07a", size: 0.05, flow: [0.1, 0.3] },
     nebulae: ["#2f5ad0", "#ffd23c", "#ff4f3c"],
-    effect: "bokeh",
     dice: { body: "#0a1020", roughness: 0.22, metalness: 0.7, opacity: 1, edge: "#ff4f3c", edgeOpacity: 0.8 },
     glyphs: "★✦⚡✷✸◆▲!?※",
     glyphFont: "44px sans-serif",
@@ -533,7 +515,6 @@ export const THEME_VISUALS: Record<ThemeKey, ThemeVisual> = {
     ambient: "#38301c",
     dust: { color: "#d9c08a", size: 0.05, flow: [0.28, 0.1] },
     nebulae: ["#6a4a1a", "#5a9a4f", "#3a2a18"],
-    effect: "frontier",
     dice: { body: "#161008", roughness: 0.55, metalness: 0.45, opacity: 1, edge: "#e8a33c", edgeOpacity: 0.6 },
     glyphs: "✈☀✜✠※◈☼⚒",
     glyphFont: "42px serif",
@@ -562,7 +543,6 @@ export const THEME_VISUALS: Record<ThemeKey, ThemeVisual> = {
     ambient: "#3e3428",
     dust: { color: "#ffd9a8", size: 0.052, flow: [0.03, 0.08] },
     nebulae: ["#8a6a3a", "#8fbf8a", "#5a4a6a"],
-    effect: "bokeh",
     dice: { body: "#1a1410", roughness: 0.7, metalness: 0.15, opacity: 1, edge: "#f2b46a", edgeOpacity: 0.5 },
     glyphs: "❀✿❁☘♡✧⁕✤❃",
     glyphFont: "42px serif",
@@ -588,3 +568,27 @@ export const THEME_KEYS = Object.keys(THEME_VISUALS) as ThemeKey[];
 export function themeVisual(theme: ThemeKey | string | null | undefined): ThemeVisual {
   return THEME_VISUALS[(theme || "none") as ThemeKey] || THEME_VISUALS.none;
 }
+
+/**
+ * The front door's world reel: what each environment is called and the one
+ * line that sells it. The portal cycles through these while it waits.
+ */
+export const THEME_SHOWCASE: Record<Exclude<ThemeKey, "none">, { name: string; genre: string; line: string; glyph: string }> = {
+  fantasy: { name: "Aurora Vale", genre: "High fantasy", line: "Castles under a singing sky, and a road that only goes one way.", glyph: "✦" },
+  scifi: { name: "Hyperlane", genre: "Science fiction", line: "Jump coordinates locked. Nobody aboard remembers who set them.", glyph: "◇" },
+  horror: { name: "The Hollow", genre: "Horror", line: "The trees lean closer every time you look away.", glyph: "☾" },
+  noir: { name: "Rain City", genre: "Noir", line: "Rain on the glass, a body in the alley, and nobody saw a thing.", glyph: "◈" },
+  modern: { name: "Night Ops", genre: "Modern thriller", line: "Radio silence until the lights go out. Then you move.", glyph: "⌖" },
+  western: { name: "High Noon", genre: "Western", line: "Dust, a bounty, and a town that wants you gone by sundown.", glyph: "✶" },
+  postapoc: { name: "Ashfall", genre: "Post-apocalypse", line: "The old world burned. You get to decide what grows back.", glyph: "☢" },
+  cyberpunk: { name: "Neon Grid", genre: "Cyberpunk", line: "The city sings in bass. Every chrome limb is on credit.", glyph: "▚" },
+  spaceopera: { name: "Starfall Armada", genre: "Space opera", line: "Fleets burn across the void and empires bet everything on you.", glyph: "✧" },
+  gothic: { name: "Cathedral of Ash", genre: "Gothic", line: "The bells ring at midnight for a congregation long dead.", glyph: "✠" },
+  urbanfantasy: { name: "Ley City", genre: "Urban fantasy", line: "Magic runs under the subway lines. Most people never notice.", glyph: "✺" },
+  steampunk: { name: "Brass Foundry", genre: "Steampunk", line: "Gears, aether and airships, and a conspiracy in the boiler room.", glyph: "⚙" },
+  pirate: { name: "Black Tide", genre: "High seas", line: "A galleon, a cursed chart, and a crew that votes on mutiny.", glyph: "⚓" },
+  eastasian: { name: "Lantern Court", genre: "Wuxia & legend", line: "Petals fall over the pagoda as swords are drawn in silence.", glyph: "❀" },
+  superhero: { name: "Signal City", genre: "Superhero", line: "The signal is in the sky. The city needs someone tonight.", glyph: "✪" },
+  pulp: { name: "Lost Temple", genre: "Pulp adventure", line: "A biplane, a map in red ink, and a temple that wants its idol back.", glyph: "✈" },
+  cozy: { name: "Hearthside", genre: "Cozy", line: "Warm bread, fireflies, and a small town with small, lovely problems.", glyph: "☕" }
+};

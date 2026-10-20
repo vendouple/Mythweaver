@@ -5,8 +5,9 @@ import type { DisplayEvent } from "@/lib/campaign/types";
 import { api, accentColor, clearSeat, createActionId, StoredSeat, useCampaignPoll, type ChatTargetOption, type HousekeepingStatus, type NarrationFailure } from "@/lib/client/api";
 import { playSfx } from "@/lib/client/sfx";
 import { renderInline, renderMarkdown } from "@/lib/client/markup";
-import { ttsSidecarHealthy } from "@/lib/client/tts";
+import { ttsServerStatus, ttsSidecarHealthy } from "@/lib/client/tts";
 import { ACCENT_THEMES, applyAccent, currentAccent, initAccent } from "@/lib/client/theme";
+import { useThemeSkin } from "@/lib/client/skin";
 import DiceTheater, { DiceRollData } from "@/components/three/DiceTheater";
 import CosmosCanvas from "@/components/three/CosmosCanvas";
 
@@ -73,6 +74,8 @@ function useTurnCountdown(deadlineAt: string | undefined): { frac: number; secon
  */
 export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeave: () => void }) {
   const { campaign, refresh, lost, reconnecting, hostActive } = useCampaignPoll(seat.campaignId, false, seat.playerId);
+  // The phone wears the same world skin as the TV (D&D always reads as fantasy).
+  useThemeSkin(campaign?.musicTheme || (campaign?.campaignType === "dnd" ? "fantasy" : null));
   const [tab, setTab] = useState<Tab>("act");
   const [composer, setComposer] = useState("");
   const [sending, setSending] = useState(false);
@@ -101,6 +104,7 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
   const [voices, setVoices] = useState<Array<{ id: string; fileName: string }>>([]);
   const [ttsBusy, setTtsBusy] = useState(false);
   const [ttsHealth, setTtsHealth] = useState<"checking" | "online" | "offline">("checking");
+  const [ttsApi, setTtsApi] = useState<{ model?: string } | null>(null);
   const [ttsHostInput, setTtsHostInput] = useState("");
   const [ttsPortInput, setTtsPortInput] = useState("");
 
@@ -309,7 +313,9 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
 
   const checkTtsServer = async (host = ttsHost, port = ttsPort) => {
     setTtsHealth("checking");
-    setTtsHealth((await ttsSidecarHealthy(host, port)) ? "online" : "offline");
+    const status = await ttsServerStatus(host, port);
+    setTtsApi(status.provider === "api" ? { model: status.model } : null);
+    setTtsHealth(status.online ? "online" : "offline");
   };
 
   useEffect(() => {
@@ -339,7 +345,9 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
     const nextEnabled = campaign.ttsEnabled === false;
     if (nextEnabled && !(await ttsSidecarHealthy(ttsHost, ttsPort))) {
       setTtsHealth("offline");
-      setDirectorMsg("Voice server is offline. Set the server below, then start TTS/run_tts.bat.");
+      setDirectorMsg(ttsApi
+        ? "The hosted voice API isn't configured. Set TTS_API_KEY in .env and restart the app."
+        : "Voice server is offline. Set the server below, then start TTS/run_tts.bat.");
       return;
     }
     await updateTtsSettings({ ttsEnabled: nextEnabled });
@@ -914,8 +922,11 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
             <span className="director-label">Voice server</span>
             <p className="panel-hint small">
               <strong>{ttsHealth === "online" ? "Online" : ttsHealth === "offline" ? "Offline" : "Checking…"}</strong>
-              {" · "}{ttsHost}:{ttsPort}. This server supplies the available narrator voices.
+              {ttsApi
+                ? <>{" · "}Hosted voice API{ttsApi.model ? ` (${ttsApi.model})` : ""}. Voices come from the provider set in .env.</>
+                : <>{" · "}{ttsHost}:{ttsPort}. This server supplies the available narrator voices.</>}
             </p>
+            {ttsApi ? null : <>
             <div className="portal-voice-fields">
               <input className="field slim" value={ttsHostInput} onChange={(event) => setTtsHostInput(event.target.value)} placeholder="Server host" aria-label="Voice server host" />
               <input className="field slim" type="number" min="1" max="65535" value={ttsPortInput} onChange={(event) => setTtsPortInput(event.target.value)} aria-label="Voice server port" />
@@ -936,6 +947,7 @@ export default function Controller({ seat, onLeave }: { seat: StoredSeat; onLeav
             >
               Save voice server
             </button>
+            </>}
 
             <span className="director-label">Narration voice</span>
             <p className="panel-hint small">Choose whether narration plays, which voice the server uses, and its volume.</p>

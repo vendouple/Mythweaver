@@ -4,6 +4,8 @@ import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { themeVisual, ThemeKey } from "@/components/three/themeVisuals";
 import { createThemeProp } from "@/components/three/themeProps";
+import { createThemeEnvironment } from "@/components/three/themeEnvironments";
+import { createMusicPulse, silentPulse } from "@/lib/client/musicPulse";
 
 /** Soft radial glow used for nebulae, bokeh, suns, and shooting-star heads. */
 function makeGlowTexture(inner: string, outer: string) {
@@ -34,43 +36,6 @@ function makeStreakTexture() {
   return new THREE.CanvasTexture(canvas);
 }
 
-/** Vertical curtain gradient for aurora ribbons — bright crest, sheer hem. */
-function makeAuroraTexture(top: string, bottom: string) {
-  const canvas = document.createElement("canvas");
-  canvas.width = 64;
-  canvas.height = 256;
-  const ctx = canvas.getContext("2d")!;
-  const gradient = ctx.createLinearGradient(0, 0, 0, 256);
-  gradient.addColorStop(0, top);
-  gradient.addColorStop(0.45, bottom);
-  gradient.addColorStop(1, "rgba(0,0,0,0)");
-  ctx.fillStyle = gradient;
-  ctx.fillRect(0, 0, 64, 256);
-  return new THREE.CanvasTexture(canvas);
-}
-
-/** Tall feathered shaft for noir venetian light. */
-function makeShaftTexture() {
-  const canvas = document.createElement("canvas");
-  canvas.width = 128;
-  canvas.height = 512;
-  const ctx = canvas.getContext("2d")!;
-  const vertical = ctx.createLinearGradient(0, 0, 0, 512);
-  vertical.addColorStop(0, "rgba(255,255,255,0.65)");
-  vertical.addColorStop(0.7, "rgba(255,255,255,0.14)");
-  vertical.addColorStop(1, "rgba(255,255,255,0)");
-  ctx.fillStyle = vertical;
-  ctx.fillRect(0, 0, 128, 512);
-  ctx.globalCompositeOperation = "destination-in";
-  const horizontal = ctx.createLinearGradient(0, 0, 128, 0);
-  horizontal.addColorStop(0, "rgba(255,255,255,0)");
-  horizontal.addColorStop(0.5, "rgba(255,255,255,1)");
-  horizontal.addColorStop(1, "rgba(255,255,255,0)");
-  ctx.fillStyle = horizontal;
-  ctx.fillRect(0, 0, 128, 512);
-  return new THREE.CanvasTexture(canvas);
-}
-
 function hexToRgba(hex: string, alpha: number) {
   const color = new THREE.Color(hex);
   return `rgba(${Math.round(color.r * 255)},${Math.round(color.g * 255)},${Math.round(color.b * 255)},${alpha})`;
@@ -79,10 +44,11 @@ function hexToRgba(hex: string, alpha: number) {
 /**
  * The Astral Table — the ambient scene behind the portal, creation wizard,
  * lobby, and join flow. Great polyhedral dice drift like slow moons through
- * star-dust over sleeping nebulae. When a campaign theme is known the whole
- * sky commits to it: auroras crown a fantasy tale, star-lines streak past a
- * scifi one, rain falls through a noir streetlamp, a low sun burns over the
- * frontier. Pointer movement gives a gentle parallax so the menu floats.
+ * star-dust over sleeping nebulae. When a campaign theme is known the scene
+ * becomes that theme's own environment (themeEnvironments.ts): a castle under
+ * auroras, a rain-soaked skyline, a moonlit sea, a neon city whose towers are
+ * the score's equalizer. Everything listens to the music — dice swell on the
+ * kick, dust glints on the hats. Pointer movement gives a gentle parallax.
  */
 export default function CosmosCanvas({
   accent,
@@ -275,291 +241,20 @@ export default function CosmosCanvas({
     const dustHasWind = windX !== 0 || windY !== 0;
 
     /* ====================================================================
-       Signature layer — each theme owns one scene-defining element.
+       Theme environment — a complete, music-synced world per genre (see
+       themeEnvironments.ts). The neutral Astral Table has none.
        ==================================================================== */
     type FrameHook = (dt: number, t: number, drive: number) => void;
     const frameHooks: FrameHook[] = [];
-
-    if (visual.effect === "aurora") {
-      // Fantasy: aurora curtains crest the sky and fireflies wander low.
-      const auroraColors: Array<[string, string]> = [
-        [hexToRgba("#4fd8a8", 0.5), hexToRgba(visual.secondary, 0.16)],
-        [hexToRgba(visual.secondary, 0.4), hexToRgba("#4fd8a8", 0.12)]
-      ];
-      const ribbons: Array<{ mesh: THREE.Mesh; base: Float32Array; seed: number; material: THREE.MeshBasicMaterial }> = [];
-      auroraColors.forEach(([top, bottom], index) => {
-        const texture = makeAuroraTexture(top, bottom);
-        const geometry = new THREE.PlaneGeometry(38, 6.5 - index, 96, 1);
-        const material = new THREE.MeshBasicMaterial({
-          map: texture,
-          transparent: true,
-          opacity: 0.42 - index * 0.1,
-          depthWrite: false,
-          blending: THREE.AdditiveBlending,
-          side: THREE.DoubleSide
-        });
-        const mesh = new THREE.Mesh(geometry, material);
-        mesh.position.set(index * 4 - 2, 6.2 + index * 2.1, -17 - index * 4);
-        mesh.rotation.x = -0.14;
-        scene.add(mesh);
-        const base = new Float32Array(geometry.getAttribute("position").array);
-        ribbons.push({ mesh, base, seed: index * 2.7, material });
-        disposables.push(geometry, material, texture);
-      });
-      frameHooks.push((dt, t) => {
-        for (const ribbon of ribbons) {
-          const attr = ribbon.mesh.geometry.getAttribute("position") as THREE.BufferAttribute;
-          for (let i = 0; i < attr.count; i += 1) {
-            const x = ribbon.base[i * 3];
-            const y = ribbon.base[i * 3 + 1];
-            attr.setY(i, y + Math.sin(x * 0.42 + t * 0.5 + ribbon.seed) * 0.55 + Math.sin(x * 0.13 - t * 0.22) * 0.9);
-            attr.setZ(i, ribbon.base[i * 3 + 2] + Math.sin(x * 0.2 + t * 0.3 + ribbon.seed) * 0.8);
-          }
-          attr.needsUpdate = true;
-          ribbon.material.opacity = (0.34 + Math.sin(t * 0.24 + ribbon.seed) * 0.12) * (ribbon.seed ? 0.8 : 1);
-        }
-      });
-
-      const FIREFLIES = 70;
-      const flyPositions = new Float32Array(FIREFLIES * 3);
-      const flyBase = new Float32Array(FIREFLIES * 3);
-      const flySeeds = new Float32Array(FIREFLIES);
-      for (let i = 0; i < FIREFLIES; i += 1) {
-        flyBase[i * 3] = (Math.random() - 0.5) * 24;
-        flyBase[i * 3 + 1] = -5 + Math.random() * 6;
-        flyBase[i * 3 + 2] = -2 - Math.random() * 10;
-        flySeeds[i] = Math.random() * Math.PI * 2;
-      }
-      const flyGeometry = new THREE.BufferGeometry();
-      flyGeometry.setAttribute("position", new THREE.BufferAttribute(flyPositions, 3));
-      const flyMaterial = new THREE.PointsMaterial({
-        color: new THREE.Color(visual.accentBright),
-        size: 0.09,
-        transparent: true,
-        opacity: 0.9,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending,
-        sizeAttenuation: true
-      });
-      scene.add(new THREE.Points(flyGeometry, flyMaterial));
-      disposables.push(flyGeometry, flyMaterial);
-      frameHooks.push((dt, t) => {
-        const attr = flyGeometry.getAttribute("position") as THREE.BufferAttribute;
-        for (let i = 0; i < FIREFLIES; i += 1) {
-          const s = flySeeds[i];
-          attr.setXYZ(
-            i,
-            flyBase[i * 3] + Math.sin(t * 0.4 + s * 3) * 1.6,
-            flyBase[i * 3 + 1] + Math.sin(t * 0.7 + s * 5) * 0.8,
-            flyBase[i * 3 + 2] + Math.cos(t * 0.3 + s * 2) * 1.2
-          );
-        }
-        attr.needsUpdate = true;
-        flyMaterial.opacity = 0.55 + Math.sin(t * 2.2) * 0.3;
-      });
-    }
-
-    if (visual.effect === "warp") {
-      // Scifi: star-lines streaming past the table at cruise velocity.
-      const STREAKS = 150;
-      const streakPositions = new Float32Array(STREAKS * 6);
-      const streakData: Array<{ x: number; y: number; z: number; speed: number; len: number }> = [];
-      for (let i = 0; i < STREAKS; i += 1) {
-        streakData.push({
-          x: (Math.random() - 0.5) * 40,
-          y: (Math.random() - 0.5) * 24,
-          z: -30 - Math.random() * 30,
-          speed: 7 + Math.random() * 14,
-          len: 0.8 + Math.random() * 2.2
-        });
-      }
-      const streakGeometry = new THREE.BufferGeometry();
-      streakGeometry.setAttribute("position", new THREE.BufferAttribute(streakPositions, 3));
-      const streakMaterial = new THREE.LineBasicMaterial({
-        color: accentColor,
-        transparent: true,
-        opacity: 0.4,
-        blending: THREE.AdditiveBlending
-      });
-      scene.add(new THREE.LineSegments(streakGeometry, streakMaterial));
-      disposables.push(streakGeometry, streakMaterial);
-      frameHooks.push((dt, t, drive) => {
-        const attr = streakGeometry.getAttribute("position") as THREE.BufferAttribute;
-        for (let i = 0; i < STREAKS; i += 1) {
-          const s = streakData[i];
-          s.z += s.speed * dt * (0.6 + drive * 0.6);
-          if (s.z > 8) {
-            s.z = -55 - Math.random() * 10;
-            s.x = (Math.random() - 0.5) * 40;
-            s.y = (Math.random() - 0.5) * 24;
-          }
-          attr.setXYZ(i * 2, s.x, s.y, s.z);
-          attr.setXYZ(i * 2 + 1, s.x, s.y, s.z - s.len);
-        }
-        attr.needsUpdate = true;
-        streakMaterial.opacity = 0.28 + Math.sin(t * 0.6) * 0.08 + drive * 0.12;
-      });
-    }
-
-    if (visual.effect === "haunt") {
-      // Horror: the one light in the room is not reliable, and something
-      // pale crawls along the floor.
-      const crawlTexture = makeGlowTexture(hexToRgba("#41501f", 0.4), hexToRgba("#41501f", 0));
-      disposables.push(crawlTexture);
-      const crawlers: Array<{ sprite: THREE.Sprite; seed: number }> = [];
-      for (let i = 0; i < 3; i += 1) {
-        const material = new THREE.SpriteMaterial({
-          map: crawlTexture,
-          transparent: true,
-          opacity: 0.4,
-          depthWrite: false
-        });
-        const sprite = new THREE.Sprite(material);
-        sprite.position.set((i - 1) * 9, -6.5 + i * 0.6, -4 - i * 2);
-        sprite.scale.set(16, 6, 1);
-        scene.add(sprite);
-        crawlers.push({ sprite, seed: Math.random() * Math.PI * 2 });
-        disposables.push(material);
-      }
-      let flicker = 1;
-      frameHooks.push((dt, t) => {
-        // Random-walk flicker with occasional near-blackout stutters.
-        flicker += ((Math.random() > 0.985 ? 0.15 : 1) - flicker) * Math.min(1, dt * 9);
-        keyLight.intensity = 42 * flicker * (0.85 + Math.sin(t * 13.7) * 0.07);
-        rimLight.intensity = 16 * (0.7 + Math.sin(t * 0.4) * 0.3);
-        for (const crawler of crawlers) {
-          crawler.sprite.position.x += Math.sin(t * 0.11 + crawler.seed) * dt * 0.7;
-          (crawler.sprite.material as THREE.SpriteMaterial).opacity = 0.3 + Math.sin(t * 0.23 + crawler.seed) * 0.12;
-        }
-      });
-    }
-
-    if (visual.effect === "rain") {
-      // Noir: rain through a streetlamp, venetian shafts cutting the dark.
-      const DROPS = 420;
-      const dropPositions = new Float32Array(DROPS * 6);
-      const dropSpeed = new Float32Array(DROPS);
-      const dropX = new Float32Array(DROPS);
-      const dropY = new Float32Array(DROPS);
-      const dropZ = new Float32Array(DROPS);
-      for (let i = 0; i < DROPS; i += 1) {
-        dropX[i] = (Math.random() - 0.5) * 34;
-        dropY[i] = (Math.random() - 0.5) * 24;
-        dropZ[i] = -2 - Math.random() * 18;
-        dropSpeed[i] = 13 + Math.random() * 9;
-      }
-      const rainGeometry = new THREE.BufferGeometry();
-      rainGeometry.setAttribute("position", new THREE.BufferAttribute(dropPositions, 3));
-      const rainMaterial = new THREE.LineBasicMaterial({
-        color: new THREE.Color("#8fa3bd"),
-        transparent: true,
-        opacity: 0.32,
-        blending: THREE.AdditiveBlending
-      });
-      scene.add(new THREE.LineSegments(rainGeometry, rainMaterial));
-      disposables.push(rainGeometry, rainMaterial);
-      frameHooks.push((dt) => {
-        const attr = rainGeometry.getAttribute("position") as THREE.BufferAttribute;
-        for (let i = 0; i < DROPS; i += 1) {
-          dropY[i] -= dropSpeed[i] * dt;
-          dropX[i] -= dropSpeed[i] * dt * 0.12;
-          if (dropY[i] < -12) {
-            dropY[i] = 12;
-            dropX[i] = (Math.random() - 0.5) * 34;
-          }
-          attr.setXYZ(i * 2, dropX[i], dropY[i], dropZ[i]);
-          attr.setXYZ(i * 2 + 1, dropX[i] + 0.06, dropY[i] + 0.55, dropZ[i]);
-        }
-        attr.needsUpdate = true;
-      });
-
-      const shaftTexture = makeShaftTexture();
-      disposables.push(shaftTexture);
-      const shafts: Array<{ mesh: THREE.Mesh; seed: number }> = [];
-      for (let i = 0; i < 4; i += 1) {
-        const material = new THREE.MeshBasicMaterial({
-          map: shaftTexture,
-          color: new THREE.Color(visual.accent),
-          transparent: true,
-          opacity: 0.1,
-          depthWrite: false,
-          blending: THREE.AdditiveBlending,
-          side: THREE.DoubleSide
-        });
-        const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1.1 + (i % 2) * 0.6, 22), material);
-        mesh.position.set(-7 + i * 4.6, 3.5, -6 - i);
-        mesh.rotation.z = -0.42;
-        scene.add(mesh);
-        shafts.push({ mesh, seed: Math.random() * Math.PI * 2 });
-        disposables.push(mesh.geometry, material);
-      }
-      frameHooks.push((dt, t) => {
-        for (const shaft of shafts) {
-          (shaft.mesh.material as THREE.MeshBasicMaterial).opacity = 0.07 + Math.max(0, Math.sin(t * 0.3 + shaft.seed)) * 0.09;
-        }
-      });
-    }
-
-    if (visual.effect === "bokeh") {
-      // Modern: out-of-focus city lights sliding past a night window.
-      const bokehTexture = makeGlowTexture("rgba(255,255,255,0.5)", "rgba(255,255,255,0)");
-      disposables.push(bokehTexture);
-      const bokehColors = [visual.accent, visual.secondary, "#ffffff", "#ff6a8a"];
-      const orbs: Array<{ sprite: THREE.Sprite; seed: number; speed: number }> = [];
-      for (let i = 0; i < 26; i += 1) {
-        const material = new THREE.SpriteMaterial({
-          map: bokehTexture,
-          color: new THREE.Color(bokehColors[i % bokehColors.length]),
-          transparent: true,
-          opacity: 0.16,
-          depthWrite: false,
-          blending: THREE.AdditiveBlending
-        });
-        const sprite = new THREE.Sprite(material);
-        sprite.position.set((Math.random() - 0.5) * 36, (Math.random() - 0.5) * 20, -6 - Math.random() * 14);
-        sprite.scale.setScalar(1.2 + Math.random() * 3.6);
-        scene.add(sprite);
-        orbs.push({ sprite, seed: Math.random() * Math.PI * 2, speed: 0.3 + Math.random() * 0.6 });
-        disposables.push(material);
-      }
-      frameHooks.push((dt, t) => {
-        for (const orb of orbs) {
-          orb.sprite.position.x += dt * orb.speed;
-          if (orb.sprite.position.x > 20) orb.sprite.position.x = -20;
-          (orb.sprite.material as THREE.SpriteMaterial).opacity = 0.1 + Math.sin(t * 0.5 + orb.seed) * 0.07 + 0.07;
-        }
-      });
-    }
-
-    if (visual.effect === "frontier") {
-      // Western: a huge low sun smolders on the horizon; dust rides the wind.
-      const sunTexture = makeGlowTexture(hexToRgba("#ffd9a0", 0.85), hexToRgba("#c4573a", 0));
-      const sunMaterial = new THREE.SpriteMaterial({
-        map: sunTexture,
-        transparent: true,
-        opacity: 0.65,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending
-      });
-      const sun = new THREE.Sprite(sunMaterial);
-      sun.position.set(2, -4.5, -26);
-      sun.scale.setScalar(30);
-      scene.add(sun);
-      disposables.push(sunTexture, sunMaterial);
-
-      const hazeTexture = makeGlowTexture(hexToRgba("#c4573a", 0.3), hexToRgba("#c4573a", 0));
-      const hazeMaterial = new THREE.SpriteMaterial({ map: hazeTexture, transparent: true, opacity: 0.4, depthWrite: false });
-      const haze = new THREE.Sprite(hazeMaterial);
-      haze.position.set(0, -7, -20);
-      haze.scale.set(60, 14, 1);
-      scene.add(haze);
-      disposables.push(hazeTexture, hazeMaterial);
-
-      frameHooks.push((dt, t) => {
-        sunMaterial.opacity = 0.55 + Math.sin(t * 0.17) * 0.1;
-        sun.scale.setScalar(30 + Math.sin(t * 0.23) * 1.4);
-        hazeMaterial.opacity = 0.32 + Math.sin(t * 0.13) * 0.08;
-      });
+    const environment = createThemeEnvironment(scene, visual, { width: 48, height: 26, z: -12, full: true });
+    const themed = !!environment;
+    // Only a themed scene taps the score. The neutral table runs on phones and
+    // menus where no music plays, and building the analyser there would spin
+    // up an AudioContext for nothing — so it reads a frozen, silent pulse.
+    const pulseReader = themed ? createMusicPulse() : null;
+    let pulse = silentPulse();
+    if (environment) {
+      frameHooks.push((dt, t, drive) => environment.update({ t, dt, envelope: 1, drive, pulse }));
     }
 
     // -- signature prop -----------------------------------------------------
@@ -592,14 +287,18 @@ export default function CosmosCanvas({
     const renderFrame = () => {
       const dt = Math.min(clock.getDelta(), 0.05);
       const t = clock.elapsedTime;
-      const drive = 0.4 + dramaRef.current * 0.9;
+      if (pulseReader) pulse = pulseReader.read(dt, t);
+      const drive = (0.4 + dramaRef.current * 0.9) * (1 + pulse.level * 0.35);
 
       for (const solid of solids) {
         solid.group.rotation.x += solid.spin.x * dt * drive;
-        solid.group.rotation.y += solid.spin.y * dt * drive;
+        solid.group.rotation.y += solid.spin.y * dt * drive * (1 + pulse.snare * 2);
         solid.group.rotation.z += solid.spin.z * dt * drive;
         solid.group.position.y = solid.base.y + Math.sin(t * solid.bobSpeed + solid.bobPhase) * 0.35;
+        solid.group.scale.setScalar(1 + pulse.kick * 0.06);
       }
+      edgeMaterial.opacity = Math.min(1, visual.dice.edgeOpacity * (0.85 + pulse.kick * 0.4 + pulse.brightness * 0.2));
+      keyLight.intensity = 42 * (0.85 + pulse.kick * 0.35 + pulse.swell * 0.3);
 
       if (dustHasWind) {
         const attr = dustGeometry.getAttribute("position") as THREE.BufferAttribute;
@@ -617,17 +316,19 @@ export default function CosmosCanvas({
       } else {
         dust.rotation.y = t * 0.008 * drive;
       }
-      dustMaterial.opacity = 0.55 + Math.sin(t * 0.6) * 0.15;
-      dustMaterial.size = visual.dust.size + Math.sin(t * 1.7) * 0.008;
+      dustMaterial.opacity = (0.55 + Math.sin(t * 0.6) * 0.15 + pulse.hat * 0.25) * (themed ? 0.5 : 1);
+      dustMaterial.size = visual.dust.size + Math.sin(t * 1.7) * 0.008 + pulse.hat * 0.015;
 
       nebulae.forEach((sprite, index) => {
         const material = sprite.material as THREE.SpriteMaterial;
-        material.opacity = 0.34 + Math.sin(t * 0.14 + nebulaSeeds[index]) * 0.16;
+        // A themed environment paints its own sky; the generic nebulae would
+        // only wash it out.
+        material.opacity = themed ? 0 : (0.34 + Math.sin(t * 0.14 + nebulaSeeds[index]) * 0.16) * (1 + pulse.swell * 0.6);
         sprite.position.y += Math.sin(t * 0.05 + nebulaSeeds[index]) * dt * 0.12;
       });
 
       nextMeteorAt -= dt * drive;
-      if (nextMeteorAt <= 0) {
+      if (nextMeteorAt <= 0 && !themed) {
         launchMeteor();
         nextMeteorAt = 5 + Math.random() * 11;
       }
@@ -671,6 +372,7 @@ export default function CosmosCanvas({
         });
       }
       themeProp?.dispose();
+      environment?.dispose();
       for (const item of disposables) item.dispose();
       if (renderer.domElement.parentElement === mount) mount.removeChild(renderer.domElement);
     };

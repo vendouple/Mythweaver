@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { aquaConfig, aquaFetch } from "@/lib/aqua/client";
+import { aquaConfig, aquaFetch, extractToolArgs, singleToolChoice } from "@/lib/aqua/client";
 import { listCampaigns, getCampaign } from "@/lib/campaign/store";
 import { serverLog, serverError } from "@/lib/aqua/chat";
 
@@ -14,55 +14,83 @@ async function findCampaignByJoinCode(code: string) {
   return await getCampaign(summary.id);
 }
 
-function parseJsonBlock(content: string) {
-  const startIdx = content.indexOf("{");
-  const endIdx = content.lastIndexOf("}");
-  if (startIdx === -1 || endIdx === -1 || endIdx <= startIdx) {
-    return null;
-  }
-  try {
-    return JSON.parse(content.substring(startIdx, endIdx + 1));
-  } catch {
-    return null;
-  }
+type StructuredTool = { name: string; description: string; parameters: Record<string, unknown> };
+
+function missingRequired(result: Record<string, any> | null, tool: StructuredTool): string[] {
+  const required = Array.isArray((tool.parameters as any).required) ? (tool.parameters as any).required as string[] : [];
+  if (!result) return required;
+  return required.filter((key) => {
+    const value = result[key];
+    if (typeof value === "string") return !value.trim();
+    if (Array.isArray(value)) return value.length === 0;
+    return value === undefined || value === null;
+  });
 }
 
 /**
- * Ask the model for a structured object via OpenAI-compatible tool calling.
- * Forcing a single function (tool_choice) makes small models return clean,
- * schema-shaped arguments far more reliably than "reply in JSON" prose. If the
- * backend ever answers with content instead of a tool call, we still parse the
- * JSON block out of the content so the caller degrades gracefully.
+ * Ask the model for a structured object via OpenAI-compatible tool calling,
+ * validating the required fields and retrying when they come back missing.
+ *
+ * Some backends (DeepSeek via Pollinations, observed) answer a FORCED
+ * tool_choice with an empty `{}` call about half the time, which is what made
+ * character generation fail with "AI did not return a valid character JSON
+ * structure". So: offer the single tool with the configured tool choice
+ * (default "auto"), then retry, and finally fall back to plain JSON-in-content
+ * with no tools at all, which every chat endpoint can do.
  */
 async function callStructured(
   systemInstruction: string,
   userPrompt: string,
-  tool: { name: string; description: string; parameters: Record<string, unknown> }
+  tool: StructuredTool,
+  label: string,
+  ignoreMissing: string[] = []
 ): Promise<Record<string, any> | null> {
   const config = aquaConfig();
-  const response = await aquaFetch("/chat/completions", {
-    method: "POST",
-    body: JSON.stringify({
-      model: config.chatModel,
-      messages: [
-        { role: "system", content: `${systemInstruction}\n\nDelivery: call ${tool.name} exactly once with the requested fields as arguments. Do not also write JSON or prose in message content. If native tools are unavailable, return one JSON object with the same fields.` },
-        { role: "user", content: userPrompt }
-      ],
-      tools: [{ type: "function", function: tool }],
-      tool_choice: { type: "function", function: { name: tool.name } }
-    })
-  }) as any;
-
-  const message = response.choices?.[0]?.message || response.message;
-  const call = Array.isArray(message?.tool_calls) ? message.tool_calls[0] : null;
-  if (call?.function?.arguments) {
+  const fieldList = Object.keys((tool.parameters as any).properties || {}).join(", ");
+  const attempts = [
+    { tools: true },
+    { tools: true },
+    { tools: false }
+  ];
+  let best: Record<string, any> | null = null;
+  for (let i = 0; i < attempts.length; i += 1) {
+    const useTools = attempts[i].tools;
+    const delivery = useTools
+      ? `Delivery: call ${tool.name} exactly once and put EVERY field (${fieldList}) in its arguments, fully written. Never call it with empty arguments. Do not also write JSON or prose in message content.`
+      : `Delivery: reply with ONE JSON object and nothing else — no markdown, no code fences, no commentary. It must contain these keys, each fully written: ${fieldList}.`;
     try {
-      return JSON.parse(call.function.arguments);
-    } catch {
-      // Fall through to content parsing below.
+      const response = await aquaFetch("/chat/completions", {
+        method: "POST",
+        body: JSON.stringify({
+          model: config.chatModel,
+          messages: [
+            { role: "system", content: `${systemInstruction}
+
+${delivery}` },
+            { role: "user", content: userPrompt }
+          ],
+          ...(useTools
+            ? { tools: [{ type: "function", function: tool }], tool_choice: singleToolChoice(tool.name) }
+            : {})
+        })
+      }, { retries: 3, reasoningEffort: config.chatReasoningEffort }) as any;
+      const message = response?.choices?.[0]?.message || response?.message;
+      const result = extractToolArgs(message, tool.name);
+      const missing = missingRequired(result, tool).filter((key) => !ignoreMissing.includes(key));
+      if (result && !missing.length) {
+        if (i > 0) serverLog("API generate", `${label}: valid result on attempt ${i + 1}/${attempts.length}${useTools ? "" : " (plain JSON fallback)"}`);
+        return result;
+      }
+      if (result && (!best || Object.keys(result).length > Object.keys(best).length)) best = result;
+      const rawArgs = Array.isArray(message?.tool_calls) ? String(message.tool_calls[0]?.function?.arguments ?? "") : "";
+      serverError("API generate", `${label}: attempt ${i + 1}/${attempts.length} missing [${missing.join(", ")}]` +
+        ` (tool args: ${rawArgs.slice(0, 160) || "none"}; content: ${String(message?.content || "").slice(0, 160) || "none"})`);
+    } catch (err) {
+      serverError("API generate", `${label}: attempt ${i + 1}/${attempts.length} request failed`, err);
+      if (i === attempts.length - 1) throw err;
     }
   }
-  return parseJsonBlock(message?.content || "");
+  return best;
 }
 
 const CAMPAIGN_TOOL = {
@@ -176,7 +204,7 @@ export async function POST(request: Request) {
 
       systemInstruction += titleDirective;
 
-      const result = await callStructured(systemInstruction, userPrompt, CAMPAIGN_TOOL);
+      const result = await callStructured(systemInstruction, userPrompt, CAMPAIGN_TOOL, "Campaign", seedTitle ? ["title"] : []);
       // The user's chosen title is non-negotiable — enforce it verbatim.
       if (result && seedTitle) result.title = seedTitle;
       if (!result || !result.title || !result.startingStory) {
@@ -206,7 +234,8 @@ For each character provide name, biography, traits, current motive, initial disp
       const result = await callStructured(
         systemInstruction,
         `Plan the private NPC cast for this ${isDndCampaign ? "D&D" : "tabletop RPG"} campaign.`,
-        CAST_PLAN_TOOL
+        CAST_PLAN_TOOL,
+        "Cast plan"
       );
       if (!result || !Array.isArray(result.cast)) {
         serverError("API generate", "AI did not return a valid cast plan.");
@@ -296,7 +325,7 @@ Provide characterName, personality, and background. Leave future choices to the 
 
       systemInstruction += nameDirective;
 
-      const result = await callStructured(systemInstruction, userPrompt, CHARACTER_TOOL);
+      const result = await callStructured(systemInstruction, userPrompt, CHARACTER_TOOL, "Character", keepName ? ["characterName"] : []);
       // The player's chosen name is non-negotiable — enforce it even if the
       // model drifted or dropped the field.
       if (result && keepName) result.characterName = characterName.trim();

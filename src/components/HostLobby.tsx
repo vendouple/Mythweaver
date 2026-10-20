@@ -6,6 +6,7 @@ import { api, accentColor, Campaign } from "@/lib/client/api";
 import { playSfx } from "@/lib/client/sfx";
 import WorldForge from "@/components/three/WorldForge";
 import { themeVisual, ThemeKey } from "@/components/three/themeVisuals";
+import { useThemeSkin } from "@/lib/client/skin";
 
 /**
  * The Gathering. The TV shows the table code like an inscription over a
@@ -14,6 +15,7 @@ import { themeVisual, ThemeKey } from "@/components/three/themeVisuals";
  */
 export default function HostLobby({ campaign, theme }: { campaign: Campaign; theme?: ThemeKey | string | null }) {
   const visual = themeVisual(theme);
+  useThemeSkin(visual.key);
   const [joinUrl, setJoinUrl] = useState("");
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);

@@ -1,6 +1,7 @@
 import { createId } from "@/lib/utils/ids";
 import { isValidVoiceId } from "./voices";
 import { ttsServerHost } from "./config";
+import { ttsApiConfig, ttsProvider } from "./provider";
 
 /**
  * Server-only, ephemeral turn-scoped TTS clip registry.
@@ -11,6 +12,10 @@ import { ttsServerHost } from "./config";
  *   POST {base}/synthesize -> JSON { text, voiceId, exaggeration?, cfgWeight? }
  *                             returns `audio/wav` bytes with
  *                             `X-Audio-Duration` / `X-Audio-Sample-Rate` headers.
+ *
+ * With TTS_PROVIDER=api the same batches are synthesized by an
+ * OpenAI-compatible `POST {base}/audio/speech` endpoint instead (see
+ * ./provider.ts) — the rest of this module is provider-agnostic.
  *
  * Batches are keyed by campaign + batch id and live entirely in memory —
  * nothing is persisted to disk and no generated clips are committed anywhere.
@@ -227,6 +232,10 @@ async function generateClip(batch: Batch, clip: StoredClip, sidecarHost?: string
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), requestTimeoutMs());
   try {
+    if (ttsProvider() === "api") {
+      await generateApiClip(clip, controller.signal);
+      return;
+    }
     const response = await fetch(`${sidecarBaseUrl(sidecarHost, sidecarPort)}/synthesize`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -271,6 +280,49 @@ async function generateClip(batch: Batch, clip: StoredClip, sidecarHost?: string
   } finally {
     clearTimeout(timeout);
   }
+}
+
+/**
+ * Synthesize one clip through an OpenAI-compatible /audio/speech endpoint.
+ * Chatterbox's `exaggeration` knob has no direct equivalent, so a high value
+ * is folded into the style instructions when instructions are in use.
+ */
+async function generateApiClip(clip: StoredClip, signal: AbortSignal): Promise<void> {
+  const config = ttsApiConfig();
+  if (!config.apiKey) throw new Error("TTS_API_KEY is not set");
+  // A voice id left over from the local sidecar (e.g. "clyde") means nothing to
+  // the API — fall back to the configured default instead of failing the clip.
+  const voice = config.voices.includes(clip.voiceId) ? clip.voiceId : config.defaultVoice;
+  const instructions = config.instructions
+    ? `${config.instructions}${(clip.exaggeration ?? 0) >= 0.7 ? " Deliver it with heightened, theatrical emotion." : ""}`
+    : "";
+  const response = await fetch(`${config.baseUrl}/audio/speech`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${config.apiKey}` },
+    body: JSON.stringify({
+      model: config.model,
+      input: clip.text,
+      voice,
+      response_format: config.format,
+      ...(instructions ? { instructions } : {}),
+      ...(config.speed ? { speed: config.speed } : {}),
+    }),
+    signal,
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    const detail = (await response.text().catch(() => "")).slice(0, 200);
+    throw new Error(`TTS API responded ${response.status}${detail ? `: ${detail}` : ""}`);
+  }
+  const buffer = Buffer.from(await response.arrayBuffer());
+  clip.audio = buffer;
+  clip.contentType = response.headers.get("content-type")?.startsWith("audio/") ? response.headers.get("content-type")! : config.contentType;
+  clip.byteLength = buffer.byteLength;
+  // The client measures duration from the decoded audio when this is absent.
+  clip.durationSeconds = undefined;
+  clip.sampleRate = undefined;
+  clip.status = "ready";
+  clip.error = undefined;
 }
 
 /** Fetch a batch summary (no audio bytes). */
@@ -344,6 +396,13 @@ export function releaseCampaign(campaignId: string): number {
 
 /** Health passthrough for the sidecar. */
 export async function sidecarHealth(host?: string, port?: number): Promise<unknown> {
+  if (ttsProvider() === "api") {
+    const config = ttsApiConfig();
+    // No network probe: a paid endpoint shouldn't be pinged every 10s by the
+    // status light. A missing key is the one failure we can know up front.
+    if (!config.apiKey) throw new Error("TTS_PROVIDER=api but TTS_API_KEY is not set");
+    return { status: "ok", provider: "api", model: config.model, voices: config.voices, defaultVoice: config.defaultVoice };
+  }
   const controller = new AbortController();
   // A status light must fail fast if a LAN server disappears; synthesis keeps
   // its longer, separately configured timeout.
@@ -354,7 +413,8 @@ export async function sidecarHealth(host?: string, port?: number): Promise<unkno
       signal: controller.signal,
       cache: "no-store",
     });
-    return await response.json();
+    const health = await response.json();
+    return health && typeof health === "object" ? { provider: "local", ...health } : health;
   } finally {
     clearTimeout(timeout);
   }

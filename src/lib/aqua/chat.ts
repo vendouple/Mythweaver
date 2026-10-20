@@ -1,7 +1,7 @@
 import { buildCampaignContext } from "@/lib/campaign/context";
 import { getCampaign, getCampaignLock, saveCampaign, downloadAndSaveImage, logCampaignDebug, logCampaignEvent, scrubLogText, safePushDisplayEvent, isValidImageUrl, startCampaignDraft, finishCampaignDraft, reconcilePresence, normalizeBeatEffect, ensureLocations, getFocusedLocation, persistFocusedLocation, applyFocus, resolveOrPromoteNpc, type CampaignLogCategory } from "@/lib/campaign/store";
 import { createId } from "@/lib/utils/ids";
-import { aquaConfig, aquaFetch, fastModelTarget, resolveChatTarget, DEFAULT_CHAT_TARGET_ID, AquaFetchOptions, AquaMessage, AquaToolCall, AquaToolDefinition } from "./client";
+import { aquaConfig, aquaFetch, extractToolArgs, singleToolChoice, fastModelTarget, resolveChatTarget, DEFAULT_CHAT_TARGET_ID, AquaFetchOptions, AquaMessage, AquaToolCall, AquaToolDefinition } from "./client";
 import { runTool, toolDefinitions, applyNpcGroupFields, applyConditionFields, isNpcPortraitPending } from "@/lib/tools/registry";
 import { generateImage } from "@/lib/aqua/images";
 import { normalizeTurnPayload, normalizeActions } from "./turnPayload";
@@ -783,7 +783,7 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
                 }
               ],
               tools: [narrateTurnTool],
-              tool_choice: { type: "function", function: { name: "narrate_turn" } }
+              tool_choice: singleToolChoice("narrate_turn")
             })
           }, { ...INTERACTIVE_FETCH, ...retryModelOptions, onRetry: retryLogger(campaignId, "Narration", "parse-repair") })) as ChatCompletionResponse;
           const retryMessage = retryResponse.choices?.[0]?.message || retryResponse.message;
@@ -793,9 +793,7 @@ export async function runDungeonMaster(campaignId: string, playerName: string, a
           }
           const retryCall = retryCalls[0];
           if (retryCall) {
-            const retryArgs = typeof retryCall.function.arguments === "string"
-              ? JSON.parse(retryCall.function.arguments || "{}")
-              : (retryCall.function.arguments as Record<string, any>) || {};
+            const retryArgs = extractToolArgs(retryMessage, "narrate_turn") || {};
             parsedJson = normalizeTurnPayload(retryArgs);
             if (!parsedJson) throw new Error("narrate_turn did not contain usable story beats and updates");
             content = JSON.stringify(parsedJson);
@@ -1874,13 +1872,12 @@ async function reconcileStageDirection(
         { role: "user", content: user }
       ],
       tools: [tool],
-      tool_choice: { type: "function", function: { name: "direct_stage" } }
+      tool_choice: singleToolChoice("direct_stage")
     })
   }, { ...INTERACTIVE_FETCH, ...stageTarget.options, onRetry: retryLogger(campaign.id, "Narration", "stage-director") })) as ChatCompletionResponse;
   const message = response.choices?.[0]?.message || response.message;
-  const call = Array.isArray(message?.tool_calls) ? message?.tool_calls?.[0] : null;
-  if (!call?.function?.arguments) return;
-  const args = JSON.parse(call.function.arguments) as Record<string, unknown>;
+  const args = extractToolArgs(message, "direct_stage") as Record<string, unknown> | null;
+  if (!args) return;
 
   const mood = String(args.mood || "keep").toLowerCase();
   if (!opts.modelSetAmbience && mood !== "keep" && DIRECTABLE_MOODS.includes(mood as AmbienceMood) && mood !== campaign.ambience?.mood) {
@@ -1979,15 +1976,14 @@ async function chooseBackdrop(campaign: Campaign, force: boolean): Promise<Backd
         model: backdropTarget.model,
         messages: [{ role: "system", content: system }, { role: "user", content: user }],
         tools: [tool],
-        tool_choice: { type: "function", function: { name: "set_backdrop" } }
+        tool_choice: singleToolChoice("set_backdrop")
       })
       // Bounded like every other ancillary call — this had no options at all,
       // so it inherited aquaFetch's 6-attempt default against a dead endpoint.
     }, { ...INTERACTIVE_FETCH, ...backdropTarget.options, onRetry: retryLogger(campaign.id, "Narration", "scene-director") })) as ChatCompletionResponse;
     const message = response.choices?.[0]?.message || response.message;
-    const call = Array.isArray(message?.tool_calls) ? message?.tool_calls?.[0] : null;
-    if (!call?.function?.arguments) return null;
-    const args = JSON.parse(call.function.arguments) as Record<string, unknown>;
+    const args = extractToolArgs(message, "set_backdrop") as Record<string, unknown> | null;
+    if (!args) return null;
     const rawMode = String(args.mode || "");
     const mode = (["keep", "reuse", "new"] as const).includes(rawMode as any) ? (rawMode as BackdropDecision["mode"]) : (force ? "new" : "keep");
     return {
@@ -2132,7 +2128,8 @@ async function complete(
   const mergedOptions: AquaFetchOptions = {
     ...fetchOptions,
     baseUrl: target.baseUrl || fetchOptions.baseUrl,
-    apiKey: target.apiKey || fetchOptions.apiKey
+    apiKey: target.apiKey || fetchOptions.apiKey,
+    reasoningEffort: target.reasoningEffort ?? fetchOptions.reasoningEffort
   };
   return (await aquaFetch("/chat/completions", {
     method: "POST",
@@ -2293,7 +2290,7 @@ async function aiPickTheme(campaign: Campaign): Promise<MusicTheme | null> {
  */
 function campaignChatTarget(campaign: Campaign): { model: string; options: AquaFetchOptions } {
   const target = resolveChatTarget(campaign.selectedChatTargetId);
-  return { model: target.model, options: { baseUrl: target.baseUrl, apiKey: target.apiKey } };
+  return { model: target.model, options: { baseUrl: target.baseUrl, apiKey: target.apiKey, reasoningEffort: target.reasoningEffort } };
 }
 
 // Housekeeping thresholds: a sweep only runs once there's genuinely stale
@@ -2515,7 +2512,7 @@ async function runHousekeeping(campaign: Campaign): Promise<void> {
         model,
         messages: [{ role: "system", content: system }, { role: "user", content: user }],
         tools: [tool],
-        tool_choice: { type: "function", function: { name: "apply_housekeeping" } }
+        tool_choice: singleToolChoice("apply_housekeeping")
       })
     }, {
       ...options,
@@ -2524,15 +2521,14 @@ async function runHousekeeping(campaign: Campaign): Promise<void> {
       onRetry: retryLogger(campaign.id, "Housekeeping", "sweep")
     })) as ChatCompletionResponse;
     const message = response.choices?.[0]?.message || response.message;
-    const call = Array.isArray(message?.tool_calls) ? message?.tool_calls?.[0] : null;
-    if (!call?.function?.arguments) {
+    const args = extractToolArgs(message, "apply_housekeeping");
+    if (!args) {
       // A target that ignores a forced tool_choice cannot do this job. Treat it
       // as a genuine failure so it consumes the budget and starts a cooldown —
       // the old bare `return` left no outcome recorded at all, so such a target
       // was silently re-attempted on every single turn forever.
-      throw new Error("Housekeeping model returned no apply_housekeeping tool call (a forced tool_choice was ignored)");
+      throw new Error("Housekeeping model returned no usable apply_housekeeping arguments");
     }
-    const args = JSON.parse(call.function.arguments) as Record<string, any>;
 
     if (typeof args.storySummary === "string" && args.storySummary.trim()) {
       campaign.storySummary = sanitizeHousekeepingText(args.storySummary).slice(0, HOUSEKEEPING_SUMMARY_MAX_CHARS);

@@ -127,8 +127,12 @@ export type MusicPulseReader = {
   read: (dt: number, now: number) => MusicPulse;
 };
 
-export function createMusicPulse(): MusicPulseReader {
-  const out: MusicPulse = {
+/**
+ * A resting pulse with no analyser behind it — for scenes that should not tap
+ * the score at all (it never touches the audio graph).
+ */
+export function silentPulse(): MusicPulse {
+  return {
     playing: false,
     level: 0,
     sub: 0,
@@ -151,6 +155,10 @@ export function createMusicPulse(): MusicPulseReader {
     beatPeriod: 0,
     last: "none"
   };
+}
+
+export function createMusicPulse(): MusicPulseReader {
+  const out: MusicPulse = silentPulse();
 
   // Explicitly ArrayBuffer-backed: getFloatFrequencyData rejects a possibly
   // SharedArrayBuffer-backed view under the DOM lib's stricter typings.

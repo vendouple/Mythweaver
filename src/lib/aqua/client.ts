@@ -31,6 +31,10 @@ export function aquaConfig() {
     apiKey,
     baseUrl,
     chatModel: process.env.CHAT_MODEL || "",
+    // Optional reasoning effort sent as `reasoning_effort` on every chat call
+    // to the narration model. Empty → the field is never sent (some providers
+    // reject unknown params), so the provider default applies.
+    chatReasoningEffort: normalizeReasoningEffort(process.env.CHAT_REASONING_EFFORT),
     // Optional small/fast model for constrained HOUSEKEEPING ONLY (context
     // summarization/compaction so the large RP model never context-collapses).
     // It never directs live narration, ambience, effects, or backdrops — those
@@ -42,6 +46,9 @@ export function aquaConfig() {
     // setup needs neither.
     fastBaseUrl: process.env.FAST_BASE_URL || baseUrl,
     fastApiKey: process.env.FAST_API_KEY || apiKey,
+    // Housekeeping is mechanical summarization — a low effort is usually
+    // plenty. Empty → not sent (provider default).
+    fastReasoningEffort: normalizeReasoningEffort(process.env.FAST_REASONING_EFFORT),
     imageModel: process.env.IMAGE_MODEL || "",
     // The image model may live on a DIFFERENT OpenAI-compatible provider. Each
     // field falls back to the main chat endpoint when left empty, so a
@@ -65,9 +72,92 @@ export function aquaConfig() {
 export function fastModelTarget(): { model: string; options: AquaFetchOptions } {
   const config = aquaConfig();
   if (config.fastModel) {
-    return { model: config.fastModel, options: { baseUrl: config.fastBaseUrl, apiKey: config.fastApiKey } };
+    return { model: config.fastModel, options: { baseUrl: config.fastBaseUrl, apiKey: config.fastApiKey, reasoningEffort: config.fastReasoningEffort } };
   }
-  return { model: config.chatModel, options: {} };
+  return { model: config.chatModel, options: { reasoningEffort: config.chatReasoningEffort } };
+}
+
+const REASONING_EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh"] as const;
+export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
+
+/**
+ * Parse a REASONING_EFFORT env value. Empty, "default", "off-by-default" or an
+ * unknown word → undefined, meaning the field is not sent at all.
+ */
+export function normalizeReasoningEffort(raw: string | undefined): ReasoningEffort | undefined {
+  const v = String(raw ?? "").toLowerCase().trim();
+  return (REASONING_EFFORTS as readonly string[]).includes(v) ? (v as ReasoningEffort) : undefined;
+}
+
+/**
+ * The tool_choice to send when a call wants exactly one specific tool.
+ *
+ * TOOL_CHOICE_MODE:
+ *   auto     (default) — "auto". Some OpenAI-compatible backends (observed with
+ *            DeepSeek via Pollinations) honor a forced/required choice by
+ *            emitting the call with EMPTY `{}` arguments ~half the time, while
+ *            "auto" with a single offered tool fills it reliably.
+ *   required — "required".
+ *   named    — {type:"function", function:{name}} (strictest; best on OpenAI).
+ */
+export function singleToolChoice(name: string): "auto" | "required" | { type: "function"; function: { name: string } } {
+  const mode = String(process.env.TOOL_CHOICE_MODE ?? "").toLowerCase().trim();
+  if (mode === "named" || mode === "forced") return { type: "function", function: { name } };
+  if (mode === "required") return "required";
+  return "auto";
+}
+
+/**
+ * Best-effort JSON object parse for weaker models: strips code fences, trims
+ * to the outermost braces, drops trailing commas and closes a truncated tail.
+ */
+export function parseLooseJsonObject(raw: unknown): Record<string, any> | null {
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) return raw as Record<string, any>;
+  if (typeof raw !== "string") return null;
+  const s = raw.trim().replace(/^```(?:json)?/i, "").replace(/```$/i, "").trim();
+  const start = s.indexOf("{");
+  if (start === -1) return null;
+  const end = s.lastIndexOf("}");
+  const sliced = end > start ? s.substring(start, end + 1) : s.substring(start);
+  const candidates = [sliced, sliced.replace(/,\s*([}\]])/g, "$1")];
+  let inStr = false, esc = false;
+  const stack: string[] = [];
+  for (const ch of candidates[1]) {
+    if (esc) { esc = false; continue; }
+    if (ch === "\\") { esc = true; continue; }
+    if (ch === '"') { inStr = !inStr; continue; }
+    if (inStr) continue;
+    if (ch === "{") stack.push("}");
+    else if (ch === "[") stack.push("]");
+    else if (ch === "}" || ch === "]") stack.pop();
+  }
+  if (stack.length || inStr) candidates.push((inStr ? candidates[1] + '"' : candidates[1]) + stack.reverse().join(""));
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
+    } catch {
+      // try the next repair
+    }
+  }
+  return null;
+}
+
+/**
+ * Pull the arguments of the named tool out of a chat message. Accepts string
+ * or object arguments, repairs sloppy JSON, and falls back to a JSON object in
+ * message content for endpoints that answer in prose instead of calling the
+ * tool. An empty `{}` counts as no answer.
+ */
+export function extractToolArgs(message: { content?: unknown; tool_calls?: unknown } | null | undefined, name: string): Record<string, any> | null {
+  if (!message) return null;
+  const calls = Array.isArray(message.tool_calls) ? (message.tool_calls as AquaToolCall[]) : [];
+  const call = calls.find((c) => c?.function?.name === name) || calls[0];
+  const fromCall = parseLooseJsonObject(call?.function?.arguments);
+  if (fromCall && Object.keys(fromCall).length) return fromCall;
+  const fromContent = parseLooseJsonObject(typeof message.content === "string" ? message.content : "");
+  if (fromContent && Object.keys(fromContent).length) return fromContent;
+  return null;
 }
 
 /**
@@ -112,6 +202,7 @@ export type ChatTarget = {
   baseUrl: string;
   apiKey: string;
   supportsTools: boolean;
+  reasoningEffort?: ReasoningEffort;
 };
 
 /** The default target id — always resolves to CHAT_MODEL/BASE_URL/API_KEY. */
@@ -132,7 +223,8 @@ export function resolveChatTarget(targetId?: string): ChatTarget {
     model: config.chatModel,
     baseUrl: config.baseUrl,
     apiKey: config.apiKey,
-    supportsTools: envSupportsTools(process.env.CHAT_TARGET_DEFAULT_TOOLS)
+    supportsTools: envSupportsTools(process.env.CHAT_TARGET_DEFAULT_TOOLS),
+    reasoningEffort: config.chatReasoningEffort
   };
   if (!targetId || targetId === DEFAULT_CHAT_TARGET_ID) return defaultTarget;
 
@@ -189,7 +281,9 @@ function readNamedChatTargets(): ChatTarget[] {
     const apiKey = (process.env[`CHAT_TARGET_${i}_API_KEY`] || config.apiKey).trim();
     const label = (process.env[`CHAT_TARGET_${i}_LABEL`] || alias).trim();
     const supportsTools = envSupportsTools(process.env[`CHAT_TARGET_${i}_TOOLS`]);
-    targets.push({ id: alias, alias, label, model, baseUrl, apiKey, supportsTools });
+    // Per-target override; falls back to CHAT_REASONING_EFFORT.
+    const reasoningEffort = normalizeReasoningEffort(process.env[`CHAT_TARGET_${i}_REASONING_EFFORT`]) ?? config.chatReasoningEffort;
+    targets.push({ id: alias, alias, label, model, baseUrl, apiKey, supportsTools, reasoningEffort });
   }
   return targets;
 }
@@ -237,6 +331,12 @@ export type AquaFetchOptions = {
   baseUrl?: string;
   /** Override the bearer token for this request. Falls back to API_KEY. */
   apiKey?: string;
+  /**
+   * Sent as `reasoning_effort` on /chat/completions requests that don't set
+   * one already. Undefined → not sent. Travels with baseUrl/apiKey on the
+   * target options so the effort always matches the model it was set for.
+   */
+  reasoningEffort?: ReasoningEffort;
 };
 
 /**
@@ -349,6 +449,16 @@ export async function aquaFetch(path: string, init: RequestInit, options: AquaFe
   const headers = new Headers(init.headers);
   headers.set("content-type", "application/json");
   if (apiKey) headers.set("authorization", `Bearer ${apiKey}`);
+  if (opts.reasoningEffort && path.endsWith("/chat/completions") && typeof init.body === "string") {
+    try {
+      const parsed = JSON.parse(init.body);
+      if (parsed && typeof parsed === "object" && parsed.reasoning_effort === undefined) {
+        init = { ...init, body: JSON.stringify({ ...parsed, reasoning_effort: opts.reasoningEffort }) };
+      }
+    } catch {
+      // Not JSON — send as-is.
+    }
+  }
 
   for (let attempt = 1; attempt <= retries; attempt++) {
     const controller = new AbortController();

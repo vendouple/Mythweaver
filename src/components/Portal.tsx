@@ -1,12 +1,24 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, CampaignSummary } from "@/lib/client/api";
+import { bgmResume, bgmSetContext, bgmSetTheme, bgmStop } from "@/lib/client/audio";
+import { useThemeSkin } from "@/lib/client/skin";
 import CosmosCanvas from "@/components/three/CosmosCanvas";
+import { THEME_SHOWCASE } from "@/components/three/themeVisuals";
+
+type ReelTheme = keyof typeof THEME_SHOWCASE;
+const REEL = Object.keys(THEME_SHOWCASE) as ReelTheme[];
+const REEL_MS = 16_000;
+const FADE_MS = 650;
+const SOUND_KEY = "mythweaver.portalSound";
 
 /**
- * The front door. A dark astral table with three ways in: forge a new
- * legend, reopen a saga, or step through to the phone controller.
+ * The front door, as a world reel. Behind the doors the portal dreams through
+ * every campaign world in turn — its live environment, its music (when sound
+ * is on) and the whole interface re-dressed in that world's skin — until a
+ * guest picks one to linger on. Three ways in: forge a new legend, reopen a
+ * saga, or step through to the phone controller.
  */
 export default function Portal({
   onCreate,
@@ -28,6 +40,86 @@ export default function Portal({
   const [voices, setVoices] = useState<Array<{ id: string }>>([]);
   const [voiceId, setVoiceId] = useState("");
 
+  // World reel ----------------------------------------------------------
+  const [world, setWorld] = useState<ReelTheme>(() => REEL[Math.floor(Math.random() * REEL.length)]);
+  const [fading, setFading] = useState(false);
+  const [paused, setPaused] = useState(false);
+  const [sound, setSound] = useState(false);
+  const fadeTimer = useRef<number | null>(null);
+  useThemeSkin(world);
+
+  const showWorld = (next: ReelTheme) => {
+    if (next === world) return;
+    if (fadeTimer.current) window.clearTimeout(fadeTimer.current);
+    setFading(true);
+    fadeTimer.current = window.setTimeout(() => {
+      setWorld(next);
+      fadeTimer.current = window.setTimeout(() => setFading(false), 120);
+    }, FADE_MS);
+  };
+
+  useEffect(() => () => {
+    if (fadeTimer.current) window.clearTimeout(fadeTimer.current);
+  }, []);
+
+  useEffect(() => {
+    // Reduced motion: no auto-advance; the guest steps through by hand.
+    const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (paused || still || sagasOpen) return;
+    const id = window.setTimeout(() => showWorld(REEL[(REEL.indexOf(world) + 1) % REEL.length]), REEL_MS);
+    return () => window.clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [world, paused, sagasOpen]);
+
+  // Optional score: each world plays its own calm shelf, so the environment's
+  // music sync has something to dance to. Off by default (autoplay rules, and
+  // a quiet front door); remembered per device once switched on.
+  useEffect(() => {
+    try {
+      if (window.localStorage.getItem(SOUND_KEY) === "1") setSound(true);
+    } catch {
+      // Storage blocked — sound simply starts off.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!sound) return;
+    bgmSetTheme(world);
+    bgmSetContext("wonder");
+  }, [sound, world]);
+
+  useEffect(() => {
+    if (!sound) return;
+    // A remembered "on" still needs a gesture before the browser lets it play.
+    const kick = () => bgmResume();
+    window.addEventListener("pointerdown", kick, { once: true });
+    window.addEventListener("keydown", kick, { once: true });
+    return () => {
+      window.removeEventListener("pointerdown", kick);
+      window.removeEventListener("keydown", kick);
+    };
+  }, [sound]);
+
+  useEffect(() => () => bgmStop(), []);
+
+  const toggleSound = () => {
+    const next = !sound;
+    setSound(next);
+    try {
+      window.localStorage.setItem(SOUND_KEY, next ? "1" : "0");
+    } catch {
+      // Not persisted.
+    }
+    if (next) {
+      bgmSetTheme(world);
+      bgmSetContext("wonder");
+      bgmResume();
+    } else {
+      bgmStop();
+    }
+  };
+
+  // Archive & voice settings --------------------------------------------
   useEffect(() => {
     let cancelled = false;
     api.listCampaigns()
@@ -83,29 +175,31 @@ export default function Portal({
   };
 
   const sagas = campaigns || [];
+  const show = THEME_SHOWCASE[world];
 
   return (
-    <div className="portal screen">
-      <CosmosCanvas drama={sagasOpen ? 0.35 : 0.7} />
+    <div className="portal screen" data-music-theme={world}>
+      <CosmosCanvas theme={world} drama={sagasOpen ? 0.35 : 0.8} />
       <div className="portal-veil" />
+      <div className={`portal-fade ${fading ? "on" : ""}`} aria-hidden />
 
-      <header className="portal-mast">
-        <div className="brand-sigil" aria-hidden>✦</div>
-        <h1 className="brand-title">Mythweaver</h1>
-        <p className="brand-sub">An AI game master for the living room — the screen is the stage, your phones are the hands of fate.</p>
-      </header>
-
-      <button className="portal-debug-button" onClick={onDebug} title="Open the UI and theme showcase">
-        Debug UI
-      </button>
-      <button
-        className="portal-settings-button"
-        onClick={() => setSettingsOpen((open) => !open)}
-        aria-expanded={settingsOpen}
-        aria-controls="portal-settings"
-      >
-        ⚙ Settings
-      </button>
+      <nav className="portal-topbar" aria-label="Table tools">
+        <button
+          className="portal-top-chip"
+          onClick={() => setSettingsOpen((open) => !open)}
+          aria-expanded={settingsOpen}
+          aria-controls="portal-settings"
+        >
+          ⚙ Settings
+        </button>
+        <span className="portal-topbar-spacer" />
+        <button className={`portal-top-chip ${sound ? "on" : ""}`} onClick={toggleSound} aria-pressed={sound} title="Play each world's music">
+          {sound ? "♪ Sound on" : "♪ Sound off"}
+        </button>
+        <button className="portal-top-chip" onClick={onDebug} title="Open the UI and theme showcase">
+          Debug UI
+        </button>
+      </nav>
 
       {settingsOpen ? (
         <aside id="portal-settings" className="portal-settings panel" aria-label="Mythweaver settings">
@@ -125,34 +219,48 @@ export default function Portal({
         </aside>
       ) : null}
 
+      <header className="portal-mast">
+        <div className="brand-sigil" aria-hidden>{show.glyph}</div>
+        <h1 className="brand-title">Mythweaver</h1>
+        <p className="brand-sub">An AI game master for the living room. The screen is the stage; your phones are the hands of fate.</p>
+      </header>
+
       {!sagasOpen ? (
-        <main className="portal-choices">
-          <button className="portal-card" onClick={forgeWithVoiceServer}>
-            <span className="portal-card-rune" aria-hidden>⟡</span>
-            <span className="portal-card-title">Forge a New Legend</span>
-            <span className="portal-card-sub">Shape a world, gather the party, and let the Weaver narrate.</span>
-          </button>
-          <button
-            className="portal-card"
-            onClick={() => setSagasOpen(true)}
-            disabled={campaigns !== null && sagas.length === 0}
-          >
-            <span className="portal-card-rune" aria-hidden>❖</span>
-            <span className="portal-card-title">Reopen a Saga</span>
-            <span className="portal-card-sub">
-              {campaigns === null
-                ? "Consulting the archive…"
-                : sagas.length === 0
-                  ? "The archive is empty — forge your first legend."
-                  : `${sagas.length} ${sagas.length === 1 ? "tale waits" : "tales wait"} in the archive.`}
-            </span>
-          </button>
-          <button className="portal-card portal-card-join" onClick={onJoin}>
-            <span className="portal-card-rune" aria-hidden>➶</span>
-            <span className="portal-card-title">Join a Table</span>
-            <span className="portal-card-sub">On a phone? Enter a table code and take your seat.</span>
-          </button>
-        </main>
+        <>
+          <section className={`portal-world ${fading ? "fading" : ""}`} aria-live="polite">
+            <span className="portal-world-kicker">Now dreaming · {show.genre}</span>
+            <h2 className="portal-world-name">{show.name}</h2>
+            <p className="portal-world-line">{show.line}</p>
+          </section>
+
+          <main className="portal-choices">
+            <button className="portal-card" onClick={forgeWithVoiceServer}>
+              <span className="portal-card-rune" aria-hidden>⟡</span>
+              <span className="portal-card-title">Forge a New Legend</span>
+              <span className="portal-card-sub">Shape a world, gather the party, and let the Weaver narrate.</span>
+            </button>
+            <button
+              className="portal-card"
+              onClick={() => setSagasOpen(true)}
+              disabled={campaigns !== null && sagas.length === 0}
+            >
+              <span className="portal-card-rune" aria-hidden>❖</span>
+              <span className="portal-card-title">Reopen a Saga</span>
+              <span className="portal-card-sub">
+                {campaigns === null
+                  ? "Consulting the archive…"
+                  : sagas.length === 0
+                    ? "The archive is empty. Forge your first legend."
+                    : `${sagas.length} ${sagas.length === 1 ? "tale waits" : "tales wait"} in the archive.`}
+              </span>
+            </button>
+            <button className="portal-card portal-card-join" onClick={onJoin}>
+              <span className="portal-card-rune" aria-hidden>➶</span>
+              <span className="portal-card-title">Join a Table</span>
+              <span className="portal-card-sub">On a phone? Enter a table code and take your seat.</span>
+            </button>
+          </main>
+        </>
       ) : (
         <main className="portal-archive">
           <div className="archive-head">
@@ -185,7 +293,7 @@ export default function Portal({
                     <button className="ghost-button" onClick={() => setConfirmDelete(null)}>Keep</button>
                   </span>
                 ) : (
-                  <button className="archive-delete" title="Delete campaign" onClick={() => setConfirmDelete(saga.id)}>✕</button>
+                  <button className="archive-delete" title="Delete campaign" aria-label={`Delete ${saga.title}`} onClick={() => setConfirmDelete(saga.id)}>✕</button>
                 )}
               </div>
             ))}
@@ -194,7 +302,29 @@ export default function Portal({
       )}
 
       <footer className="portal-foot">
-        <span>Phones join at this address — or scan the lobby QR.</span>
+        <div className="portal-reel" role="group" aria-label="Preview a world">
+          <button
+            className="portal-reel-play"
+            onClick={() => setPaused((value) => !value)}
+            aria-label={paused ? "Resume the world reel" : "Pause the world reel"}
+            title={paused ? "Resume" : "Pause"}
+          >
+            {paused ? "▶" : "❚❚"}
+          </button>
+          {REEL.map((key) => (
+            <button
+              key={key}
+              className={`portal-reel-dot ${key === world ? "current" : ""}`}
+              onClick={() => { setPaused(true); showWorld(key); }}
+              aria-label={`${THEME_SHOWCASE[key].name} (${THEME_SHOWCASE[key].genre})`}
+              aria-pressed={key === world}
+              title={THEME_SHOWCASE[key].name}
+            >
+              <span aria-hidden>{THEME_SHOWCASE[key].glyph}</span>
+            </button>
+          ))}
+        </div>
+        <span className="portal-foot-hint">Phones join at this address, or scan the lobby QR.</span>
       </footer>
     </div>
   );
