@@ -52,7 +52,7 @@ export async function generateImage(
     baseUrl: config.imageBaseUrl,
     apiKey: config.imageApiKey,
     retries: Math.max(1, Number(process.env.IMAGE_RETRIES) || 3),
-    timeoutMs: Math.max(5000, Number(process.env.IMAGE_TIMEOUT_MS) || 60000),
+    timeoutMs: Math.max(5000, Number(process.env.IMAGE_TIMEOUT_MS) || 180000),
     onRetry: opts.onRetry
   };
 

@@ -246,7 +246,14 @@ function cloud(kit: Kit, count: number, color: THREE.ColorRepresentation, size: 
 }
 
 /** Line segments with a mutable buffer (two vertices per segment). */
-function segments(kit: Kit, count: number, color: THREE.ColorRepresentation, opacity: number) {
+/**
+ * Hard 1px line effects (bolts, lasers, grids, routes, impact spokes, line
+ * silhouettes). Over the in-game overlay they read as scratches across the
+ * AI-painted backdrop, so they exist only in the full backdrop unless a
+ * builder opts in with `overlay` — weather such as rain, which belongs on top
+ * of any picture.
+ */
+function segments(kit: Kit, count: number, color: THREE.ColorRepresentation, opacity: number, overlay = false) {
   const positions = new Float32Array(count * 6);
   const geometry = kit.track(new THREE.BufferGeometry());
   geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
@@ -261,6 +268,7 @@ function segments(kit: Kit, count: number, color: THREE.ColorRepresentation, opa
   }));
   const lines = new THREE.LineSegments(geometry, material);
   lines.frustumCulled = false;
+  lines.visible = kit.full || overlay;
   kit.root.add(lines);
   const attr = geometry.getAttribute("position") as THREE.BufferAttribute;
   return { positions, geometry, material, lines, attr };
@@ -396,7 +404,9 @@ function ringPool(kit: Kit, count: number, color: THREE.ColorRepresentation, opt
       ring.mesh.position.set(x, y, z);
       ring.age = 0;
       ring.size = size;
-      ring.peak = peak;
+      // Over a painted backdrop a bright hairline circle reads as a drawn-on
+      // mark; keep the pulse but as a faint ripple.
+      ring.peak = kit.full ? peak : peak * 0.4;
       if (tint) ring.material.color.copy(tint);
       ring.mesh.visible = true;
     },
@@ -859,7 +869,7 @@ function buildNoir(kit: Kit): Frame {
   wins.attr.needsUpdate = true;
 
   const DROPS = kit.n(520);
-  const rain = segments(kit, DROPS, "#9fb3cc", 0.35);
+  const rain = segments(kit, DROPS, "#9fb3cc", 0.35, true);
   const drop = Array.from({ length: DROPS }, () => ({ x: (kit.rand() - 0.5) * W, y: (kit.rand() - 0.5) * H, z: Z + 2 - kit.rand() * 8, v: 14 + kit.rand() * 10 }));
   // Venetian shafts.
   const shaftTex = kit.track(shaftTexture());

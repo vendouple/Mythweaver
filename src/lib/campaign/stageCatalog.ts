@@ -28,6 +28,15 @@ export const AMBIENCE_SOUNDS = [
   "battlefield", "fire", "supernatural", "underwater", "library", "cafe", "train", "harbor", "temple", "hospital"
 ] as const;
 
+/**
+ * Persistent weather the DM may layer over the stage with set_ambience, on
+ * top of the light mood atmosphere it always shows. "world" is the campaign
+ * theme's own signature overlay, opt-in only.
+ */
+export const AMBIENCE_VISUALS = [
+  "none", "motes", "embers", "ash", "rain", "snow", "fog", "lightning", "lightrays", "world"
+] as const;
+
 export const AMBIENCE_ACOUSTICS = [
   "outdoors", "indoors", "small-room", "large-hall", "cave", "distant", "muffled", "underwater"
 ] as const;

@@ -29,7 +29,8 @@ import {
 import { createId, createJoinCode } from "@/lib/utils/ids";
 import { MUSIC_THEMES, MusicTheme } from "./musicTheme";
 import { isSafeTtsServerHost } from "@/lib/tts/config";
-import { AMBIENCE_SOUNDS, AMBIENCE_ACOUSTICS, EFFECT_KINDS, SFX_CUES } from "./stageCatalog";
+import { AMBIENCE_SOUNDS, AMBIENCE_ACOUSTICS, AMBIENCE_VISUALS, EFFECT_KINDS, SFX_CUES } from "./stageCatalog";
+import { decodeInlineImage, externalizeInlineImages, saveImageBuffer, writeFileAtomic } from "./assets";
 
 const dataRoot = path.join(process.cwd(), "data", "campaigns");
 
@@ -393,6 +394,12 @@ export async function getCampaign(id: string): Promise<Campaign> {
   } catch {
     // Legacy saves keep environment state in campaign.json and migrate on save.
   }
+  if (raw.includes("data:image/")) {
+    // Saves from before images moved to disk carry base64 inline; lift them
+    // out now (files are content-hashed, so this is idempotent) and the next
+    // save writes the slim JSON.
+    await externalizeInlineImages(id, parsed).catch((err) => console.error(`[Store] Could not externalize inline images for ${id}:`, err));
+  }
   let castPlan: unknown = (parsed as Campaign).castPlan;
   try {
     castPlan = JSON.parse(await readFile(castPlanFile(id), "utf8"));
@@ -447,6 +454,8 @@ export async function saveCampaign(campaign: Campaign) {
 
 async function writeCampaignStateFiles(campaign: Campaign, writeEnvironment: boolean, writeCastPlan: boolean) {
   const campaignState = JSON.parse(JSON.stringify(campaign)) as Campaign;
+  // Never persist base64 images, whichever code path set them.
+  await externalizeInlineImages(campaign.id, campaignState);
   delete campaignState.castPlan;
   delete campaignState.locations;
   delete campaignState.focusedLocationId;
@@ -459,9 +468,9 @@ async function writeCampaignStateFiles(campaign: Campaign, writeEnvironment: boo
     delete npc.locationId;
     delete npc.zoneId;
   }
-  await writeFile(campaignFile(campaign.id), JSON.stringify(campaignState, null, 2), "utf8");
+  await writeFileAtomic(campaignFile(campaign.id), JSON.stringify(campaignState, null, 2));
   if (writeCastPlan) {
-    await writeFile(castPlanFile(campaign.id), JSON.stringify(campaign.castPlan || [], null, 2), "utf8");
+    await writeFileAtomic(castPlanFile(campaign.id), JSON.stringify(campaign.castPlan || [], null, 2));
   }
   if (!writeEnvironment) return;
   const environment = {
@@ -472,7 +481,7 @@ async function writeCampaignStateFiles(campaign: Campaign, writeEnvironment: boo
     playerPositions: Object.fromEntries(campaign.players.map((p) => [p.id, { locationId: p.locationId, zoneId: p.zoneId }])),
     npcPositions: Object.fromEntries(campaign.storyCharacters.map((n) => [n.id, { locationId: n.locationId, zoneId: n.zoneId }]))
   };
-  await writeFile(environmentFile(campaign.id), JSON.stringify(environment, null, 2), "utf8");
+  await writeFileAtomic(environmentFile(campaign.id), JSON.stringify(environment, null, 2));
 }
 
 export function isValidImageUrl(url: string | undefined | null): boolean {
@@ -708,6 +717,15 @@ function normalizeEnding(raw: unknown): CampaignEnding | undefined {
   };
 }
 
+/** Valid, de-duplicated, at most 3; "none" (or nothing) means the light mood baseline only. */
+export function normalizeAmbienceVisuals(raw: unknown): Ambience["visuals"] {
+  if (!Array.isArray(raw)) return undefined;
+  const picked = Array.from(new Set(raw.map(String)))
+    .filter((v): v is NonNullable<Ambience["visuals"]>[number] => (AMBIENCE_VISUALS as readonly string[]).includes(v) && v !== "none")
+    .slice(0, 3);
+  return picked.length ? picked : undefined;
+}
+
 function normalizeAmbience(raw: unknown): Ambience | undefined {
   if (!raw || typeof raw !== "object") return undefined;
   const item = raw as Partial<Ambience>;
@@ -719,12 +737,14 @@ function normalizeAmbience(raw: unknown): Ambience | undefined {
   const acoustics = Array.isArray(item.acoustics)
     ? item.acoustics.filter((acoustic): acoustic is NonNullable<Ambience["acoustics"]>[number] => AMBIENCE_ACOUSTICS.includes(acoustic as NonNullable<Ambience["acoustics"]>[number])).slice(0, 2)
     : undefined;
+  const visuals = normalizeAmbienceVisuals(item.visuals);
   return {
     mood,
     intensity: Number.isFinite(intensity) ? intensity : 0.5,
     note: typeof item.note === "string" ? item.note : undefined,
     sounds: sounds?.length ? sounds : undefined,
     acoustics: acoustics?.length ? acoustics : undefined,
+    visuals,
     updatedAt: String(item.updatedAt || new Date().toISOString())
   };
 }
@@ -1311,7 +1331,7 @@ export async function writeCampaignTextFile(campaignId: string, filePath: string
   if (!fullPath.startsWith(root)) throw new Error("Unsafe campaign file path");
   await mkdir(path.dirname(fullPath), { recursive: true });
   const output = safePath.toLowerCase() === "quest_log.md" ? sanitizeQuestLog(content) : content;
-  await writeFile(fullPath, output, "utf8");
+  await writeFileAtomic(fullPath, output);
 }
 
 function sanitizeQuestLog(content: string) {
@@ -1511,32 +1531,30 @@ export async function downloadAndSaveImage(
   category: "players" | "npcs" | "backgrounds",
   subId?: string
 ): Promise<string> {
-  if (!url || url.startsWith("/api/campaigns") || url.startsWith("data:") || url.startsWith("/")) {
-    return url;
+  if (!url || url.startsWith("/")) return url;
+
+  // Providers that answer with b64_json hand us a data: URL. Those used to be
+  // passed straight through and stored inline (see assets.ts for the fallout).
+  if (url.startsWith("data:")) {
+    const decoded = decodeInlineImage(url);
+    if (!decoded) return url;
+    try {
+      return await saveImageBuffer(campaignId, decoded.buffer, category, subId, decoded.mime);
+    } catch (error) {
+      console.error("Failed to save inline image to disk:", error);
+      return url;
+    }
   }
 
   try {
-    const response = await fetch(url);
+    const response = await fetch(url, { signal: AbortSignal.timeout(Math.max(5000, Number(process.env.IMAGE_DOWNLOAD_TIMEOUT_MS) || 45000)) });
     if (!response.ok) {
-      throw new Error(`Failed to fetch image: ${response.statusText}`);
+      throw new Error(`Failed to fetch image: ${response.status} ${response.statusText}`);
     }
     const buffer = Buffer.from(await response.arrayBuffer());
-
-    const cleanCampaignId = campaignId.replace(/[^a-zA-Z0-9_-]/g, "");
-    const campaignDirName = path.join(dataRoot, cleanCampaignId);
-    
-    const relativeDir = subId ? path.join(category, subId.replace(/[^a-zA-Z0-9_-]/g, "")) : category;
-    const destDir = path.join(campaignDirName, relativeDir);
-    await mkdir(destDir, { recursive: true });
-
-    const filename = subId ? `${subId.replace(/[^a-zA-Z0-9_-]/g, "")}.png` : `${createId("img")}.png`;
-    const fullPath = path.join(destDir, filename);
-    await writeFile(fullPath, buffer);
-
-    const assetRelativePath = subId ? `${category}/${subId}/${filename}` : `${category}/${filename}`;
-    return `/api/campaigns/${campaignId}/assets?path=${encodeURIComponent(assetRelativePath)}`;
+    return await saveImageBuffer(campaignId, buffer, category, subId, response.headers.get("content-type"));
   } catch (error) {
-    console.error("Failed to download and save image locally, using original URL:", error);
+    console.error("Failed to download and save image locally, using original URL:", error instanceof Error ? error.message : error);
     return url;
   }
 }

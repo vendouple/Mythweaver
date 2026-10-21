@@ -2,7 +2,7 @@
 
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import * as THREE from "three";
-import type { AmbienceMood, StageEffectKind } from "@/lib/campaign/types";
+import type { AmbienceMood, AmbienceVisual, StageEffectKind } from "@/lib/campaign/types";
 import { themeVisual, ThemeKey } from "@/components/three/themeVisuals";
 import { themeGutter } from "@/components/three/themeLayers";
 import { createThemeEnvironment } from "@/components/three/themeEnvironments";
@@ -45,6 +45,20 @@ const MOODS: Record<AmbienceMood, MoodRecipe> = {
 
 const MAX_PARTICLES = 900;
 
+/**
+ * Particle weather the DM can hold on screen (set_ambience visuals). Only one
+ * flavour drives the particle field at a time; this is the priority order.
+ * "motes" uses the mood's own recipe (gold dust when calm, sparks in battle).
+ */
+type Flavor = { colors: [string, string]; drift: number; wander: number; size: number; opacity: number; count: number };
+const PARTICLE_FLAVORS: Partial<Record<AmbienceVisual, Flavor>> = {
+  rain:   { colors: ["#a9bcd4", "#7f93ac"], drift: -9,   wander: 0.2, size: 0.06,  opacity: 0.35, count: 160 },
+  snow:   { colors: ["#f6f9ff", "#cfdcef"], drift: -0.8, wander: 1.0, size: 0.07,  opacity: 0.85, count: 420 },
+  embers: { colors: ["#ffb35c", "#ff5c2a"], drift: 1.6,  wander: 1.3, size: 0.06,  opacity: 0.9,  count: 320 },
+  ash:    { colors: ["#bdb2a4", "#7d756c"], drift: -0.5, wander: 1.0, size: 0.05,  opacity: 0.55, count: 300 }
+};
+const FLAVOR_ORDER: AmbienceVisual[] = ["rain", "snow", "embers", "ash", "motes"];
+
 /** Tall soft-edged shaft, bright at the top, dissolving downward. */
 function makeRayTexture() {
   const canvas = document.createElement("canvas");
@@ -83,16 +97,20 @@ function makeFogTexture() {
 }
 
 /**
- * The living air of the host stage: a full-screen particle field whose
- * palette, density, and direction are directed by the AI DM through the
- * set_ambience tool, plus one-shot squalls from trigger_effect. Rendered
- * transparently above the painted scene backdrop.
+ * The living air of the host stage, rendered transparently above the painted
+ * scene backdrop. By default it is light: the mood's motes, a little fog and
+ * soft light shafts. The DM layers weather on top via set_ambience visuals
+ * (rain, snow, embers, ash, heavier fog, lightning, stronger light rays, the
+ * world overlay), and trigger_effect fires one-shot squalls.
  */
-const StageAtmosphere = forwardRef<AtmosphereHandle, { mood: AmbienceMood; intensity: number; theme?: ThemeKey | string | null }>(
-  function StageAtmosphere({ mood, intensity, theme }, handle) {
+const StageAtmosphere = forwardRef<AtmosphereHandle, { mood: AmbienceMood; intensity: number; theme?: ThemeKey | string | null; visuals?: AmbienceVisual[] }>(
+  function StageAtmosphere({ mood, intensity, theme, visuals }, handle) {
     const mountRef = useRef<HTMLDivElement>(null);
     const moodRef = useRef<{ mood: AmbienceMood; intensity: number }>({ mood, intensity });
     moodRef.current = { mood, intensity };
+    // Weather the DM has set on top of the light mood baseline.
+    const visualsRef = useRef<AmbienceVisual[]>(visuals || []);
+    visualsRef.current = visuals || [];
     const burstRef = useRef<{ kind: StageEffectKind; strength: number; at: number } | null>(null);
 
     useImperativeHandle(handle, () => ({
@@ -178,6 +196,47 @@ const StageAtmosphere = forwardRef<AtmosphereHandle, { mood: AmbienceMood; inten
         scene.add(mesh);
       }
 
+      // Lightning: the whole sky blooms and flickers; no bolt is drawn, so the
+      // painting is lit rather than scribbled on.
+      const flashMaterial = new THREE.MeshBasicMaterial({
+        map: fogTexture,
+        color: "#cfe0ff",
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending
+      });
+      const flash = new THREE.Mesh(new THREE.PlaneGeometry(40, 22), flashMaterial);
+      flash.position.set(0, 3.5, -6);
+      scene.add(flash);
+      let flashLife = 0;
+      let nextFlashAt = 2 + Math.random() * 4;
+
+      // Rain falls as slanted streaks (points read as dust, not rain). Fades
+      // in and out with the DM's "rain" visual or a rain burst.
+      const RAIN_STREAKS = 420;
+      const rainPositions = new Float32Array(RAIN_STREAKS * 6);
+      const rainSpeeds = new Float32Array(RAIN_STREAKS);
+      for (let i = 0; i < RAIN_STREAKS; i += 1) {
+        rainSpeeds[i] = 0.75 + Math.random() * 0.5;
+        rainPositions[i * 6] = (Math.random() - 0.5) * 28;
+        rainPositions[i * 6 + 1] = (Math.random() - 0.5) * 18;
+        rainPositions[i * 6 + 2] = -Math.random() * 6;
+      }
+      const rainGeometry = new THREE.BufferGeometry();
+      rainGeometry.setAttribute("position", new THREE.BufferAttribute(rainPositions, 3));
+      const rainMaterial = new THREE.LineBasicMaterial({
+        color: "#b8c8dc",
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending
+      });
+      const rain = new THREE.LineSegments(rainGeometry, rainMaterial);
+      rain.frustumCulled = false;
+      scene.add(rain);
+      let rainLevel = 0;
+
       const colorA = new THREE.Color();
       const colorB = new THREE.Color();
       const mixed = new THREE.Color();
@@ -196,13 +255,18 @@ const StageAtmosphere = forwardRef<AtmosphereHandle, { mood: AmbienceMood; inten
       // overlay (no opaque skylines — the painted backdrop stays the scene),
       // synced to the score through the music pulse.
       const themeWind: [number, number] = [visual.dust.flow[0] * 1.6, visual.dust.flow[1] * 1.2];
-      const themeLayer = createThemeEnvironment(scene, visual, { width: 26, height: 18, z: -5, full: false });
+      // The theme's own overlay exists only while the DM asks for "world".
+      let themeLayer: ReturnType<typeof createThemeEnvironment> = null;
       const pulseReader = createMusicPulse();
+      const pickFlavor = (list: AmbienceVisual[]) => FLAVOR_ORDER.find((key) => list.includes(key)) || null;
+      let lastFlavor: AmbienceVisual | null = pickFlavor(visualsRef.current);
 
       const applyMoodColors = () => {
         const recipe = MOODS[moodRef.current.mood] || MOODS.calm;
-        colorA.set(recipe.colors[0]).lerp(themeTintA, tint);
-        colorB.set(recipe.colors[1]).lerp(themeTintB, tint);
+        const flavor = lastFlavor ? PARTICLE_FLAVORS[lastFlavor] : undefined;
+        // Weather keeps its natural colour; mood motes lean to the theme.
+        colorA.set((flavor || recipe).colors[0]).lerp(themeTintA, flavor ? 0 : tint);
+        colorB.set((flavor || recipe).colors[1]).lerp(themeTintB, flavor ? 0 : tint);
         for (let i = 0; i < MAX_PARTICLES; i += 1) {
           mixed.copy(colorA).lerp(colorB, (i % 7) / 6);
           colors[i * 3] = mixed.r;
@@ -241,9 +305,22 @@ const StageAtmosphere = forwardRef<AtmosphereHandle, { mood: AmbienceMood; inten
         const level = 0.35 + Math.max(0, Math.min(1, rawIntensity)) * 0.85;
         const pulse = pulseReader.read(dt, t);
 
-        if (activeMood !== lastMood) {
+        const shown = visualsRef.current;
+        const flavorKey = pickFlavor(shown);
+        if (activeMood !== lastMood || flavorKey !== lastFlavor) {
           lastMood = activeMood;
+          lastFlavor = flavorKey;
           applyMoodColors();
+        }
+        // Baseline is the mood's own light motes (as before the redesign);
+        // DM-set weather replaces them while it lasts.
+        const flavor = flavorKey ? PARTICLE_FLAVORS[flavorKey] || recipe : recipe;
+
+        const wantsWorld = shown.includes("world");
+        if (wantsWorld && !themeLayer) themeLayer = createThemeEnvironment(scene, visual, { width: 26, height: 18, z: -5, full: false });
+        if (!wantsWorld && themeLayer) {
+          themeLayer.dispose();
+          themeLayer = null;
         }
 
         // One-shot squalls raise density/speed briefly.
@@ -260,13 +337,14 @@ const StageAtmosphere = forwardRef<AtmosphereHandle, { mood: AmbienceMood; inten
           }
         }
 
-        const isRain = surgeKind === "rain";
-        const isSnow = surgeKind === "snow";
-        const drift = isRain ? -9 : isSnow ? -0.8 : recipe.drift * level * (1 + surge * 2.5);
-        const wander = (isRain ? 0.2 : recipe.wander) * level;
+        const isRain = surgeKind === "rain" || (!surgeKind && flavorKey === "rain");
+        const isSnow = surgeKind === "snow" || (!surgeKind && flavorKey === "snow");
+        const base = flavor || recipe;
+        const drift = surgeKind === "rain" ? -9 : surgeKind === "snow" ? -0.8 : base.drift * (flavor && flavor !== recipe ? 1 : level) * (1 + surge * 2.5);
+        const wander = (isRain ? 0.2 : base.wander) * level;
         const visible = Math.min(
           MAX_PARTICLES,
-          Math.floor(recipe.count * level + surge * 350)
+          Math.floor(base.count * level + surge * 350)
         );
 
         for (let i = 0; i < MAX_PARTICLES; i += 1) {
@@ -293,12 +371,13 @@ const StageAtmosphere = forwardRef<AtmosphereHandle, { mood: AmbienceMood; inten
         // the theme's flicker personality breathes through every light source.
         const gutter = themeGutter(visual, t);
 
-        material.size = recipe.size * (isRain ? 1.6 : 1) + surge * 0.02;
-        material.opacity = (recipe.opacity * (0.5 + level * 0.5) + surge * 0.25) * (0.75 + gutter * 0.25);
+        material.size = base.size * (isRain && !flavor ? 1.6 : 1) + surge * 0.02;
+        material.opacity = (base.opacity * (0.5 + level * 0.5) + surge * 0.25) * (0.75 + gutter * 0.25);
 
+        const rayStrength = shown.includes("lightrays") ? Math.max(recipe.rays, 0.45) : recipe.rays;
         rays.forEach((ray, index) => {
           const material = ray.mesh.material as THREE.MeshBasicMaterial;
-          material.opacity = recipe.rays * level * (0.16 + 0.1 * Math.sin(t * 0.22 + ray.seed)) * gutter;
+          material.opacity = rayStrength * level * (0.16 + 0.1 * Math.sin(t * 0.22 + ray.seed)) * gutter;
           ray.mesh.rotation.z = -0.3 - index * 0.07 + Math.sin(t * 0.08 + ray.seed) * 0.03;
         });
 
@@ -310,13 +389,54 @@ const StageAtmosphere = forwardRef<AtmosphereHandle, { mood: AmbienceMood; inten
           pulse
         });
 
+        const rainTarget = Math.max(shown.includes("rain") ? 0.6 + level * 0.4 : 0, surgeKind === "rain" ? surge : 0);
+        rainLevel += (rainTarget - rainLevel) * Math.min(1, dt * 1.5);
+        rain.visible = rainLevel > 0.01;
+        if (rain.visible) {
+          const count = Math.floor(RAIN_STREAKS * rainLevel);
+          const slant = -0.18 + themeWind[0] * 0.05;
+          for (let i = 0; i < count; i += 1) {
+            const o = i * 6;
+            const fall = 19 * rainSpeeds[i] * dt;
+            rainPositions[o] += slant * fall;
+            rainPositions[o + 1] -= fall;
+            if (rainPositions[o + 1] < -9.5) {
+              rainPositions[o] = (Math.random() - 0.5) * 28;
+              rainPositions[o + 1] = 9.5 + Math.random() * 2;
+            }
+            if (rainPositions[o] < -14) rainPositions[o] += 28;
+            if (rainPositions[o] > 14) rainPositions[o] -= 28;
+            const length = 0.55 * rainSpeeds[i];
+            rainPositions[o + 3] = rainPositions[o] - slant * length;
+            rainPositions[o + 4] = rainPositions[o + 1] + length;
+            rainPositions[o + 5] = rainPositions[o + 2];
+          }
+          rainGeometry.setDrawRange(0, count * 2);
+          rainGeometry.attributes.position.needsUpdate = true;
+          rainMaterial.opacity = 0.32 * Math.min(1, rainLevel * 1.4) * (1 + flashLife * 0.8);
+        }
+
         const fogBoost = surgeKind === "fog" ? surge * 0.5 : 0;
+        const fogBase = (shown.includes("fog") ? Math.max(recipe.fogOpacity, 0.3) : recipe.fogOpacity) * level;
         fogSheets.forEach((sheet, index) => {
           sheet.position.x += dt * (0.25 + index * 0.12) * (index % 2 === 0 ? 1 : -1);
           if (sheet.position.x > 14) sheet.position.x = -14;
           if (sheet.position.x < -14) sheet.position.x = 14;
-          (sheet.material as THREE.MeshBasicMaterial).opacity = recipe.fogOpacity * level + fogBoost;
+          (sheet.material as THREE.MeshBasicMaterial).opacity = fogBase + fogBoost;
         });
+
+        // Thunderstorm: strikes on a hard snare when the score is driving,
+        // otherwise every few seconds; a double flicker, then a slow fade.
+        if (shown.includes("lightning")) {
+          nextFlashAt -= dt;
+          if ((pulse.snareHit && pulse.snare > 0.75 && flashLife < 0.1) || nextFlashAt <= 0) {
+            flashLife = 1;
+            nextFlashAt = 4 + Math.random() * 7;
+          }
+        }
+        flashLife = Math.max(0, flashLife - dt * 1.6);
+        const flicker = flashLife > 0.82 ? 1 : flashLife > 0.7 ? 0.25 : flashLife > 0.6 ? 0.85 : flashLife * 0.9;
+        flashMaterial.opacity = flicker * 0.55;
 
         renderer.render(scene, camera);
       };
@@ -340,6 +460,10 @@ const StageAtmosphere = forwardRef<AtmosphereHandle, { mood: AmbienceMood; inten
           (ray.mesh.material as THREE.Material).dispose();
         }
         themeLayer?.dispose();
+        flash.geometry.dispose();
+        rainGeometry.dispose();
+        rainMaterial.dispose();
+        flashMaterial.dispose();
         if (renderer.domElement.parentElement === mount) mount.removeChild(renderer.domElement);
       };
     }, [theme]);

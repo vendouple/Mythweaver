@@ -427,17 +427,35 @@ button:focus-visible, a:focus-visible, select:focus-visible {
 }
 .portal > * { min-width: 0; }
 
-/* Crossfade between worlds: a brief dip to black hides the scene rebuild. */
-.portal-fade {
+/* World crossfade: the incoming scene mounts ON TOP at opacity 0 and fades
+   in over the outgoing one, which stays fully lit underneath until it is
+   removed, so the frame never dips in brightness mid-blend. The UI dims
+   briefly while its skin swaps. */
+.portal-scene {
   position: absolute;
   inset: 0;
-  z-index: 2;
+  z-index: 0;
+  opacity: 1;
+  transition: opacity 1.8s cubic-bezier(0.45, 0, 0.25, 1);
   pointer-events: none;
-  background: var(--abyss);
-  opacity: 0;
-  transition: opacity 0.6s ease;
 }
-.portal-fade.on { opacity: 1; }
+.portal-scene.entering { opacity: 0; }
+.portal-mast,
+.portal-world,
+.portal-choices,
+.portal-foot {
+  transition: opacity 0.32s ease, filter 0.32s ease, transform 0.5s cubic-bezier(0.2, 0.9, 0.25, 1);
+}
+.portal.swapping .portal-mast,
+.portal.swapping .portal-world,
+.portal.swapping .portal-choices { opacity: 0.18; filter: blur(3px); }
+.portal.swapping .portal-world { transform: translateX(-10px); }
+@media (prefers-reduced-motion: reduce) {
+  .portal-scene { transition-duration: 0.4s; }
+  .portal.swapping .portal-mast,
+  .portal.swapping .portal-world,
+  .portal.swapping .portal-choices { filter: none; transform: none; }
+}
 
 .portal-topbar {
   position: absolute;
@@ -483,7 +501,9 @@ button:focus-visible, a:focus-visible, select:focus-visible {
   z-index: 3;
   align-self: start;
   max-width: 100%;
-  animation: rise-in 1.1s cubic-bezier(0.2, 0.9, 0.25, 1) both;
+  /* backwards, not both: a held final keyframe would pin opacity at 1 and
+     stop the mast dimming during a world crossfade. */
+  animation: rise-in 1.1s cubic-bezier(0.2, 0.9, 0.25, 1) backwards;
 }
 .brand-sigil {
   font-size: 1.6rem;
@@ -539,9 +559,7 @@ button:focus-visible, a:focus-visible, select:focus-visible {
   max-width: 34rem;
   padding-left: 1rem;
   border-left: 2px solid var(--hairline-strong);
-  transition: opacity 0.5s ease, transform 0.5s ease;
 }
-.portal-world.fading { opacity: 0; transform: translateX(-12px); }
 .portal-world-kicker {
   display: block;
   font-size: 0.72rem;

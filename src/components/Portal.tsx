@@ -10,7 +10,8 @@ import { THEME_SHOWCASE } from "@/components/three/themeVisuals";
 type ReelTheme = keyof typeof THEME_SHOWCASE;
 const REEL = Object.keys(THEME_SHOWCASE) as ReelTheme[];
 const REEL_MS = 16_000;
-const FADE_MS = 650;
+/** Scene crossfade length; the UI dims and swaps skin at its midpoint. */
+const CROSSFADE_MS = 1800;
 const SOUND_KEY = "mythweaver.portalSound";
 
 /**
@@ -42,25 +43,50 @@ export default function Portal({
 
   // World reel ----------------------------------------------------------
   const [world, setWorld] = useState<ReelTheme>(() => REEL[Math.floor(Math.random() * REEL.length)]);
-  const [fading, setFading] = useState(false);
+  // Live 3D scenes. During a transition there are two: the outgoing world
+  // and the incoming one mounted beneath it, so the change is a true
+  // crossfade between two running environments rather than a cut to black.
+  const [scenes, setScenes] = useState<Array<{ id: number; theme: ReelTheme }>>(() => [{ id: 0, theme: world }]);
+  const [frontId, setFrontId] = useState(0);
+  const frontRef = useRef(0);
+  const [swapping, setSwapping] = useState(false);
   const [paused, setPaused] = useState(false);
   const [sound, setSound] = useState(false);
-  const fadeTimer = useRef<number | null>(null);
+  const sceneSeq = useRef(1);
+  const timers = useRef<number[]>([]);
+  const target = useRef<ReelTheme>(world);
   useThemeSkin(world);
 
-  const showWorld = (next: ReelTheme) => {
-    if (next === world) return;
-    if (fadeTimer.current) window.clearTimeout(fadeTimer.current);
-    setFading(true);
-    fadeTimer.current = window.setTimeout(() => {
-      setWorld(next);
-      fadeTimer.current = window.setTimeout(() => setFading(false), 120);
-    }, FADE_MS);
+  const clearTimers = () => {
+    timers.current.forEach((id) => window.clearTimeout(id));
+    timers.current = [];
+  };
+  const later = (ms: number, run: () => void) => {
+    timers.current.push(window.setTimeout(run, ms));
   };
 
-  useEffect(() => () => {
-    if (fadeTimer.current) window.clearTimeout(fadeTimer.current);
-  }, []);
+  const showWorld = (next: ReelTheme) => {
+    if (next === target.current) return;
+    target.current = next;
+    clearTimers();
+    const id = sceneSeq.current++;
+    // Keep only the scene currently in front (a rapid second pick drops the
+    // half-faded one) and mount the newcomer beneath it at zero opacity.
+    const keep = frontRef.current;
+    setScenes((current) => [...current.filter((scene) => scene.id === keep), { id, theme: next }]);
+    // Give the new environment a beat to build its first frames, then fade.
+    later(150, () => {
+      frontRef.current = id;
+      setFrontId(id);
+    });
+    // The interface dims, re-skins at the visual midpoint, and comes back.
+    later(CROSSFADE_MS * 0.3, () => setSwapping(true));
+    later(CROSSFADE_MS * 0.5, () => setWorld(next));
+    later(CROSSFADE_MS * 0.5 + 260, () => setSwapping(false));
+    later(CROSSFADE_MS + 250, () => setScenes((current) => current.filter((scene) => scene.id === id)));
+  };
+
+  useEffect(() => () => clearTimers(), []);
 
   useEffect(() => {
     // Reduced motion: no auto-advance; the guest steps through by hand.
@@ -178,10 +204,13 @@ export default function Portal({
   const show = THEME_SHOWCASE[world];
 
   return (
-    <div className="portal screen" data-music-theme={world}>
-      <CosmosCanvas theme={world} drama={sagasOpen ? 0.35 : 0.8} />
+    <div className={`portal screen ${swapping ? "swapping" : ""}`} data-music-theme={world}>
+      {scenes.map((scene) => (
+        <div key={scene.id} className={`portal-scene ${scene.id > frontId ? "entering" : ""}`} aria-hidden>
+          <CosmosCanvas theme={scene.theme} drama={sagasOpen ? 0.35 : 0.8} />
+        </div>
+      ))}
       <div className="portal-veil" />
-      <div className={`portal-fade ${fading ? "on" : ""}`} aria-hidden />
 
       <nav className="portal-topbar" aria-label="Table tools">
         <button
@@ -227,7 +256,7 @@ export default function Portal({
 
       {!sagasOpen ? (
         <>
-          <section className={`portal-world ${fading ? "fading" : ""}`} aria-live="polite">
+          <section className="portal-world" aria-live="polite">
             <span className="portal-world-kicker">Now dreaming · {show.genre}</span>
             <h2 className="portal-world-name">{show.name}</h2>
             <p className="portal-world-line">{show.line}</p>

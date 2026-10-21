@@ -339,6 +339,9 @@ export type AquaFetchOptions = {
   reasoningEffort?: ReasoningEffort;
 };
 
+/** Requests estimated above this size are logged; they are near most context windows. */
+const CHAT_REQUEST_WARN_TOKENS = Math.max(10_000, Number(process.env.CHAT_REQUEST_WARN_TOKENS) || 200_000);
+
 /**
  * Hard ceiling on per-request retries. Prevents a misconfigured env value
  * (e.g. INTERACTIVE_RETRIES=1000) from trapping a turn on one dead provider
@@ -457,6 +460,19 @@ export async function aquaFetch(path: string, init: RequestInit, options: AquaFe
       }
     } catch {
       // Not JSON — send as-is.
+    }
+  }
+  if (path.endsWith("/chat/completions") && typeof init.body === "string") {
+    // Base64 images have no business in a text prompt: one inlined portrait
+    // is ~100k tokens, and a campaign that stored nine of them blew past a
+    // 1M-token window on every turn. Swap any that slip through for a stub.
+    if (init.body.includes("data:image/")) {
+      init = { ...init, body: init.body.replace(/data:image\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]{64,}/gi, "[inline image omitted]") };
+    }
+    const chars = String(init.body).length;
+    const approxTokens = Math.round(chars / 3.5);
+    if (approxTokens > CHAT_REQUEST_WARN_TOKENS) {
+      console.warn(`[aqua] Large chat request: ~${approxTokens.toLocaleString()} tokens (${chars.toLocaleString()} chars) to ${path}.`);
     }
   }
 

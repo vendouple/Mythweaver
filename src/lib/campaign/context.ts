@@ -72,6 +72,7 @@ export function buildCampaignContext(campaign: Campaign) {
     describeStoryline(campaign),
     `Current TV background (what the party sees right now): ${currentBackground}`,
     `Current ambience/music playing on the TV: ${currentAmbience}`,
+    `On-screen weather over the backdrop: ${campaign.ambience?.visuals?.length ? campaign.ambience.visuals.join(", ") : "none (light mood atmosphere only)"}`,
     `Current image URL: ${campaign.currentImageUrl || "None"}`,
     `Recent reusable backgrounds (older assets remain saved): ${JSON.stringify((campaign.images || []).slice(-12).map(img => ({ url: img.url, prompt: img.prompt.slice(0, 320) })))}`,
     `Recent reusable character portraits (existing faces are already attached in the roster): ${JSON.stringify((campaign.portraits || []).slice(-12).map(p => ({ url: p.url, characterName: p.characterName })))}`,

@@ -1042,7 +1042,7 @@ export default function HostStage({
           can see — on a smart TV that is the difference between a smooth
           finale and a stuttering one. */}
       {activeEnding || debugScene ? null : (
-        <StageAtmosphere ref={atmosphereRef} mood={mood} intensity={intensity} theme={visual.key} />
+        <StageAtmosphere ref={atmosphereRef} mood={mood} intensity={intensity} theme={visual.key} visuals={campaign.ambience?.visuals} />
       )}
 
       <div className="stage-grain" aria-hidden />

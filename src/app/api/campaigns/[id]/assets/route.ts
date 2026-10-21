@@ -13,7 +13,7 @@ export async function GET(request: Request, { params }: { params: { id: string }
     }
 
     const cleanPath = filePath.replace(/\\/g, "/").replace(/^\/+/, "");
-    const isImageAsset = /^(?:backgrounds\/[a-zA-Z0-9_.-]+|(?:players|npcs)\/[a-zA-Z0-9_-]+\/[a-zA-Z0-9_.-]+)\.(?:png|jpe?g|gif|webp)$/i.test(cleanPath);
+    const isImageAsset = /^(?:(?:backgrounds|inline)\/[a-zA-Z0-9_.-]+|(?:players|npcs)\/[a-zA-Z0-9_-]+\/[a-zA-Z0-9_.-]+)\.(?:png|jpe?g|gif|webp)$/i.test(cleanPath);
     if (cleanPath.includes("..") || path.isAbsolute(cleanPath) || !isImageAsset) {
       return NextResponse.json({ error: "Unsafe path" }, { status: 400 });
     }

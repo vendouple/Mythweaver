@@ -1882,7 +1882,10 @@ async function reconcileStageDirection(
   const mood = String(args.mood || "keep").toLowerCase();
   if (!opts.modelSetAmbience && mood !== "keep" && DIRECTABLE_MOODS.includes(mood as AmbienceMood) && mood !== campaign.ambience?.mood) {
     const rawIntensity = Number(args.intensity ?? 0.6);
+    // A mood correction is not a location change: keep what the DM chose for
+    // the room (sound beds, on-screen visuals, flavor note).
     campaign.ambience = {
+      ...campaign.ambience,
       mood: mood as AmbienceMood,
       intensity: Number.isFinite(rawIntensity) ? Math.max(0, Math.min(1, rawIntensity)) : 0.6,
       updatedAt: new Date().toISOString()
@@ -2162,6 +2165,7 @@ function toolsForTurn(opts: { musicTheme?: string }): typeof toolDefinitions {
  */
 function atmosphereDirective(): string {
   return `Atmosphere (you are the stage director this turn):
+- The TV shows the backdrop painting with only a light mood atmosphere by default. Only when the scene truly has visible weather or air (rain, a thunderstorm = rain + lightning, snow, fog, ash, embers, drifting motes, sun shafts) pass set_ambience visuals; each call replaces the list, so restate it on every set_ambience while it still applies and omit it once the party leaves.
 - Call set_ambience when the emotional register shifts. Moods: calm, tense, adrenaline (chases, escapes, heists, races against time — excitement without combat), battle (ordinary combat), boss (climactic showdowns against a major villain or endgame threat), mystery, dread, triumph, wonder, somber. Use sparingly — once per real shift, not every turn.
 - EVERY turn, compare this scene's register against the "Current ambience/music playing" line in the context: if they no longer match (a fight broke out, dread gave way to triumph, the chase began), call set_ambience THIS TURN — the music only changes when you do. Do not let one mood drone through an entire act.
 - Use effects selectively: shockwave for an impact, heal for restoration, glitch for disrupted technology, spotlight for a discovery. Quiet roleplay often needs no effect. Place foley (page-turn, quill-write, bell, footsteps) on the beat that earns it; use discovery/quest-complete stingers only for actual milestones.
@@ -2820,6 +2824,44 @@ function stringifyItem(item: unknown): string {
   return String(item ?? "");
 }
 
+const PROFILE_FIELDS = ["characterName", "background", "personality", "inventory", "abilities", "stats", "notes", "portraitUrl"];
+const PROFILE_ALIASES: Record<string, string> = {
+  name: "characterName", character_name: "characterName", backstory: "background", bio: "background",
+  biography: "background", description: "background", items: "inventory", equipment: "inventory",
+  gear: "inventory", skills: "abilities", traits: "personality"
+};
+
+/**
+ * Pull the one player's profile out of whatever shape the model returned.
+ * The prompt asks for { playerUpdates: [ {...} ] }, but models also answer
+ * with playerUpdates as an object, a { player | character | profile | update }
+ * wrapper, or bare fields under synonyms (name/backstory/items). Rejecting
+ * those as "no profile" failed whole joins that had perfectly good content.
+ */
+export function extractProfileUpdate(parsed: unknown): Record<string, any> | null {
+  const looksLikeProfile = (value: unknown): value is Record<string, any> =>
+    !!value && typeof value === "object" && !Array.isArray(value) &&
+    Object.keys(value).some((key) => PROFILE_FIELDS.includes(key) || key in PROFILE_ALIASES);
+  const withAliases = (value: Record<string, any>) => {
+    const out: Record<string, any> = { ...value };
+    for (const [alias, field] of Object.entries(PROFILE_ALIASES)) {
+      if (out[field] === undefined && out[alias] !== undefined) out[field] = out[alias];
+    }
+    return out;
+  };
+  if (!parsed || typeof parsed !== "object") return null;
+  const root = parsed as Record<string, any>;
+  const candidates: unknown[] = [];
+  for (const key of ["playerUpdates", "playerUpdate", "players", "updates", "update", "player", "character", "profile"]) {
+    const value = root[key];
+    if (Array.isArray(value)) candidates.push(value[0]);
+    else candidates.push(value);
+  }
+  candidates.push(root);
+  const hit = candidates.find(looksLikeProfile);
+  return hit ? withAliases(hit) : null;
+}
+
 export async function runProfileGeneration(campaignId: string, playerId: string) {
   await logCampaignDebug(campaignId, `[runProfileGeneration] Player ID: ${playerId}`);
   serverLog("PROFILE START", `Running profile generation for player: ${playerId} in campaign: ${campaignId}`);
@@ -2958,11 +3000,9 @@ Return ONLY valid JSON matching this schema. Do not include markdown code fences
   // The model sometimes returns the player fields at the top level instead of
   // wrapped in { playerUpdates: [{ ... }] }. Normalize both shapes so a
   // structurally-correct response is never rejected just for missing the wrapper.
-  let update: Record<string, any> | null = null;
-  if (parsedJson && Array.isArray(parsedJson.playerUpdates) && parsedJson.playerUpdates.length > 0) {
-    update = parsedJson.playerUpdates[0];
-  } else if (parsedJson && typeof parsedJson === "object" && (parsedJson.characterName || parsedJson.background || parsedJson.portraitUrl || parsedJson.inventory || parsedJson.stats)) {
-    update = parsedJson;
+  let update = extractProfileUpdate(parsedJson);
+  if (!update && parsedJson) {
+    await logCampaignDebug(campaignId, `[Profile Gen] JSON had no usable profile. Keys: ${JSON.stringify(Object.keys(parsedJson)).slice(0, 300)} | Head: ${content.slice(0, 400)}`);
   }
   // Apply updates only to the target player
   const latestCampaign = await getCampaign(campaignId);

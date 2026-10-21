@@ -1,4 +1,4 @@
-﻿import { getCampaign, getCampaignLock, readCampaignTextFile, saveCampaign, writeCampaignTextFile, downloadAndSaveImage, logCampaignDebug, logCampaignEvent, safePushDisplayEvent, isValidImageUrl, pushStageSfx, endCampaign, ensureLocations, getFocusedLocation, applyFocus, resolveOrPromoteNpc } from "@/lib/campaign/store";
+﻿import { getCampaign, getCampaignLock, readCampaignTextFile, saveCampaign, writeCampaignTextFile, downloadAndSaveImage, logCampaignDebug, logCampaignEvent, safePushDisplayEvent, isValidImageUrl, pushStageSfx, endCampaign, ensureLocations, getFocusedLocation, applyFocus, resolveOrPromoteNpc, normalizeAmbienceVisuals } from "@/lib/campaign/store";
 import { createId } from "@/lib/utils/ids";
 import { generateImage } from "@/lib/aqua/images";
 import { normalizeActions } from "@/lib/aqua/turnPayload";
@@ -9,7 +9,7 @@ import { AmbienceAcoustic, AmbienceMood, AmbienceSound, PlayerStat, SfxCue, Stag
 import type { Location as CampaignLocation } from "@/lib/campaign/types";
 import { MUSIC_THEMES, MusicTheme, THEME_GUIDE } from "@/lib/campaign/musicTheme";
 import { startCombat, endCombat, syncFocusedMirror } from "@/lib/campaign/turns";
-import { AMBIENCE_SOUNDS, AMBIENCE_ACOUSTICS, EFFECT_KINDS, SFX_CUES } from "@/lib/campaign/stageCatalog";
+import { AMBIENCE_SOUNDS, AMBIENCE_ACOUSTICS, AMBIENCE_VISUALS, EFFECT_KINDS, SFX_CUES } from "@/lib/campaign/stageCatalog";
 
 export const toolDefinitions: AquaToolDefinition[] = [
   {
@@ -231,7 +231,8 @@ export const toolDefinitions: AquaToolDefinition[] = [
           intensity: { type: "number", description: "0.0 to 1.0 - how hard the TV leans into the mood. Default 0.6." },
           note: { type: "string", description: "Optional short sensory flavor, e.g. 'rain hammers the tin roof'. May be shown faintly on the TV." },
           sounds: { type: "array", maxItems: 2, items: { type: "string", enum: AMBIENCE_SOUNDS }, description: "Up to two environmental beds actually audible here. Use [\"none\"] for intentional silence; omit to infer from the scene." },
-          acoustics: { type: "array", maxItems: 2, items: { type: "string", enum: AMBIENCE_ACOUSTICS }, description: "Up to two acoustic modifiers: one space, optionally one distance/material treatment." }
+          acoustics: { type: "array", maxItems: 2, items: { type: "string", enum: AMBIENCE_ACOUSTICS }, description: "Up to two acoustic modifiers: one space, optionally one distance/material treatment." },
+          visuals: { type: "array", maxItems: 3, items: { type: "string", enum: AMBIENCE_VISUALS }, description: "Persistent weather/air over the backdrop painting, on top of the light mood motes the TV always shows. Each set_ambience call replaces the list (omit or [\"none\"] = just the light mood baseline). Use only when the scene truly has it: rain, snow, fog, ash, embers, lightning (storm flashes; pair with rain), motes (floating dust/light), lightrays (strong sun shafts), fog (heavy fog), world (the campaign genre's signature overlay; use sparingly). One-off moments belong to trigger_effect instead." }
         }
       }
     }
@@ -915,10 +916,11 @@ export async function runTool(campaignId: string, name: string, args: Record<str
         note: typeof args.note === "string" && args.note.trim() ? args.note.trim() : undefined,
         sounds: sounds?.length ? sounds : undefined,
         acoustics: acoustics?.length ? acoustics : undefined,
+        visuals: normalizeAmbienceVisuals(args.visuals),
         updatedAt: new Date().toISOString()
       };
       await saveCampaign(campaign);
-      return { ok: true, mood, intensity: campaign.ambience.intensity, sounds, acoustics };
+      return { ok: true, mood, intensity: campaign.ambience.intensity, sounds, acoustics, visuals: campaign.ambience.visuals || ["none"] };
     }
 
     if (name === "set_theme") {

@@ -349,10 +349,13 @@ export type Ambience = {
   sounds?: AmbienceSound[];
   /** Acoustic treatment applied to the environmental beds. */
   acoustics?: AmbienceAcoustic[];
+  /** DM-set weather over the light mood baseline. Omitted/empty = baseline only. */
+  visuals?: AmbienceVisual[];
   updatedAt: string;
 };
 
 export type StageEffectKind = (typeof import("./stageCatalog").EFFECT_KINDS)[number];
+export type AmbienceVisual = (typeof import("./stageCatalog").AMBIENCE_VISUALS)[number];
 export type SfxCue = (typeof import("./stageCatalog").SFX_CUES)[number];
 
 /** Cinematic effect queued by the DM via trigger_effect. Supports repeats. */
